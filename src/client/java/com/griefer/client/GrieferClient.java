@@ -11,17 +11,34 @@ import net.minecraft.client.Minecraft;
 /**
  * Client entrypoint: registers modules, keybinds and the tick hook that
  * opens the ClickGUI.
+ *
+ * The open/close keybind (default Right Shift, rebindable in the vanilla
+ * Controls screen) is a single edge-triggered listener — no duplicate
+ * handlers, nothing runs while the GUI is closed.
  */
 public class GrieferClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
-		ModuleManager.get().register(new SwingSpeedModule());
+		ModuleManager modules = ModuleManager.get();
+		modules.register(new SwingSpeedModule());
+
+		// Harden stored settings once after registration (clamps invalid
+		// config values before anything can read them).
+		SwingSpeedModule swingSpeed = modules.get(SwingSpeedModule.class);
+		if (swingSpeed != null) {
+			swingSpeed.sanitize();
+		}
+
 		ClientKeybinds.register();
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			if (ClientKeybinds.consumeOpenGuiClick()) {
 				Minecraft mc = Minecraft.getInstance();
-				mc.setScreen(new ClickGuiScreen());
+				if (mc.screen == null) {
+					mc.setScreen(new ClickGuiScreen());
+				} else if (mc.screen instanceof ClickGuiScreen) {
+					mc.setScreen(null);
+				}
 			}
 		});
 	}
