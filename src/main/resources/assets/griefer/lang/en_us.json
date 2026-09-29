@@ -1,0 +1,8 @@
+{
+	"griefer.gui.title": "Griefer",
+	"key.griefer.openClickGui": "Open ClickGUI",
+	"key.category.griefer.main": "Griefer",
+	"griefer.module.swing_speed.name": "Swing Speed",
+	"griefer.module.swing_speed.desc": "Visual swing animation speed. Actual attack/mining speed untouched.",
+	"griefer.module.swing_speed.speed": "Speed"
+}

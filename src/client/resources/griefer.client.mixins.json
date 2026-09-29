@@ -1,9 +1,9 @@
 {
 	"required": true,
-	"package": "com.example.client.mixin",
+	"package": "com.griefer.client.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
-		"ExampleClientMixin"
+		"LivingEntityMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

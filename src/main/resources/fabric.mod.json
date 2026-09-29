@@ -1,9 +1,9 @@
 {
 	"schemaVersion": 1,
-	"id": "modid",
+	"id": "griefer",
 	"version": "${version}",
-	"name": "Example Mod",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"name": "Griefer Client",
+	"description": "Anarchy utility client.",
 	"authors": [
 		"Me!"
 	],
@@ -12,20 +12,16 @@
 		"sources": "https://github.com/FabricMC/fabric-example-mod"
 	},
 	"license": "CC0-1.0",
-	"icon": "assets/modid/icon.png",
-	"environment": "*",
+	"icon": "assets/griefer/icon.png",
+	"environment": "client",
 	"entrypoints": {
-		"main": [
-			"com.example.ExampleMod"
-		],
 		"client": [
-			"com.example.client.ExampleModClient"
+			"com.griefer.client.GrieferClient"
 		]
 	},
 	"mixins": [
-		"modid.mixins.json",
 		{
-			"config": "modid.client.mixins.json",
+			"config": "griefer.client.mixins.json",
 			"environment": "client"
 		}
 	],
