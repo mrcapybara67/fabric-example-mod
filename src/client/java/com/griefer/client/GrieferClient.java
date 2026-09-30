@@ -36,8 +36,8 @@ public class GrieferClient implements ClientModInitializer {
 				Minecraft mc = Minecraft.getInstance();
 				if (mc.screen == null) {
 					mc.setScreen(new ClickGuiScreen());
-				} else if (mc.screen instanceof ClickGuiScreen) {
-					mc.setScreen(null);
+				} else if (mc.screen instanceof ClickGuiScreen gui) {
+					gui.requestClose();
 				}
 			}
 		});

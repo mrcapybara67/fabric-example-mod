@@ -3,10 +3,8 @@ package com.griefer.client.gui;
 import net.minecraft.client.gui.GuiGraphics;
 
 /**
- * Reusable scrollbar: proportional draggable thumb with wheel support and
- * smooth eased scrolling. The owner calls {@link #update} each frame with the
- * viewport geometry; wheel and drag input flow through here so scrolling
- * behavior stays consistent everywhere it is used.
+ * Scrollbar: proportional draggable thumb with wheel support and smooth
+ * eased scrolling. Restyled as a rounded subtle pill; no hard rail line.
  */
 public class UiScrollbar {
 	private static final double WHEEL_PER_NOTCH = 28.0;
@@ -46,9 +44,8 @@ public class UiScrollbar {
 			scroll = target;
 		}
 
-		int maxThumb = trackH - (int) Math.max(24, trackH * (trackH / (float) contentHeight));
-		thumbH = trackH - maxThumb;
-		thumbH = Math.max(24, thumbH);
+		float ratio = trackH / (float) contentHeight;
+		thumbH = Math.max(24, (int) (trackH * ratio));
 		int thumbMax = trackH - thumbH;
 		thumbY = trackY + (int) Math.round((scroll / maxScroll) * thumbMax);
 	}
@@ -72,7 +69,7 @@ public class UiScrollbar {
 		return true;
 	}
 
-	/** Called on press anywhere over the rail; starts a thumb drag. */
+	/** Called on press over the rail strip; starts a thumb drag. */
 	public boolean pressed(double my) {
 		if (!usable) {
 			return false;
@@ -100,7 +97,7 @@ public class UiScrollbar {
 		return was;
 	}
 
-	/** The rail is drawn at the given x, 3px wide. */
+	/** The thumb is drawn at the given x, 3px wide. */
 	public void setRailX(int x) {
 		this.railX = x;
 	}
@@ -109,8 +106,7 @@ public class UiScrollbar {
 		if (!usable) {
 			return;
 		}
-		g.fill(railX, trackY, railX + 3, trackY + trackH, UiTheme.LINE);
-		g.fill(railX, thumbY, railX + 3, thumbY + thumbH, UiTheme.SURFACE_3);
+		Ui.roundRect(g, railX, thumbY, 3, thumbH, UiTheme.RADIUS_PILL, 0xFF39424E);
 	}
 
 	private void clampTarget() {

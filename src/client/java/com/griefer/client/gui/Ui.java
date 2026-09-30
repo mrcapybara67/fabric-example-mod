@@ -1,23 +1,23 @@
 package com.griefer.client.gui;
 
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 
 /**
- * Shared drawing primitives for the GUI. Every component renders through
- * these so corner radii, clipping and text ellipsis behave identically
- * everywhere. Rounded corners are composed from axis-aligned fills — no
- * shaders, no textures, no per-frame allocations.
+ * Shared drawing primitives. Every component renders through this layer so
+ * corner radii, shadows, clipping, icons and text ellipsis behave identically
+ * everywhere. Rounded rects are composed per-pixel at the corners (clean,
+ * seam-free, no shaders or textures); everything else is plain fills.
  */
 public final class Ui {
-	/** Max simultaneous clips (must exceed the deepest nesting we ever use). */
+	/** Max simultaneous clips (exceeds the deepest nesting we ever use). */
 	private static final int MAX_CLIP_DEPTH = 8;
 	private static final boolean[] CLIP_USED = new boolean[MAX_CLIP_DEPTH];
 
 	private Ui() {
 	}
 
-	/** Filled rounded rectangle built from 5 overlapping rectangles. */
+	/** Filled rounded rectangle with true per-pixel corners. */
 	public static void roundRect(GuiGraphics g, int x, int y, int w, int h, int radius, int color) {
 		if (w <= 0 || h <= 0) {
 			return;
@@ -27,27 +27,52 @@ public final class Ui {
 			g.fill(x, y, x + w, y + h, color);
 			return;
 		}
+		// Center band
 		g.fill(x + r, y, x + w - r, y + h, color);
-		g.fill(x, y + r, x + w, y + h - r, color);
-		g.fill(x, y, x + r, y + r, color);
-		g.fill(x + w - r, y, x + w, y + r, color);
-		g.fill(x, y + h - r, x + w, y + h, color);
+		// Left / right bands between the corner rows
+		g.fill(x, y + r, x + r, y + h - r, color);
+		g.fill(x + w - r, y + r, x + w, y + h - r, color);
+		// Corner rows: each row insets by its circular offset (both sides at once)
+		for (int i = 0; i < r; i++) {
+			int dy = i + 1;
+			int inset = r - (int) Math.round(Math.sqrt(r * (double) r - (r - dy) * (double) (r - dy)));
+			g.fill(x + inset, y + i, x + w - inset, y + i + 1, color);           // top
+			g.fill(x + inset, y + h - 1 - i, x + w - inset, y + h - i, color);   // bottom
+		}
 	}
 
-	/** Rounded-rectangle outline drawn as 4 thin edge fills. */
+	/** 1px rounded outline (4 edge fills + the 2 edge pixels of each corner row). */
 	public static void roundOutline(GuiGraphics g, int x, int y, int w, int h, int radius, int color) {
 		if (w <= 0 || h <= 0) {
 			return;
 		}
-		g.fill(x, y, x + w, y + 1, color);
-		g.fill(x, y + h - 1, x + w, y + h, color);
-		g.fill(x, y + 1, x + 1, y + h - 1, color);
-		g.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
+		int r = Math.min(radius, Math.min(w / 2, h / 2));
+		if (r <= 0) {
+			g.fill(x, y, x + w, y + 1, color);
+			g.fill(x, y + h - 1, x + w, y + h, color);
+			g.fill(x, y + 1, x + 1, y + h - 1, color);
+			g.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
+			return;
+		}
+		g.fill(x + r, y, x + w - r, y + 1, color);
+		g.fill(x + r, y + h - 1, x + w - r, y + h, color);
+		g.fill(x, y + r, x + 1, y + h - r, color);
+		g.fill(x + w - 1, y + r, x + w, y + h - r, color);
+		for (int i = 0; i < r; i++) {
+			int dy = i + 1;
+			int inset = r - (int) Math.round(Math.sqrt(r * (double) r - (r - dy) * (double) (r - dy)));
+			// only the two edge pixels per corner row (transparent fills cannot carve)
+			g.fill(x + inset, y + i, x + inset + 1, y + i + 1, color);
+			g.fill(x + w - inset - 1, y + i, x + w - inset, y + i + 1, color);
+			g.fill(x + inset, y + h - 1 - i, x + inset + 1, y + h - i, color);
+			g.fill(x + w - inset - 1, y + h - 1 - i, x + w - inset, y + h - i, color);
+		}
 	}
 
-	/** Soft drop shadow (single translucent band under the shape). */
+	/** Two-layer soft drop shadow (large faint + tight tighter band). */
 	public static void shadow(GuiGraphics g, int x, int y, int w, int h, int radius) {
-		roundRect(g, x + 1, y + 2, w, h, radius, UiTheme.SHADOW);
+		roundRect(g, x + 3, y + 5, w, h, radius + 2, 0x38000000);
+		roundRect(g, x + 1, y + 2, w, h, radius + 1, 0x30000000);
 	}
 
 	/** Begins a clip region. Returns false if nesting depth was exhausted. */
@@ -77,7 +102,10 @@ public final class Ui {
 	public static void drawEllipsized(GuiGraphics g, Font font, String text, int x, int y, int maxWidth, int color) {
 		String s = text;
 		if (font.width(s) > maxWidth) {
-			String ell = "...";
+			String ell = "…";
+			if (font.width(ell) > maxWidth) {
+				ell = "...";
+			}
 			while (s.length() > 1 && font.width(s + ell) > maxWidth) {
 				s = s.substring(0, s.length() - 1);
 			}

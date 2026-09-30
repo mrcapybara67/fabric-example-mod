@@ -5,27 +5,22 @@ import com.griefer.client.module.Setting;
 import com.griefer.client.module.SliderSetting;
 import java.util.IdentityHashMap;
 import java.util.Map;
-import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.network.chat.Component;
 
 /**
- * Reusable card representing one module: name, optional description, an
- * animated toggle, and (for modules that have them) expandable settings rows.
+ * Modern module card: name (medium weight), description (regular weight),
+ * settings chevron, pill toggle. Expands smoothly to reveal slider rows.
  *
- * Interaction contract:
- *   - Click anywhere on the card body -> toggle the module
- *   - Click the chevron strip -> expand/collapse settings (if any)
- *   - Click/drag a slider row -> set the value (never toggles)
- *
- * The card never mutates anything except its own module's public API
- * ({@link Module#toggle()}, {@link SliderSetting#setFromFraction}).
+ * Interaction contract (unchanged from the working version):
+ *   - Click card body / toggle -> toggle the module
+ *   - Click the chevron strip  -> expand/collapse settings (if any)
+ *   - Click/drag a slider row  -> set the value (never toggles)
  */
 public class ModuleCard {
-	private static final int CHEVRON_W = 16;
+	private static final int CHEVRON_W = 14;
 	private static final int ROW_H = 26;
 	private static final int DESC_H = 12;
-	private static final int SETTINGS_PAD = 8;
+	private static final int PAD = 6;
 
 	private final Module module;
 	private final UiToggle toggle = new UiToggle();
@@ -64,11 +59,11 @@ public class ModuleCard {
 	}
 
 	private static String resolveOrFallback(String key, String fallback) {
-		String s = Component.translatable(key).getString();
+		String s = net.minecraft.network.chat.Component.translatable(key).getString();
 		return s.equals(key) ? fallback : s;
 	}
 
-	/** Per-slider model, created once (never per frame). */
+	/** Static per-slider model, created once (never per frame). */
 	private static final class FixedModel implements UiSlider.SliderModel {
 		private final SliderSetting slider;
 
@@ -91,6 +86,16 @@ public class ModuleCard {
 		return module;
 	}
 
+	/** Cached display title (resolved once at construction). */
+	public String title() {
+		return title;
+	}
+
+	/** Cached description text; empty string when the module has none. */
+	public String descriptionText() {
+		return description == null ? "" : description;
+	}
+
 	/** Full height with settings fully expanded. */
 	public int fullHeight() {
 		return UiTheme.CARD_H + settingsFullHeight();
@@ -111,20 +116,13 @@ public class ModuleCard {
 		if (sliders.isEmpty()) {
 			return 0;
 		}
-		int h = DESC_H + SETTINGS_PAD;
-		if (descriptionText() == null) {
-			h -= DESC_H;
-		}
-		return h + sliders.size() * ROW_H;
-	}
-
-	private String descriptionText() {
-		return description;
+		// Must stay in sync with sliderAt(): sliders start at CARD_H + PAD.
+		return PAD + sliders.size() * ROW_H;
 	}
 
 	// ---------------------------------------------------------------- render
 
-	public void render(GuiGraphics g, Font font, int x, int y, int w, int mouseX, int mouseY, float delta) {
+	public void render(GuiGraphics g, int x, int y, int w, int mouseX, int mouseY, float delta, boolean showCategory) {
 		this.x = x;
 		this.y = y;
 		this.w = w;
@@ -135,41 +133,50 @@ public class ModuleCard {
 		hover.to(hovered ? 1f : 0f, delta);
 		on.to(module.isEnabled() ? 1f : 0f, delta);
 
-		int bg = Ui.lerpColor(
-				Ui.lerpColor(UiTheme.SURFACE_1, UiTheme.SURFACE_2, hover.value()),
-				UiTheme.SURFACE_2, 0.35f * on.value());
+		// Elevation: base -> hover; enabled adds the faintest accent tint
+		int bg = Ui.lerpColor(UiTheme.SURFACE_2, UiTheme.SURFACE_3, hover.value() * 0.85f);
 		if (pressed) {
-			bg = Ui.lerpColor(bg, UiTheme.SURFACE_3, 0.6f);
+			bg = Ui.lerpColor(bg, 0xFF2A3340, 0.6f);
+		}
+		if (on.value() > 0.5f) {
+			bg = Ui.lerpColor(bg, UiTheme.ACCENT_10, 0.35f);
 		}
 		Ui.roundRect(g, x, y, w, h, UiTheme.RADIUS, bg);
 
-		// Enabled: accent bar down the left edge
-		if (on.value() > 0.02f) {
-			int barH = Math.round((h - 6) * Math.min(1f, on.value() * 1.4f));
-			Ui.roundRect(g, x, y + (h - barH) / 2, 2, barH, 1, UiTheme.ACCENT);
+		// Name + description, two-line hierarchy
+		int textX = x + UiTheme.SP_4;
+		int nameY = y + UiTheme.SP_3 - 1;
+		int textRight = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3;
+		if (hasSettings()) {
+			textRight -= CHEVRON_W;
+		}
+		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(on.value(), hover.value() * 0.7f));
+		Ui.drawEllipsized(g, UiFonts.medium(), title, textX, nameY, textRight - textX, nameColor);
+
+		String desc = description;
+		if (showCategory) {
+			String tag = module.category().title;
+			desc = desc == null ? tag : desc + "  ·  " + tag;
+		}
+		if (desc != null) {
+			Ui.drawEllipsized(g, UiFonts.regular(), desc, textX, nameY + 11, textRight - textX, UiTheme.TEXT_3);
 		}
 
-		// Name
-		int nameRight = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3;
+		// Settings chevron (small, left of the toggle)
 		if (hasSettings()) {
-			nameRight -= CHEVRON_W;
-		}
-		int nameColor = Ui.lerpColor(UiTheme.TEXT_SUB, UiTheme.TEXT, Math.max(on.value(), hover.value() * 0.7f));
-		Ui.drawEllipsized(g, font, moduleTitle(), x + UiTheme.SP_5, y + 9, nameRight - (x + UiTheme.SP_5), nameColor);
-
-		// Chevron (modules with settings)
-		if (hasSettings()) {
-			int cx = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3 + 2;
-			int cy = y + UiTheme.CARD_H / 2 - 2;
+			int cx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3;
+			int cy = y + UiTheme.CARD_H / 2 - 1;
 			boolean openDir = expand.value() > 0.5f;
-			for (int i = 0; i <= 2; i++) {
-				int row = openDir ? 2 - i : i;
-				g.fill(cx - i, cy + row, cx + i + 1, cy + row + 1, UiTheme.TEXT_FAINT);
+			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.TEXT, hover.value());
+			for (int i = 0; i <= 1; i++) {
+				int row = openDir ? 1 - i : i;
+				g.fill(cx + i, cy + row, cx + i + 1, cy + row + 1, chev);
+				g.fill(cx + 3 - i, cy + row, cx + 4 - i, cy + row + 1, chev);
 			}
 		}
 
-		// Toggle
-		int tx = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W;
+		// Pill toggle
+		int tx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W;
 		int ty = y + (UiTheme.CARD_H - UiTheme.TOGGLE_H) / 2;
 		toggle.update(module.isEnabled(), hovered, delta);
 		toggle.render(g, tx, ty, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
@@ -179,15 +186,10 @@ public class ModuleCard {
 		if (full > 0 && expand.value() > 0.01f) {
 			int clipH = Math.round(full * expand.value());
 			if (Ui.beginClip(g, x, y + UiTheme.CARD_H, w, clipH)) {
-				int cy = y + UiTheme.CARD_H;
-				String desc = descriptionText();
-				if (desc != null) {
-					Ui.drawEllipsized(g, font, desc, x + UiTheme.SP_5, cy, w - UiTheme.SP_5 * 2, UiTheme.TEXT_FAINT);
-					cy += DESC_H;
-				}
+				int cy = y + UiTheme.CARD_H + PAD;
 				for (Setting<?> s : module.settings()) {
 					if (s instanceof SliderSetting slider) {
-						renderSliderRow(g, font, sliders.get(slider), slider, x, w, cy);
+						renderSliderRow(g, sliders.get(slider), slider, x, w, cy);
 						cy += ROW_H;
 					}
 				}
@@ -196,21 +198,17 @@ public class ModuleCard {
 		}
 	}
 
-	private void renderSliderRow(GuiGraphics g, Font font, UiSlider ui, SliderSetting slider, int x, int w, int rowY) {
-		int trackX0 = x + UiTheme.SP_5;
-		int trackX1 = x + w - UiTheme.SP_5;
+	private void renderSliderRow(GuiGraphics g, UiSlider ui, SliderSetting slider, int x, int w, int rowY) {
+		int trackX0 = x + UiTheme.SP_4;
+		int trackX1 = x + w - UiTheme.SP_4;
 		int trackY = rowY + 17;
 		ui.bind(sliderLabels.get(slider), String.valueOf(slider.get()), trackX0, trackX1, trackY);
-		ui.render(g, font, x + UiTheme.SP_5, w - UiTheme.SP_5 * 2);
-	}
-
-	private String moduleTitle() {
-		return title;
+		ui.render(g, UiFonts.regular(), x + UiTheme.SP_4, w - UiTheme.SP_4 * 2);
 	}
 
 	private String sliderLabel(SliderSetting slider) {
 		String key = "griefer.module." + module.id() + "." + slider.key();
-		String s = Component.translatable(key).getString();
+		String s = net.minecraft.network.chat.Component.translatable(key).getString();
 		if (s.equals(key)) {
 			s = Character.toUpperCase(slider.key().charAt(0)) + slider.key().substring(1);
 		}
@@ -222,34 +220,6 @@ public class ModuleCard {
 	}
 
 	// ---------------------------------------------------------------- input
-
-	private boolean overChevron(double mx, double my) {
-		if (!hasSettings()) {
-			return false;
-		}
-		int cx = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3;
-		return mx >= cx - 2 && mx < cx + CHEVRON_W && my >= y && my < y + UiTheme.CARD_H;
-	}
-
-	private UiSlider sliderAt(double my) {
-		if (!expanded) {
-			return null;
-		}
-		int cy = y + UiTheme.CARD_H;
-		String desc = descriptionText();
-		if (desc != null) {
-			cy += DESC_H;
-		}
-		for (Setting<?> s : module.settings()) {
-			if (s instanceof SliderSetting slider) {
-				if (my >= cy && my < cy + ROW_H) {
-					return sliders.get(slider);
-				}
-				cy += ROW_H;
-			}
-		}
-		return null;
-	}
 
 	/** Full current bounds (card + any expanded settings). */
 	public boolean contains(double mx, double my) {
@@ -299,5 +269,29 @@ public class ModuleCard {
 		}
 		pressed = false;
 		return hadPress;
+	}
+
+	private boolean overChevron(double mx, double my) {
+		if (!hasSettings()) {
+			return false;
+		}
+		int cx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3;
+		return mx >= cx - 2 && mx < cx + CHEVRON_W && my >= y && my < y + UiTheme.CARD_H;
+	}
+
+	private UiSlider sliderAt(double my) {
+		if (!expanded) {
+			return null;
+		}
+		int cy = y + UiTheme.CARD_H + PAD;
+		for (Setting<?> s : module.settings()) {
+			if (s instanceof SliderSetting slider) {
+				if (my >= cy && my < cy + ROW_H) {
+					return sliders.get(slider);
+				}
+				cy += ROW_H;
+			}
+		}
+		return null;
 	}
 }

@@ -4,9 +4,10 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 
 /**
- * Reusable slider control: label, live value, hairline track with animated
- * fill and a draggable knob. The caller feeds it a 0..1 fraction model
- * (via {@link SliderModel}) so it stays decoupled from module settings.
+ * Slider control: label + live value on the label line, then a rounded
+ * background track with an accent fill and a dot knob. The value model is
+ * bound once (never per frame); geometry and display strings are bound per
+ * frame by the owning card.
  */
 public class UiSlider {
 	/** Minimal value model the slider renders and drives. */
@@ -25,12 +26,10 @@ public class UiSlider {
 	private int trackY;
 	private boolean dragging;
 
-	/** Binds the value model once (never per frame). */
 	public void bindModel(SliderModel model) {
 		this.model = model;
 	}
 
-	/** Binds geometry + display strings for the current frame. */
 	public void bind(String label, String valueText, int trackX0, int trackX1, int trackY) {
 		this.label = label;
 		this.valueText = valueText;
@@ -41,6 +40,10 @@ public class UiSlider {
 	}
 
 	public boolean isDragging() {
+		return sliderDrag() || dragging;
+	}
+
+	private boolean sliderDrag() {
 		return dragging;
 	}
 
@@ -55,7 +58,7 @@ public class UiSlider {
 		}
 	}
 
-	/** Ends any drag. Returns true if a drag was actually in progress. */
+	/** Ends any drag. Returns true if a drag was in progress. */
 	public boolean released() {
 		boolean was = dragging;
 		dragging = false;
@@ -67,19 +70,21 @@ public class UiSlider {
 	 * scissor-clipped by the caller.
 	 */
 	public void render(GuiGraphics g, Font font, int rowX, int rowW) {
-		Ui.drawEllipsized(g, font, label, rowX, trackY - 11, rowW - font.width(valueText) - UiTheme.SP_3, UiTheme.TEXT_SUB);
-		Ui.drawRightAligned(g, font, valueText, rowX + rowW, trackY - 11, UiTheme.TEXT);
+		Ui.drawEllipsized(g, font, label, rowX, trackY - 12, rowW - font.width(valueText) - UiTheme.SP_3, UiTheme.TEXT_2);
+		Ui.drawRightAligned(g, font, valueText, rowX + rowW, trackY - 12, UiTheme.TEXT);
 
+		int trackH = 5;
+		int half = trackH / 2;
 		int knobX = trackX0 + Math.round(fill.value() * (trackX1 - trackX0));
 
-		// Track
-		g.fill(trackX0, trackY, trackX1, trackY + 1, UiTheme.LINE_HI);
-		// Fill
-		if (knobX > trackX0) {
-			g.fill(trackX0, trackY, knobX, trackY + 1, UiTheme.ACCENT);
+		// Track background (rounded, spans the full row)
+		Ui.roundRect(g, trackX0, trackY - half, trackX1 - trackX0, trackH, UiTheme.RADIUS_PILL, UiTheme.SURFACE);
+		// Accent fill up to the knob
+		if (knobX > trackX0 + half) {
+			Ui.roundRect(g, trackX0, trackY - half, knobX - trackX0, trackH, UiTheme.RADIUS_PILL, UiTheme.ACCENT);
 		}
-		// Knob
-		g.fill(knobX - 1, trackY - 2, knobX + 1, trackY + 3, UiTheme.TEXT);
+		// Knob: white dot, sits on top of the track edge
+		Ui.roundRect(g, knobX - half - 1, trackY - half - 1, trackH + 2, trackH + 2, UiTheme.RADIUS_PILL, UiTheme.TEXT);
 	}
 
 	private void apply(double mx) {

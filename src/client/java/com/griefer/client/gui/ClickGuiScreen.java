@@ -7,42 +7,51 @@ import com.griefer.client.module.ModuleManager;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * The Griefer ClickGUI: a single centered window with a sidebar for category
- * navigation and a scrollable list of module cards on the right.
+ * The Griefer GUI: an application-style shell floating over the game.
  *
- * Everything is computed per frame from {@code width}/{@code height}, so GUI
- * scaling and window resizes need no relayout. All animation state lives in
- * this screen instance — it is discarded on close, so nothing persists or
- * ticks after the GUI is gone.
+ * Structure: header (logo, page title, search, close) / sidebar (icon
+ * navigation) / content workspace (module cards or a designed empty state).
+ * Typography is Manrope via {@link UiFonts}; every color, gap and radius
+ * comes from {@link UiTheme}; all drawing goes through {@link Ui}.
  *
- * Input: Right Shift (the registered, rebindable keybind) opens and closes
- * the GUI; mouse coordinates arrive pre-scaled from vanilla so all hit
- * targets below use the same coordinate space as rendering.
+ * Lifecycle: the open animation (scale + fade) runs only while this screen
+ * exists — closing discards the instance, so nothing animates or listens
+ * afterwards. Right Shift opens/closes exactly as before (single
+ * edge-triggered listener in the entrypoint).
  */
 public class ClickGuiScreen extends Screen {
-	private static final int HEADER_H = 20;
-	private static final int SIDEBAR_ROW_H = 24;
 	private static final Category[] CATEGORIES = Category.values();
+	private static final UiIcons.Icon[] CATEGORY_ICONS = {
+			UiIcons.Icon.TARGET, // Base Finder
+			UiIcons.Icon.WORLD,
+			UiIcons.Icon.VISUAL,
+			UiIcons.Icon.DONUT,
+			UiIcons.Icon.MISC
+	};
 
 	private final Map<Category, List<ModuleCard>> cards = new EnumMap<>(Category.class);
 	private final UiScrollbar scrollbar = new UiScrollbar();
+	private final UiSearch search = new UiSearch();
 
-	private final Anim open = new Anim(0f, 20f);
-	private final float[] select = new float[Category.values().length];
+	private final Anim open = new Anim(0f, 14f);
+	private final float[] select = new float[CATEGORIES.length];
 
 	private int selected;
+	private int lastSelected = -1;
+	private float switchProgress = 1f;
+	private boolean closing;
 	private ModuleCard pressedCard;
-	private boolean sidebarHover = false;
-	private int sidebarHoverIndex = -1;
 
 	public ClickGuiScreen() {
 		super(Component.translatable("griefer.gui.title"));
@@ -59,6 +68,10 @@ public class ClickGuiScreen extends Screen {
 			cards.put(category, list);
 		}
 		selected = 0;
+		lastSelected = -1;
+		switchProgress = 1f;
+		closing = false;
+		search.setFocused(false);
 		open.to(0f, 0f);
 	}
 
@@ -72,147 +85,206 @@ public class ClickGuiScreen extends Screen {
 	// ---------------------------------------------------------------- layout
 
 	private int windowWidth() {
-		return Math.max(300, Math.min(540, (int) (this.width * 0.6f)));
+		return Math.max(380, Math.min(520, (int) (this.width * 0.55f)));
 	}
 
 	private int windowHeight() {
-		return Math.max(180, Math.min(250, (int) (this.height * 0.72f)));
+		return Math.max(230, Math.min(290, (int) (this.height * 0.72f)));
+	}
+
+	private float openScale() {
+		float t = open.value();
+		return 0.96f + 0.04f * t;
 	}
 
 	private int windowX() {
-		return (this.width - windowWidth()) / 2;
-	}
-
-	private int baseWindowY() {
-		return (this.height - windowHeight()) / 2;
+		float s = openScale();
+		return (int) (this.width / 2.0 - windowWidth() * s / 2.0);
 	}
 
 	private int windowY() {
-		// Slide-up + settle on open.
-		return Math.max(0, baseWindowY() + Math.round(8 * (1f - open.value())));
+		float s = openScale();
+		return (int) (this.height / 2.0 - windowHeight() * s / 2.0);
 	}
 
-	private int contentX() {
-		return windowX() + UiTheme.SIDEBAR_W;
-	}
-
-	private int contentTop() {
-		return windowY() + HEADER_H + UiTheme.CONTENT_PAD;
-	}
-
-	private int contentBottom() {
-		return windowY() + windowHeight() - UiTheme.CONTENT_PAD;
-	}
-
-	private int contentWidth() {
-		return windowWidth() - UiTheme.SIDEBAR_W - UiTheme.CONTENT_PAD * 2;
+	/** Plays the outro animation, then really closes. */
+	public void requestClose() {
+		if (!closing) {
+			closing = true;
+			search.setFocused(false);
+			open.to(0f, 1f);
+		}
 	}
 
 	private boolean inWindow(double mx, double my) {
 		int wx = windowX();
 		int wy = windowY();
-		return mx >= wx && mx < wx + windowWidth() && my >= wy && my < wy + windowHeight();
+		float s = openScale();
+		int ww = Math.round(windowWidth() * s);
+		int wh = Math.round(windowHeight() * s);
+		return mx >= wx && mx < wx + ww && my >= wy && my < wy + wh;
+	}
+
+	private boolean inContent(double mx, double my) {
+		int wx = windowX();
+		int wy = windowY();
+		float s = openScale();
+		int ww = Math.round(windowWidth() * s);
+		int wh = Math.round(windowHeight() * s);
+		int cx = wx + Math.round((UiTheme.SIDEBAR_W + 4) * s);
+		int top = wy + Math.round((UiTheme.HEADER_H + 10) * s);
+		int bottom = wy + wh - Math.round(12 * s);
+		return mx >= cx && mx < wx + ww - Math.round(10 * s) && my >= top && my < bottom;
 	}
 
 	// ---------------------------------------------------------------- render
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-		g.fill(0, 0, this.width, this.height, UiTheme.SCRIM);
+		// Rebuild UI fonts after resource reloads (F3+T / pack switch).
+		UiFonts.tick(Minecraft.getInstance());
 
-		open.to(1f, partialTick);
-		// selection easing
+		// Fade: scrim eases in from transparent; skip the shell while invisible.
+		open.to(closing ? 0f : 1f, partialTick);
+		g.fill(0, 0, this.width, this.height, Ui.lerpColor(0x00000000, UiTheme.SCRIM, open.value()));
+		if (open.value() <= 0.03f) {
+			if (closing) {
+				finishClose();
+			}
+			return;
+		}
 		for (int i = 0; i < select.length; i++) {
 			select[i] += ((i == selected ? 1f : 0f) - select[i]) * (1f - (float) Math.exp(-16f * partialTick));
 		}
+		if (selected != lastSelected) {
+			lastSelected = selected;
+			switchProgress = 0f;
+		}
+		switchProgress += (1f - switchProgress) * (1f - (float) Math.exp(-14f * partialTick));
 
 		int wx = windowX();
 		int wy = windowY();
-		int ww = windowWidth();
-		int wh = windowHeight();
+		float s = openScale();
+		int ww = Math.round(windowWidth() * s);
+		int wh = Math.round(windowHeight() * s);
 
-		Ui.shadow(g, wx, wy, ww, wh, UiTheme.RADIUS);
-		Ui.roundRect(g, wx, wy, ww, wh, UiTheme.RADIUS, UiTheme.SURFACE_0);
-		Ui.roundOutline(g, wx, wy, ww, wh, UiTheme.RADIUS, UiTheme.LINE);
+		Ui.shadow(g, wx, wy, ww, wh, UiTheme.RADIUS_LG);
+		Ui.roundRect(g, wx, wy, ww, wh, UiTheme.RADIUS_LG, UiTheme.BG);
+		Ui.roundOutline(g, wx, wy, ww, wh, UiTheme.RADIUS_LG, UiTheme.LINE);
 
-		renderHeader(g, wx, wy, ww);
-		renderSidebar(g, wx, wy, wh, mouseX, mouseY, partialTick);
-		renderContent(g, mouseX, mouseY, partialTick);
+		renderHeader(g, wx, wy, ww, mouseX, mouseY, partialTick);
+		renderSidebar(g, wx, wy, wh, s, mouseX, mouseY, partialTick);
+		renderContent(g, wx, wy, ww, wh, s, mouseX, mouseY, partialTick);
 	}
 
-	private void renderHeader(GuiGraphics g, int wx, int wy, int ww) {
-		g.drawString(this.font, "Griefer", wx + UiTheme.CONTENT_PAD, wy + (HEADER_H - 8) / 2, UiTheme.TEXT, false);
-		String hint = ClientKeybinds.openClickGui().getTranslatedKeyMessage().getString() + " to close";
-		Ui.drawRightAligned(g, this.font, hint, wx + ww - UiTheme.CONTENT_PAD, wy + (HEADER_H - 8) / 2, UiTheme.TEXT_FAINT);
-		g.fill(wx + 1, wy + HEADER_H, wx + ww - 1, wy + HEADER_H + 1, UiTheme.LINE);
+	private void renderHeader(GuiGraphics g, int wx, int wy, int ww, int mouseX, int mouseY, float partialTick) {
+		// Logo chip + client name
+		int chip = UiTheme.SP_4 + 2; // 14px
+		Ui.roundRect(g, wx + UiTheme.SP_5, wy + (UiTheme.HEADER_H - chip) / 2, chip, chip, 4, UiTheme.ACCENT);
+		String initial = "G";
+		net.minecraft.client.gui.Font bold = UiFonts.bold();
+		g.drawString(bold, initial, wx + UiTheme.SP_5 + (chip - bold.width(initial)) / 2,
+				wy + (UiTheme.HEADER_H - bold.lineHeight) / 2 + 1, UiTheme.ON_ACCENT, false);
+
+		net.minecraft.client.gui.Font name = UiFonts.bold();
+		int nx = wx + UiTheme.SP_5 + chip + UiTheme.SP_3;
+		int ny = wy + (UiTheme.HEADER_H - name.lineHeight) / 2;
+		g.drawString(name, "Griefer", nx, ny, UiTheme.TEXT, false);
+
+		// Page title (current category or Search)
+		net.minecraft.client.gui.Font regular = UiFonts.regular();
+		String page = search.query().isEmpty() ? CATEGORIES[selected].title : "Search";
+		int pageX = nx + name.width("Griefer") + UiTheme.SP_4;
+		int searchX = wx + ww - UiTheme.SP_5 - UiTheme.SEARCH_W - UiTheme.SP_4 - 16;
+		if (searchX - pageX > UiTheme.SP_4) {
+			Ui.drawEllipsized(g, regular, page, pageX, ny + 1, searchX - pageX - UiTheme.SP_4, UiTheme.TEXT_3);
+		}
+
+		// Search field, right-aligned before the close button
+		int sx = wx + ww - UiTheme.SP_5 - UiTheme.SEARCH_W - UiTheme.SP_4 - 16;
+		int sy = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
+		search.bind(sx, sy, UiTheme.SEARCH_W, UiTheme.SEARCH_H);
+		search.render(g, UiFonts.regular(), mouseX, mouseY, partialTick);
+
+		// Close button
+		int bx = wx + ww - UiTheme.SP_4 - 16;
+		int by = wy + (UiTheme.HEADER_H - 16) / 2;
+		boolean hovered = mouseX >= bx && mouseX < bx + 16 && mouseY >= by && mouseY < by + 16;
+		if (hovered) {
+			Ui.roundRect(g, bx, by, 16, 16, UiTheme.RADIUS, UiTheme.SURFACE_3);
+		}
+		UiIcons.draw(g, UiIcons.Icon.CLOSE, bx + 4, by + 4, 8, hovered ? UiTheme.TEXT : UiTheme.TEXT_3);
 	}
 
-	private void renderSidebar(GuiGraphics g, int wx, int wy, int wh, int mouseX, int mouseY, float partialTick) {
-		// Sidebar surface (inset so the window outline stays crisp)
-		g.fill(wx + 1, wy + HEADER_H + 1, wx + UiTheme.SIDEBAR_W, wy + wh - 1, UiTheme.SURFACE_1);
-		g.fill(wx + UiTheme.SIDEBAR_W, wy + HEADER_H + 1, wx + UiTheme.SIDEBAR_W + 1, wy + wh - 1, UiTheme.LINE);
+	private void renderSidebar(GuiGraphics g, int wx, int wy, int wh, float s, int mouseX, int mouseY, float partialTick) {
+		int sx = wx + Math.round(UiTheme.SP_3 * s);
+		int sw = Math.round((UiTheme.SIDEBAR_W - UiTheme.SP_3) * s);
+		int y = wy + Math.round((UiTheme.HEADER_H + UiTheme.SP_3) * s);
+		int rowH = Math.round(26 * s);
+		int gap = Math.round(2 * s);
 
-		sidebarHover = false;
-		sidebarHoverIndex = -1;
-
-		int rowY = wy + HEADER_H + UiTheme.SP_3;
-		Category[] values = Category.values();
-		for (int i = 0; i < values.length; i++) {
-			Category category = values[i];
-			boolean hovered = mouseX >= wx + 1 && mouseX < wx + UiTheme.SIDEBAR_W
-					&& mouseY >= rowY && mouseY < rowY + SIDEBAR_ROW_H;
-			if (hovered) {
-				sidebarHover = true;
-				sidebarHoverIndex = i;
-			}
-
+		for (int i = 0; i < CATEGORIES.length; i++) {
+			Category category = CATEGORIES[i];
+			boolean hovered = mouseX >= sx && mouseX < sx + sw && mouseY >= y && mouseY < y + rowH;
 			float sel = select[i];
-			int rowBg = Ui.lerpColor(UiTheme.SURFACE_1, UiTheme.SURFACE_2, Math.max(sel, hovered ? 0.45f : 0f));
-			if (sel > 0.01f) {
-				Ui.roundRect(g, wx + UiTheme.SP_2, rowY, UiTheme.SIDEBAR_W - UiTheme.SP_2 * 2, SIDEBAR_ROW_H, UiTheme.RADIUS_SM, rowBg);
-				int barH = Math.round((SIDEBAR_ROW_H - 8) * sel);
-				g.fill(wx + UiTheme.SP_2, rowY + (SIDEBAR_ROW_H - barH) / 2, wx + UiTheme.SP_2 + 2, rowY + (SIDEBAR_ROW_H - barH) / 2 + barH, category.accent);
+
+			if (sel > 0.02f) {
+				// Selected: subtle tinted pill + small accent indicator
+				Ui.roundRect(g, sx, y, sw, rowH, UiTheme.RADIUS, Ui.lerpColor(UiTheme.BG, UiTheme.SURFACE_2, sel));
+				int barH = Math.round(14 * sel * s);
+				Ui.roundRect(g, sx + 1, y + (rowH - barH) / 2, 2, barH, 1, Ui.lerpColor(0x00000000, category.accent, sel));
 			} else if (hovered) {
-				Ui.roundRect(g, wx + UiTheme.SP_2, rowY, UiTheme.SIDEBAR_W - UiTheme.SP_2 * 2, SIDEBAR_ROW_H, UiTheme.RADIUS_SM, rowBg);
+				Ui.roundRect(g, sx, y, sw, rowH, UiTheme.RADIUS, UiTheme.SURFACE_2);
 			}
 
-			// Category dot + name
-			int textX = wx + UiTheme.SP_5 + 4;
-			int textY = rowY + (SIDEBAR_ROW_H - 8) / 2;
-			g.fill(textX, textY + 3, textX + 3, textY + 6, category.accent);
-			// Ellipsize so long category names can never collide with the badge
-			int labelMax = UiTheme.SIDEBAR_W - (textX + 8 - wx) - UiTheme.SIDEBAR_W / 4;
-			String label = category.title;
-			while (label.length() > 1 && this.font.width(label) > labelMax) {
-				label = label.substring(0, label.length() - 1);
+			int iconBox = Math.round(14 * s);
+			int textX = sx + Math.round(UiTheme.SP_4 * s) + iconBox + Math.round(UiTheme.SP_2 * s);
+			int textY = y + (rowH - UiFonts.medium().lineHeight) / 2;
+			int iconColor = sel > 0.5f ? UiTheme.TEXT : UiTheme.TEXT_2;
+			if (hovered && sel <= 0.02f) {
+				iconColor = UiTheme.TEXT;
 			}
-			if (!label.equals(category.title)) {
-				label = label + "…";
-			}
-			g.drawString(this.font, label, textX + 8, textY,
-					Ui.lerpColor(UiTheme.TEXT_SUB, UiTheme.TEXT, Math.max(sel, hovered ? 0.6f : 0f)), false);
+			UiIcons.draw(g, CATEGORY_ICONS[i], sx + Math.round(UiTheme.SP_4 * s), y + (rowH - iconBox) / 2, iconBox,
+					Ui.lerpColor(UiTheme.TEXT_2, iconColor, Math.max(sel, hovered ? 1f : 0f)));
 
-			// Module count badge
+			int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(sel, hovered ? 0.8f : 0f));
+			Ui.drawEllipsized(g, UiFonts.medium(), category.title, textX, textY,
+					sx + sw - UiTheme.SP_2 - textX, nameColor);
+
+			// Count badge only when meaningful
 			int count = cards.get(category).size();
 			if (count > 0) {
-				String countLabel = String.valueOf(count);
-				Ui.drawRightAligned(g, this.font, countLabel, wx + UiTheme.SIDEBAR_W - UiTheme.SP_4, textY, UiTheme.TEXT_FAINT);
+				String label = String.valueOf(count);
+				Ui.drawRightAligned(g, UiFonts.regular(), label, sx + sw - UiTheme.SP_3, textY,
+						Ui.lerpColor(UiTheme.TEXT_3, UiTheme.TEXT_2, sel));
 			}
 
-			rowY += SIDEBAR_ROW_H;
+			y += rowH + gap;
 		}
+
+		// Small keybind hint at the sidebar foot — secondary, unobtrusive
+		String hint = ClientKeybinds.openClickGui().getTranslatedKeyMessage().getString();
+		Ui.drawEllipsized(g, UiFonts.regular(), hint + " to close", sx + UiTheme.SP_2,
+				wy + wh - Math.round(16 * s), sw - UiTheme.SP_2, UiTheme.HINT);
 	}
 
-	private void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-		List<ModuleCard> list = cards.get(CATEGORIES[selected]);
-		int cx = contentX();
-		int cw = contentWidth();
-		int top = contentTop();
-		int bottom = contentBottom();
+	private void renderContent(GuiGraphics g, int wx, int wy, int ww, int wh, float s, int mouseX, int mouseY, float partialTick) {
+		int cx = wx + Math.round((UiTheme.SIDEBAR_W + 4) * s);
+		int top = wy + Math.round((UiTheme.HEADER_H + 10) * s);
+		int bottom = wy + wh - Math.round(12 * s);
+		int cw = wx + ww - Math.round(10 * s) - cx;
 		int viewportH = Math.max(0, bottom - top);
 
-		// Advance every card's animation exactly once, then measure the real
-		// laid-out height so scroll bounds always match what is rendered.
+		List<ModuleCard> list = visibleCards();
+		boolean showCategory = !search.query().isEmpty();
+
+		// Category-switch transition: content fades/slides in
+		if (!showCategory && switchProgress < 0.999f) {
+			float a = Math.max(0f, switchProgress);
+			top += Math.round((1f - a) * 6f);
+		}
+
+		// Measure with current animated heights
 		int contentH = 0;
 		for (int i = 0; i < list.size(); i++) {
 			ModuleCard card = list.get(i);
@@ -224,20 +296,19 @@ public class ClickGuiScreen extends Screen {
 		}
 
 		scrollbar.update(top, bottom, contentH, partialTick);
-		scrollbar.setRailX(cx + cw + UiTheme.SP_2);
+		scrollbar.setRailX(cx + cw + UiTheme.SP_1);
 
 		if (list.isEmpty()) {
-			renderEmptyState(g, cx + cw / 2, top + viewportH / 2);
+			renderEmptyState(g, cx + cw / 2, top + viewportH / 2, showCategory);
 			return;
 		}
 
 		boolean clipped = Ui.beginClip(g, cx, top, cw, viewportH);
-		double scroll = scrollbar.scroll();
-		int y = top - (int) Math.round(scroll);
+		int y = top - (int) Math.round(scrollbar.scroll());
 		for (int i = 0; i < list.size(); i++) {
 			ModuleCard card = list.get(i);
 			if (y + card.height() >= top && y <= bottom) {
-				card.render(g, this.font, cx, y, cw, mouseX, mouseY, partialTick);
+				card.render(g, cx, y, cw, mouseX, mouseY, partialTick, showCategory);
 			}
 			y += card.height() + UiTheme.CARD_GAP;
 		}
@@ -248,20 +319,34 @@ public class ClickGuiScreen extends Screen {
 		scrollbar.render(g);
 	}
 
-	private void renderEmptyState(GuiGraphics g, int centerX, int centerY) {
-		// Small diamond mark
-		int dy = centerY - 22;
-		for (int i = 0; i <= 3; i++) {
-			g.fill(centerX - i, dy + i, centerX - i + 1, dy + i + 1, UiTheme.TEXT_FAINT);
-			g.fill(centerX + i, dy + i, centerX + i + 1, dy + i + 1, UiTheme.TEXT_FAINT);
+	private List<ModuleCard> visibleCards() {
+		String q = search.query().trim().toLowerCase(Locale.ROOT);
+		if (!q.isEmpty()) {
+			List<ModuleCard> out = new ArrayList<>();
+			for (Category category : CATEGORIES) {
+				for (ModuleCard card : cards.get(category)) {
+					if (card.title().toLowerCase(Locale.ROOT).contains(q)
+							|| card.descriptionText().toLowerCase(Locale.ROOT).contains(q)
+							|| card.module().id().replace('_', ' ').contains(q)) {
+						out.add(card);
+					}
+				}
+			}
+			return out;
 		}
-		for (int i = 0; i <= 2; i++) {
-			g.fill(centerX - (3 - i), dy + 4 + i, centerX - (3 - i) + 1, dy + 4 + i + 1, UiTheme.TEXT_FAINT);
-			g.fill(centerX + (3 - i), dy + 4 + i, centerX + (3 - i) + 1, dy + 4 + i + 1, UiTheme.TEXT_FAINT);
-		}
-		g.drawCenteredString(this.font, "No modules yet", centerX, centerY - 4, UiTheme.TEXT_FAINT);
-		g.drawCenteredString(this.font, "Modules added to this category will appear here",
-				centerX, centerY + 8, 0xFF3A424C);
+		return cards.get(CATEGORIES[selected]);
+	}
+
+	private void renderEmptyState(GuiGraphics g, int centerX, int centerY, boolean searchEmpty) {
+		net.minecraft.client.gui.Font regular = UiFonts.regular();
+		net.minecraft.client.gui.Font medium = UiFonts.medium();
+		String title = searchEmpty ? "No matches" : "Nothing here yet";
+		String sub = searchEmpty
+				? "No modules match your search."
+				: "This category currently has no modules.";
+		int ty = centerY - 10;
+		g.drawString(medium, title, centerX - medium.width(title) / 2, ty, UiTheme.TEXT_2, false);
+		g.drawString(regular, sub, centerX - regular.width(sub) / 2, ty + 13, UiTheme.TEXT_3, false);
 	}
 
 	// ---------------------------------------------------------------- input
@@ -272,28 +357,50 @@ public class ClickGuiScreen extends Screen {
 		double my = event.y();
 		int button = event.button();
 
-		if (!inWindow(mx, my) || button != 0) {
-			return true; // swallow everything while the GUI is open
+		if (closing || !inWindow(mx, my)) {
+			return true; // swallow everything while closing / outside the shell
+		}
+
+		// Search field first (it sits in the header)
+		if (button == 0 && search.contains(mx, my)) {
+			search.setFocused(true);
+			return true;
+		}
+		search.setFocused(false);
+
+		int wx = windowX();
+		int wy = windowY();
+		float s = openScale();
+		int ww = Math.round(windowWidth() * s);
+
+		// Close button
+		if (button == 0) {
+			int bx = wx + ww - UiTheme.SP_4 - 16;
+			int by = wy + (UiTheme.HEADER_H - 16) / 2;
+			if (mx >= bx && mx < bx + 16 && my >= by && my < by + 16) {
+				onClose();
+				return true;
+			}
 		}
 
 		// Sidebar rows
-		int wx = windowX();
-		int wy = windowY();
-		if (mx >= wx + 1 && mx < wx + UiTheme.SIDEBAR_W && my >= wy + HEADER_H && my < wy + windowHeight()) {
-			int index = (int) ((my - (wy + HEADER_H + UiTheme.SP_3)) / SIDEBAR_ROW_H);
-			if (index >= 0 && index < CATEGORIES.length) {
+		int sx = wx + Math.round(UiTheme.SP_3 * s);
+		int sw = Math.round((UiTheme.SIDEBAR_W - UiTheme.SP_3) * s);
+		int rowY = wy + Math.round((UiTheme.HEADER_H + UiTheme.SP_3) * s);
+		int rowH = Math.round(26 * s);
+		int gap = Math.round(2 * s);
+		if (mx >= sx && mx < sx + sw) {
+			int index = (int) ((my - rowY) / (rowH + gap));
+			if (index >= 0 && index < CATEGORIES.length && my >= rowY) {
 				selected = index;
+				search.clear();
+				return true;
 			}
-			return true;
 		}
 
-		// Module cards (reverse order; card bounds already include settings).
-		// Only cards inside the content viewport are hit-testable — cards
-		// scrolled out of view keep stale bounds and must never swallow clicks.
-		int top = contentTop();
-		int bottom = contentBottom();
-		if (my >= top && my < bottom) {
-			List<ModuleCard> list = cards.get(CATEGORIES[selected]);
+		// Content area: cards
+		if (inContent(mx, my)) {
+			List<ModuleCard> list = visibleCards();
 			for (int i = list.size() - 1; i >= 0; i--) {
 				ModuleCard card = list.get(i);
 				if (card.contains(mx, my) && card.mouseClicked(mx, my, button)) {
@@ -301,15 +408,23 @@ public class ClickGuiScreen extends Screen {
 					return true;
 				}
 			}
-		}
-
-		// Scrollbar rail
-		int railX = contentX() + contentWidth() + UiTheme.SP_2;
-		if (mx >= railX - 2 && mx < railX + 5) {
-			scrollbar.pressed(my);
-			return true;
+			// Scrollbar rail
+			int railX = contentRailX();
+			if (mx >= railX - 2 && mx < railX + 5) {
+				scrollbar.pressed(my);
+				return true;
+			}
 		}
 		return true;
+	}
+
+	private int contentRailX() {
+		int wx = windowX();
+		float s = openScale();
+		int ww = Math.round(windowWidth() * s);
+		int cx = wx + Math.round((UiTheme.SIDEBAR_W + 4) * s);
+		int cw = wx + ww - Math.round(10 * s) - cx;
+		return cx + cw + UiTheme.SP_1;
 	}
 
 	@Override
@@ -349,9 +464,24 @@ public class ClickGuiScreen extends Screen {
 	}
 
 	@Override
+	public boolean charTyped(CharacterEvent event) {
+		if (closing) {
+			return true;
+		}
+		if (search.charTyped(event)) {
+			return true;
+		}
+		return super.charTyped(event);
+	}
+
+	@Override
 	public boolean keyPressed(KeyEvent event) {
+		// Unchanged behavior: the registered (rebindable) keybind closes the GUI.
 		if (ClientKeybinds.openClickGui().matches(event)) {
-			onClose();
+			requestClose();
+			return true;
+		}
+		if (search.keyPressed(event)) {
 			return true;
 		}
 		return super.keyPressed(event);
@@ -359,8 +489,14 @@ public class ClickGuiScreen extends Screen {
 
 	@Override
 	public void onClose() {
+		// Esc / close button: play the outro, then close for real.
+		requestClose();
+	}
+
+	private void finishClose() {
 		pressedCard = null;
 		scrollbar.released();
+		search.setFocused(false);
 		super.onClose();
 	}
 
