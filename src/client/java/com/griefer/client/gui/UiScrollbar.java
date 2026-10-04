@@ -4,7 +4,8 @@ import net.minecraft.client.gui.GuiGraphics;
 
 /**
  * Scrollbar: proportional draggable thumb with wheel support and smooth
- * eased scrolling. Restyled as a rounded subtle pill; no hard rail line.
+ * eased scrolling. The thumb is a translucent glass pill with a specular rim,
+ * so it belongs to the same material as everything around it.
  */
 public class UiScrollbar {
 	private static final double WHEEL_PER_NOTCH = 28.0;
@@ -106,7 +107,9 @@ public class UiScrollbar {
 		if (!usable) {
 			return;
 		}
-		Ui.roundRect(g, railX, thumbY, 3, thumbH, UiTheme.RADIUS_PILL, 0xFF39424E);
+		int w = 5;
+		Ui.glassFill(g, railX, thumbY, w, thumbH, UiTheme.RADIUS_PILL, 0xB33C4859, 0xB3202833);
+		Ui.glassEdge(g, railX, thumbY, w, thumbH, UiTheme.RADIUS_PILL, 0x59FFFFFF, 0x1AFFFFFF);
 	}
 
 	private void clampTarget() {

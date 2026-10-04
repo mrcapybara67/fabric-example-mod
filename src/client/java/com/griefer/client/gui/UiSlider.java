@@ -4,8 +4,8 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 
 /**
- * Slider control: label + live value on the label line, then a rounded
- * background track with an accent fill and a dot knob. The value model is
+ * Slider control: label + live value on the label line, then a translucent
+ * glass track with a glowing accent fill and a glass knob. The value model is
  * bound once (never per frame); geometry and display strings are bound per
  * frame by the owning card.
  */
@@ -40,10 +40,6 @@ public class UiSlider {
 	}
 
 	public boolean isDragging() {
-		return sliderDrag() || dragging;
-	}
-
-	private boolean sliderDrag() {
 		return dragging;
 	}
 
@@ -70,21 +66,38 @@ public class UiSlider {
 	 * scissor-clipped by the caller.
 	 */
 	public void render(GuiGraphics g, Font font, int rowX, int rowW) {
-		Ui.drawEllipsized(g, font, label, rowX, trackY - 12, rowW - font.width(valueText) - UiTheme.SP_3, UiTheme.TEXT_2);
-		Ui.drawRightAligned(g, font, valueText, rowX + rowW, trackY - 12, UiTheme.TEXT);
+		Ui.drawEllipsized(g, font, label, rowX, trackY - 18,
+				rowW - font.width(valueText) - UiTheme.SP_3, UiTheme.TEXT_2);
+		Ui.drawRightAligned(g, font, valueText, rowX + rowW, trackY - 18, UiTheme.TEXT);
 
-		int trackH = 5;
+		int trackH = 8;
 		int half = trackH / 2;
 		int knobX = trackX0 + Math.round(fill.value() * (trackX1 - trackX0));
 
-		// Track background (rounded, spans the full row)
-		Ui.roundRect(g, trackX0, trackY - half, trackX1 - trackX0, trackH, UiTheme.RADIUS_PILL, UiTheme.SURFACE);
-		// Accent fill up to the knob
+		// Glass track
+		Ui.glassFill(g, trackX0, trackY - half, trackX1 - trackX0, trackH, UiTheme.RADIUS_PILL,
+				UiTheme.TRACK_TOP, UiTheme.TRACK_BOTTOM);
+		Ui.glassEdge(g, trackX0, trackY - half, trackX1 - trackX0, trackH, UiTheme.RADIUS_PILL,
+				0x38FFFFFF, 0x12FFFFFF);
+
+		// Accent fill up to the knob, glowing slightly
 		if (knobX > trackX0 + half) {
-			Ui.roundRect(g, trackX0, trackY - half, knobX - trackX0, trackH, UiTheme.RADIUS_PILL, UiTheme.ACCENT);
+			int fw = knobX - trackX0;
+			Ui.roundRect(g, trackX0, trackY - half - 1, fw, trackH + 2, UiTheme.RADIUS_PILL, 0x405FE3C8);
+			Ui.glassFill(g, trackX0, trackY - half, fw, trackH, UiTheme.RADIUS_PILL,
+					UiTheme.ACCENT, UiTheme.ACCENT_DIM);
+			Ui.glassEdge(g, trackX0, trackY - half, fw, trackH, UiTheme.RADIUS_PILL,
+					0x80FFFFFF, 0x2EFFFFFF);
 		}
-		// Knob: white dot, sits on top of the track edge
-		Ui.roundRect(g, knobX - half - 1, trackY - half - 1, trackH + 2, trackH + 2, UiTheme.RADIUS_PILL, UiTheme.TEXT);
+
+		// Knob: a glass disc sitting on the track edge
+		int d = trackH + 6;
+		int kx = knobX - d / 2;
+		int ky = trackY - d / 2;
+		Ui.roundRect(g, kx + 1, ky + 2, d, d, UiTheme.RADIUS_PILL, 0x59000000);
+		Ui.glassFill(g, kx, ky, d, d, UiTheme.RADIUS_PILL, 0xFFFDFEFF, 0xFFB9C6D4);
+		Ui.glassEdge(g, kx, ky, d, d, UiTheme.RADIUS_PILL, 0xC4FFFFFF, 0x38FFFFFF);
+		Ui.innerBevel(g, kx, ky, d, d, UiTheme.RADIUS_PILL, 0x73FFFFFF, 0x33000000);
 	}
 
 	private void apply(double mx) {

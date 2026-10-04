@@ -8,8 +8,14 @@ import java.util.Map;
 import net.minecraft.client.gui.GuiGraphics;
 
 /**
- * Modern module card: name (medium weight), description (regular weight),
- * settings chevron, pill toggle. Expands smoothly to reveal slider rows.
+ * Module card: a floating pane of glass holding the module name, description,
+ * settings chevron and glass toggle. Expands smoothly to reveal slider rows
+ * inside an inset glass well.
+ *
+ * When the module is enabled the card lights up: an accent bloom behind it, an
+ * accent-tinted body, and a thin accent bar down the leading edge — the same
+ * "this thing is active" language used by the sidebar, so the two read as one
+ * system.
  *
  * Interaction contract (unchanged from the working version):
  *   - Click card body / toggle -> toggle the module
@@ -17,10 +23,10 @@ import net.minecraft.client.gui.GuiGraphics;
  *   - Click/drag a slider row  -> set the value (never toggles)
  */
 public class ModuleCard {
-	private static final int CHEVRON_W = 14;
-	private static final int ROW_H = 26;
+	private static final int CHEVRON_W = 16;
+	private static final int ROW_H = 34;
 	private static final int DESC_H = 12;
-	private static final int PAD = 6;
+	private static final int PAD = 8;
 
 	private final Module module;
 	private final UiToggle toggle = new UiToggle();
@@ -133,24 +139,53 @@ public class ModuleCard {
 		hover.to(hovered ? 1f : 0f, delta);
 		on.to(module.isEnabled() ? 1f : 0f, delta);
 
-		// Elevation: base -> hover; enabled adds the faintest accent tint
-		int bg = Ui.lerpColor(UiTheme.SURFACE_2, UiTheme.SURFACE_3, hover.value() * 0.85f);
+		float hv = hover.value();
+		float onv = on.value();
+		int r = UiTheme.RADIUS;
+
+		// Enabled: the card is lit from inside.
+		if (onv > 0.02f) {
+			Ui.roundRect(g, x - 2, y - 2, w + 4, h + 4, r + 2,
+					Ui.lerpColor(0x00000000, UiTheme.GLOW_ACCENT, onv * 0.4f));
+		}
+		Ui.roundRect(g, x + 2, y + 3, w - 4, h, r, 0x38000000);
+
+		// Body: glass, lifting slightly on hover and warming with the accent.
+		int top = Ui.lerpColor(UiTheme.CARD_TOP, UiTheme.CARD_HOVER_TOP, hv);
+		int bottom = Ui.lerpColor(UiTheme.CARD_BOTTOM, UiTheme.CARD_HOVER_BOTTOM, hv);
 		if (pressed) {
-			bg = Ui.lerpColor(bg, 0xFF2A3340, 0.6f);
+			top = Ui.lerpColor(top, 0xFF141C27, 0.45f);
+			bottom = Ui.lerpColor(bottom, 0xFF0E141D, 0.45f);
 		}
-		if (on.value() > 0.5f) {
-			bg = Ui.lerpColor(bg, UiTheme.ACCENT_10, 0.35f);
+		Ui.glassFill(g, x, y, w, h, r, top, bottom);
+		if (onv > 0.02f) {
+			Ui.glassFill(g, x, y, w, h, r,
+					Ui.withAlpha(UiTheme.ACCENT, Math.round(26 * onv)),
+					Ui.withAlpha(UiTheme.ACCENT, Math.round(8 * onv)));
 		}
-		Ui.roundRect(g, x, y, w, h, UiTheme.RADIUS, bg);
+		Ui.glassEdge(g, x, y, w, h, r,
+				Ui.lerpColor(UiTheme.EDGE_TOP, 0xA6FFFFFF, hv * 0.5f + onv * 0.5f),
+				Ui.lerpColor(UiTheme.EDGE_BOTTOM, 0x30FFFFFF, hv));
+		Ui.innerBevel(g, x, y, w, h, r,
+				Ui.lerpColor(UiTheme.INNER_TOP, 0x40FFFFFF, onv), UiTheme.INNER_BOTTOM);
+
+		// Leading accent bar while enabled.
+		if (onv > 0.02f) {
+			int barH = Math.max(6, Math.round((h - 16) * onv));
+			int barY = y + (h - barH) / 2;
+			Ui.glassFill(g, x + 1, barY, 3, barH, 2,
+					Ui.withAlpha(UiTheme.ACCENT, Math.round(255 * onv)),
+					Ui.withAlpha(UiTheme.ACCENT_DIM, Math.round(255 * onv)));
+		}
 
 		// Name + description, two-line hierarchy
-		int textX = x + UiTheme.SP_4;
-		int nameY = y + UiTheme.SP_3 - 1;
+		int textX = x + UiTheme.SP_4 + 2;
+		int nameY = y + 11;
 		int textRight = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3;
 		if (hasSettings()) {
 			textRight -= CHEVRON_W;
 		}
-		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(on.value(), hover.value() * 0.7f));
+		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.7f));
 		Ui.drawEllipsized(g, UiFonts.medium(), title, textX, nameY, textRight - textX, nameColor);
 
 		String desc = description;
@@ -159,34 +194,35 @@ public class ModuleCard {
 			desc = desc == null ? tag : desc + "  ·  " + tag;
 		}
 		if (desc != null) {
-			Ui.drawEllipsized(g, UiFonts.regular(), desc, textX, nameY + 11, textRight - textX, UiTheme.TEXT_3);
+			Ui.drawEllipsized(g, UiFonts.regular(), desc, textX, nameY + DESC_H, textRight - textX, UiTheme.TEXT_3);
 		}
 
 		// Settings chevron (small, left of the toggle)
 		if (hasSettings()) {
-			int cx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3;
-			int cy = y + UiTheme.CARD_H / 2 - 1;
-			boolean openDir = expand.value() > 0.5f;
-			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.TEXT, hover.value());
-			for (int i = 0; i <= 1; i++) {
-				int row = openDir ? 1 - i : i;
-				g.fill(cx + i, cy + row, cx + i + 1, cy + row + 1, chev);
-				g.fill(cx + 3 - i, cy + row, cx + 4 - i, cy + row + 1, chev);
-			}
+			int cx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3 - CHEVRON_W + 2;
+			int cy = y + UiTheme.CARD_H / 2 - 6;
+			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.TEXT, Math.max(hv, expand.value() * 0.6f));
+			UiIcons.chevron(g, cx, cy, 12, chev, expand.value());
 		}
 
-		// Pill toggle
+		// Glass toggle
 		int tx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W;
 		int ty = y + (UiTheme.CARD_H - UiTheme.TOGGLE_H) / 2;
 		toggle.update(module.isEnabled(), hovered, delta);
 		toggle.render(g, tx, ty, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
 
-		// Settings section, clipped by animated height
+		// Settings well: an inset glass panel holding the slider rows.
 		int full = settingsFullHeight();
 		if (full > 0 && expand.value() > 0.01f) {
 			int clipH = Math.round(full * expand.value());
-			if (Ui.beginClip(g, x, y + UiTheme.CARD_H, w, clipH)) {
-				int cy = y + UiTheme.CARD_H + PAD;
+			if (Ui.beginClip(g, x + 1, y + UiTheme.CARD_H, w - 2, clipH)) {
+				int wy = y + UiTheme.CARD_H;
+				Ui.glassFill(g, x + UiTheme.SP_3, wy, w - UiTheme.SP_3 * 2, full - 2, UiTheme.RADIUS,
+						0x8C0B1017, 0xA6090D13);
+				Ui.glassEdge(g, x + UiTheme.SP_3, wy, w - UiTheme.SP_3 * 2, full - 2, UiTheme.RADIUS,
+						0x1FFFFFFF, 0x0DFFFFFF);
+
+				int cy = wy + PAD;
 				for (Setting<?> s : module.settings()) {
 					if (s instanceof SliderSetting slider) {
 						renderSliderRow(g, sliders.get(slider), slider, x, w, cy);
@@ -199,11 +235,11 @@ public class ModuleCard {
 	}
 
 	private void renderSliderRow(GuiGraphics g, UiSlider ui, SliderSetting slider, int x, int w, int rowY) {
-		int trackX0 = x + UiTheme.SP_4;
-		int trackX1 = x + w - UiTheme.SP_4;
-		int trackY = rowY + 17;
+		int trackX0 = x + UiTheme.SP_4 + 4;
+		int trackX1 = x + w - UiTheme.SP_4 - 4;
+		int trackY = rowY + 24;
 		ui.bind(sliderLabels.get(slider), String.valueOf(slider.get()), trackX0, trackX1, trackY);
-		ui.render(g, UiFonts.regular(), x + UiTheme.SP_4, w - UiTheme.SP_4 * 2);
+		ui.render(g, UiFonts.regular(), trackX0, trackX1 - trackX0);
 	}
 
 	private String sliderLabel(SliderSetting slider) {
@@ -275,7 +311,7 @@ public class ModuleCard {
 		if (!hasSettings()) {
 			return false;
 		}
-		int cx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3;
+		int cx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3 - CHEVRON_W;
 		return mx >= cx - 2 && mx < cx + CHEVRON_W && my >= y && my < y + UiTheme.CARD_H;
 	}
 
