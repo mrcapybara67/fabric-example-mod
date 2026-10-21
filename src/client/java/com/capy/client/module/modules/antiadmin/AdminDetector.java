@@ -2,7 +2,9 @@ package com.capy.client.module.modules.antiadmin;
 
 import com.capy.client.module.WatchlistSetting;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -15,36 +17,44 @@ import net.minecraft.world.entity.player.PlayerSkin;
 /**
  * Finds the watched players the client can actually observe.
  *
- * What counts as observable:
- *   <ul>
- *     <li>a player entity that the server sent to the client — its position,
- *         distance and skin are known;</li>
- *     <li>the identity the client knows for that player, taken from the game
- *         profile and from the player list entry (the tab list display name
- *         is what a cross-platform server exposes for a Bedrock player).</li>
- *   </ul>
+ * Two levels of evidence are produced, and they are never mixed up:
+ * <ul>
+ *   <li><b>NEARBY</b> — the server sent the player's entity to the client, so
+ *       the client knows the player is in the world and can measure the
+ *       distance;</li>
+ *   <li><b>ONLINE</b> — the server lists the player (the tab list), but no
+ *       entity is available, so the client only knows that the player is
+ *       connected. The position is unknown and is reported as unknown.</li>
+ * </ul>
  *
- * What does <em>not</em> count: a player the server never mentions. A
- * server-side vanish system usually removes the player from the client
- * entirely, so nothing here can (or claims to) detect it. Missing information
- * is treated as unknown, never as proof that no administrator is around.
+ * What this class deliberately does <em>not</em> do:
+ * <ul>
+ *   <li>infer nearby presence from a name alone;</li>
+ *   <li>claim that a matched player is an administrator — the watchlist says
+ *       "watch this account", nothing more;</li>
+ *   <li>detect a player the server never mentions. A server side vanish
+ *       system usually removes the player from the client entirely, so no
+ *       client side mod can see them. Missing information is treated as
+ *       unknown, never as proof that nobody is around.</li>
+ * </ul>
  */
 public final class AdminDetector {
-	/** A watched player that is currently visible to the client. */
-	public record Candidate(UUID uuid, String username, String identity, double distance, PlayerSkin skin) {
+	/** An observed watched player. */
+	public record Match(UUID uuid, String username, String identity, double distance, PlayerSkin skin,
+			Evidence evidence) {
 	}
 
 	private AdminDetector() {
 	}
 
 	/**
-	 * Scans the visible player entities for names on the watchlist.
+	 * Scans the client for watched players.
 	 *
 	 * @param range detection radius in blocks
-	 * @return every watched player inside the radius, nearest first
+	 * @return every watched player the client can observe, strongest first
 	 */
-	public static List<Candidate> scan(Minecraft mc, WatchlistSetting watchlist, double range) {
-		List<Candidate> out = new ArrayList<>();
+	public static List<Match> scan(Minecraft mc, WatchlistSetting watchlist, double range) {
+		List<Match> out = new ArrayList<>();
 		if (mc == null || watchlist == null) {
 			return out;
 		}
@@ -53,12 +63,12 @@ public final class AdminDetector {
 		if (level == null || local == null) {
 			return out;
 		}
-		List<AbstractClientPlayer> players = level.players();
-		if (players.isEmpty()) {
-			return out;
-		}
 
+		Set<UUID> seen = new HashSet<>();
 		double rangeSq = range * range;
+
+		// 1. Players the server sent to us: their position is known.
+		List<AbstractClientPlayer> players = level.players();
 		for (AbstractClientPlayer player : players) {
 			if (player == local || player.isRemoved()) {
 				continue;
@@ -72,19 +82,47 @@ public final class AdminDetector {
 			if (distanceSq > rangeSq) {
 				continue;
 			}
-			out.add(new Candidate(player.getUUID(),
+			seen.add(player.getUUID());
+			out.add(new Match(player.getUUID(),
 					profileName == null || profileName.isEmpty() ? identity : profileName,
 					identity,
 					Math.sqrt(distanceSq),
-					player.getSkin()));
+					player.getSkin(),
+					Evidence.NEARBY));
 		}
-		out.sort((a, b) -> Double.compare(a.distance(), b.distance()));
+
+		// 2. Players the server lists but did not send an entity for.
+		if (mc.getConnection() != null) {
+			for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
+				if (info == null || seen.contains(info.getProfile().id())) {
+					continue;
+				}
+				String identity = matchIdentity(mc, info, watchlist);
+				if (identity == null) {
+					continue;
+				}
+				String name = info.getProfile() == null ? null : info.getProfile().name();
+				out.add(new Match(info.getProfile().id(),
+						name == null || name.isEmpty() ? identity : name,
+						identity,
+						-1.0,
+						info.getSkin(),
+						Evidence.ONLINE));
+			}
+		}
+
+		out.sort((a, b) -> {
+			if (a.evidence() != b.evidence()) {
+				return a.evidence() == Evidence.NEARBY ? -1 : 1;
+			}
+			return Double.compare(a.distance(), b.distance());
+		});
 		return out;
 	}
 
 	/**
-	 * Returns the identity that matched the watchlist, or null when the player
-	 * is not watched.
+	 * Returns the identity that matched the watchlist, or null when the
+	 * player is not watched.
 	 *
 	 * The game profile name is the primary identity. The player list entry is
 	 * consulted as well, because a server with a cross-platform bridge can
@@ -99,6 +137,10 @@ public final class AdminDetector {
 		if (info == null) {
 			return null;
 		}
+		return matchIdentity(mc, info, watchlist);
+	}
+
+	private static String matchIdentity(Minecraft mc, PlayerInfo info, WatchlistSetting watchlist) {
 		String infoName = info.getProfile() == null ? null : info.getProfile().name();
 		if (infoName != null && !infoName.isEmpty() && watchlist.matches(infoName)) {
 			return infoName;

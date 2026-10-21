@@ -64,8 +64,8 @@ public class CapyClient implements ClientModInitializer {
 
 		// The Anti Admin alerts are drawn over the HUD.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anti_admin"),
-				(graphics, deltaTracker) ->
-						antiAdmin.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight()));
+				(graphics, deltaTracker) -> antiAdmin.onHudRender(graphics, graphics.guiWidth(),
+						graphics.guiHeight(), deltaTracker.getGameTimeDeltaPartialTick(false)));
 
 		// Transient detection state must not survive a world change or a
 		// disconnect: the players of the old world are gone.

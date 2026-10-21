@@ -2,8 +2,6 @@ package com.capy.client.gui;
 
 import com.capy.client.module.WatchlistSetting;
 import java.util.List;
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 
@@ -90,38 +88,38 @@ public class UiWatchlist {
 		}
 	}
 
-	public void render(GuiGraphics g, Font font, int x, int y, int w, int mouseX, int mouseY, float delta) {
+	public void render(UiCanvas c, UiText font, int x, int y, int w, int mouseX, int mouseY, float delta) {
 		int cy = y;
 
 		// Header: the setting label.
-		g.drawString(font, label, x, cy, UiTheme.TEXT_2, false);
+		font.draw(c, label, x, cy, UiTheme.TEXT_2);
 		cy += HEADER_H;
 
 		// Input + add button.
 		int addW = 22;
 		int fieldW = Math.max(30, w - addW - UiTheme.SP_2);
 		field.bind(x, cy, fieldW, INPUT_H);
-		field.render(g, font, mouseX, mouseY, delta);
+		field.render(c, font, mouseX, mouseY, delta);
 
 		int addX = x + fieldW + UiTheme.SP_2;
 		boolean addHovered = mouseX >= addX && mouseX < addX + addW && mouseY >= cy && mouseY < cy + INPUT_H;
-		Ui.surface(g, addX, cy, addW, INPUT_H, UiTheme.RADIUS,
+		Ui.surface(c, addX, cy, addW, INPUT_H, UiTheme.RADIUS,
 				addHovered ? UiTheme.ACCENT : UiTheme.TRACK_TOP,
 				addHovered ? UiTheme.ACCENT_DEEP : UiTheme.TRACK_BOTTOM);
-		Ui.surfaceEdge(g, addX, cy, addW, INPUT_H, UiTheme.RADIUS, 0x33FFFFFF, 0x12FFFFFF);
-		UiIcons.draw(g, UiIcons.Icon.PLUS, addX + 7, cy + (INPUT_H - 8) / 2, 8,
+		Ui.surfaceEdge(c, addX, cy, addW, INPUT_H, UiTheme.RADIUS, 0x33FFFFFF, 0x12FFFFFF);
+		UiIcons.draw(c, UiIcons.Icon.PLUS, addX + 7, cy + (INPUT_H - 8) / 2, 8,
 				addHovered ? UiTheme.ON_ACCENT : UiTheme.TEXT_2);
 		cy += INPUT_H + UiTheme.SP_2;
 
 		// Status line (only while the message is fresh).
 		if (!status.isEmpty() && System.currentTimeMillis() < statusUntil) {
-			g.drawString(font, status, x, cy, UiTheme.ACCENT_DEEP, false);
+			font.draw(c, status, x, cy, UiTheme.ACCENT_DEEP);
 		}
 		cy += STATUS_H;
 
 		List<String> entries = model.entries();
 		if (entries.isEmpty()) {
-			g.drawString(font, "No usernames watched yet", x, cy, UiTheme.TEXT_3, false);
+			font.draw(c, "No usernames watched yet", x, cy, UiTheme.TEXT_3);
 			return;
 		}
 
@@ -131,29 +129,29 @@ public class UiWatchlist {
 			int rowY = cy + i * ENTRY_H;
 
 			// Entry chip.
-			Ui.surface(g, x, rowY, w, ENTRY_H - 2, UiTheme.RADIUS,
+			Ui.surface(c, x, rowY, w, ENTRY_H - 2, UiTheme.RADIUS,
 					UiTheme.PANEL_ALT, UiTheme.PANEL_TOP);
-			Ui.outline(g, x, rowY, w, ENTRY_H - 2, UiTheme.RADIUS, 0x2EFFFFFF);
+			Ui.outline(c, x, rowY, w, ENTRY_H - 2, UiTheme.RADIUS, 0x2EFFFFFF);
 
 			// Blossom bullet.
-			UiIcons.draw(g, UiIcons.Icon.BLOSSOM, x + UiTheme.SP_2, rowY + 3, 9, UiTheme.ACCENT_2);
-			g.drawString(font, entry, x + UiTheme.SP_2 + 13, rowY + 4, UiTheme.TEXT, false);
+			UiIcons.draw(c, UiIcons.Icon.BLOSSOM, x + UiTheme.SP_2, rowY + 3, 9, UiTheme.ACCENT_2);
+			font.draw(c, entry, x + UiTheme.SP_2 + 13, rowY + 4, UiTheme.TEXT);
 
 			// Remove button.
 			int rm = 12;
 			int rx = x + w - rm - UiTheme.SP_2;
 			int ry = rowY + (ENTRY_H - 2 - rm) / 2;
 			boolean rmHovered = mouseX >= rx && mouseX < rx + rm && mouseY >= ry && mouseY < ry + rm;
-			Ui.surface(g, rx, ry, rm, rm, rm / 2,
+			Ui.surface(c, rx, ry, rm, rm, rm / 2,
 					rmHovered ? Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x66) : 0x00000000,
 					rmHovered ? Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x40) : 0x00000000);
-			UiIcons.draw(g, UiIcons.Icon.CLOSE, rx + 3, ry + 3, 6,
+			UiIcons.draw(c, UiIcons.Icon.CLOSE, rx + 3, ry + 3, 6,
 					rmHovered ? UiTheme.TEXT : UiTheme.TEXT_3);
 		}
 		cy += shown * ENTRY_H;
 
 		if (entries.size() > MAX_VISIBLE) {
-			g.drawString(font, "+" + (entries.size() - MAX_VISIBLE) + " more", x, cy, UiTheme.TEXT_3, false);
+			font.draw(c, "+" + (entries.size() - MAX_VISIBLE) + " more", x, cy, UiTheme.TEXT_3);
 		}
 	}
 
@@ -203,7 +201,7 @@ public class UiWatchlist {
 	private int lastY;
 	private int lastWidth;
 
-	/** Records the geometry of the last frame for hit-testing. */
+	/** Records the geometry of the last frame for hit-testinc. */
 	public void bind(int x, int y, int width) {
 		this.lastX = x;
 		this.lastY = y;

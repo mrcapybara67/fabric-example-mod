@@ -1,7 +1,5 @@
 package com.capy.client.gui;
 
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
 
 /**
  * A small tooltip that fades in after a short hover delay.
@@ -38,7 +36,7 @@ public final class UiTooltip {
 	}
 
 	/** Draws the tooltip when it is due. */
-	public void render(GuiGraphics g, Font font) {
+	public void render(UiCanvas c, UiText font) {
 		if (!visible || text.isEmpty()) {
 			return;
 		}
@@ -54,18 +52,18 @@ public final class UiTooltip {
 
 		int pad = 6;
 		int w = font.width(text) + pad * 2;
-		int h = font.lineHeight + pad * 2 - 2;
+		int h = font.lineHeight() + pad * 2 - 2;
 		int bx = x;
 		int by = y - h - 4;
 		if (by < 4) {
 			by = y + 12;
 		}
 
-		Ui.shadow(g, bx, by, w, h, UiTheme.RADIUS);
-		Ui.surface(g, bx, by, w, h, UiTheme.RADIUS,
+		Ui.shadow(c, bx, by, w, h, UiTheme.RADIUS);
+		Ui.surface(c, bx, by, w, h, UiTheme.RADIUS,
 				Ui.withAlpha(UiTheme.PANEL_ALT, alphaInt),
 				Ui.withAlpha(UiTheme.PANEL_TOP, alphaInt));
-		Ui.outline(g, bx, by, w, h, UiTheme.RADIUS, Ui.withAlpha(UiTheme.BORDER, alphaInt));
-		g.drawString(font, text, bx + pad, by + pad - 1, Ui.withAlpha(UiTheme.TEXT, alphaInt), false);
+		Ui.outline(c, bx, by, w, h, UiTheme.RADIUS, Ui.withAlpha(UiTheme.BORDER, alphaInt));
+		font.draw(c, text, bx + pad, by + pad - 1, Ui.withAlpha(UiTheme.TEXT, alphaInt));
 	}
 }

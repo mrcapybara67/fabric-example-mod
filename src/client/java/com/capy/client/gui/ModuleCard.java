@@ -7,8 +7,6 @@ import com.capy.client.module.SliderSetting;
 import com.capy.client.module.WatchlistSetting;
 import java.util.IdentityHashMap;
 import java.util.Map;
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
 
 /**
  * Module card: a plum surface holding the module name, its description, a
@@ -26,12 +24,12 @@ import net.minecraft.client.gui.GuiGraphics;
  *   - Click a setting control   -> drives that setting, never the module
  */
 public class ModuleCard {
-	private static final int CHEVRON_W = 14;
-	private static final int DESC_H = 12;
-	private static final int PAD = 8;
+	private static final int CHEVRON_W = 16;
+	private static final int DESC_H = 13;
+	private static final int PAD = 10;
 
-	private static final int ROW_SLIDER = 34;
-	private static final int ROW_TOGGLE = 24;
+	private static final int ROW_SLIDER = 40;
+	private static final int ROW_TOGGLE = 30;
 
 	private final Module module;
 	private final UiToggle toggle = new UiToggle();
@@ -50,7 +48,7 @@ public class ModuleCard {
 	// Display strings are static per module — resolved once, not per frame.
 	private final String title;
 	private final String description;
-	/** Description with the category appended, used while searching. */
+	/** Description with the category appended, used while searchinc. */
 	private final String taggedDescription;
 	private final Map<SliderSetting, String> sliderLabels = new IdentityHashMap<>();
 
@@ -107,29 +105,15 @@ public class ModuleCard {
 	}
 
 	private static String resolveOrFallback(String key, String fallback) {
-		String s = net.minecraft.network.chat.Component.translatable(key).getString();
-		return s.equals(key) ? fallback : s;
+		String s = UiLabels.translate(key, null);
+		return s == null ? fallback : s;
 	}
 
 	/** Resolves {@code capy.module.<module>.<setting>} with a readable fallback. */
 	private String settingLabel(String settingKey) {
 		String key = "capy.module." + module.id() + "." + settingKey;
-		String s = net.minecraft.network.chat.Component.translatable(key).getString();
-		if (s.equals(key)) {
-			String[] words = settingKey.replace('_', ' ').split(" ");
-			StringBuilder sb = new StringBuilder();
-			for (String word : words) {
-				if (word.isEmpty()) {
-					continue;
-				}
-				if (!sb.isEmpty()) {
-					sb.append(' ');
-				}
-				sb.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
-			}
-			return sb.toString();
-		}
-		return s;
+		String s = UiLabels.translate(key, null);
+		return s == null ? UiLabels.humanize(settingKey) : s;
 	}
 
 	/** Static per-slider model, created once (never per frame). */
@@ -203,13 +187,19 @@ public class ModuleCard {
 		return 0;
 	}
 
+	/** Expands the settings well (used by the offline preview). */
+	void setExpanded(boolean expanded) {
+		this.expanded = expanded;
+	}
+
 	public boolean hasSettings() {
 		return !module.settings().isEmpty();
 	}
 
 	// ---------------------------------------------------------------- render
 
-	public void render(GuiGraphics g, int x, int y, int w, int mouseX, int mouseY, float delta, boolean showCategory) {
+	public void render(UiCanvas c, UiType type, int x, int y, int w, int mouseX, int mouseY, float delta,
+			boolean showCategory) {
 		this.x = x;
 		this.y = y;
 		this.w = w;
@@ -224,101 +214,101 @@ public class ModuleCard {
 		float onv = on.value();
 		int r = UiTheme.RADIUS;
 
-		// Enabled: the card is lit from inside.
-		if (onv > 0.02f) {
-			Ui.roundRect(g, x - 2, y - 2, w + 4, h + 4, r + 2,
-					Ui.lerpColor(0x00000000, UiTheme.ACCENT_GLOW, onv * 0.75f));
-		}
-		Ui.roundRect(g, x + 2, y + 3, w - 4, h, r, 0x33000000);
+		// A soft shadow lifts the card off the workspace.
+		Ui.roundRect(c, x + 1, y + 3, w - 2, h, r, 0x2E000000);
 
-		// Body: a plum surface that lifts slightly on hover and warms with the accent.
+		// The body: a plum surface that brightens on hover and warms with
+		// the accent while the module is enabled.
 		int top = Ui.lerpColor(UiTheme.CARD_TOP, UiTheme.CARD_HOVER_TOP, hv);
 		int bottom = Ui.lerpColor(UiTheme.CARD_BOTTOM, UiTheme.CARD_HOVER_BOTTOM, hv);
 		if (pressed) {
-			top = Ui.lerpColor(top, 0xFF17111B, 0.5f);
-			bottom = Ui.lerpColor(bottom, 0xFF120D16, 0.5f);
+			top = Ui.lerpColor(top, 0xFF191220, 0.45f);
+			bottom = Ui.lerpColor(bottom, 0xFF140E19, 0.45f);
 		}
-		Ui.surface(g, x, y, w, h, r, top, bottom);
+		Ui.surface(c, x, y, w, h, r, top, bottom);
 		if (onv > 0.02f) {
-			Ui.surface(g, x, y, w, h, r,
-					Ui.withAlpha(UiTheme.ACCENT, Math.round(24 * onv)),
-					Ui.withAlpha(UiTheme.ACCENT_DEEP, Math.round(8 * onv)));
+			Ui.surface(c, x, y, w, h, r,
+					Ui.withAlpha(UiTheme.ACCENT, Math.round(22 * onv)),
+					Ui.withAlpha(UiTheme.ACCENT_DEEP, Math.round(7 * onv)));
 		}
-		Ui.surfaceEdge(g, x, y, w, h, r,
-				Ui.lerpColor(UiTheme.BORDER, UiTheme.ACCENT, onv * 0.55f),
-				Ui.lerpColor(UiTheme.BORDER, 0x00FFFFFF, 0.35f));
-		Ui.innerBevel(g, x, y, w, h, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
+		// A hairline, not a heavy frame.
+		Ui.surfaceEdge(c, x, y, w, h, r,
+				Ui.lerpColor(Ui.withAlpha(UiTheme.BORDER, 0xA8), Ui.withAlpha(UiTheme.ACCENT, 0xB0), onv * 0.8f),
+				Ui.withAlpha(UiTheme.BORDER, 0x60));
+		Ui.innerBevel(c, x, y, w, h, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 
-		// Leading accent bar while enabled.
+		// The leading accent bar marks the enabled state.
 		if (onv > 0.02f) {
-			int barH = Math.max(6, Math.round((h - 16) * onv));
+			int barH = Math.round((h - 22) * onv);
 			int barY = y + (h - barH) / 2;
-			Ui.surface(g, x + 1, barY, 3, barH, 2,
+			Ui.surface(c, x + 1, barY, 3, barH, 2,
 					Ui.withAlpha(UiTheme.ACCENT, Math.round(255 * onv)),
 					Ui.withAlpha(UiTheme.ACCENT_DEEP, Math.round(255 * onv)));
 		}
 
-		// Name + description, two-line hierarchy.
-		int textX = x + UiTheme.SP_4 + 2;
-		int nameY = y + 10;
-		int textRight = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3;
+		// Name and description, aligned on one left edge.
+		UiText medium = type.medium();
+		UiText regular = type.regular();
+		int textX = x + UiTheme.SP_6;
+		int textRight = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W - UiTheme.SP_4;
 		if (hasSettings()) {
 			textRight -= CHEVRON_W;
 		}
-		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.7f));
-		Ui.drawEllipsized(g, UiFonts.medium(), title, textX, nameY, textRight - textX, nameColor);
-
 		String desc = showCategory ? taggedDescription : description;
-		if (desc != null && !desc.isEmpty()) {
-			Ui.drawEllipsized(g, UiFonts.regular(), desc, textX, nameY + DESC_H, textRight - textX, UiTheme.TEXT_3);
+		boolean hasDesc = desc != null && !desc.isEmpty();
+		int nameY = hasDesc ? y + 11 : y + (UiTheme.CARD_H - medium.lineHeight()) / 2;
+		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.8f));
+		Ui.drawEllipsized(c, medium, title, textX, nameY, textRight - textX, nameColor);
+		if (hasDesc) {
+			Ui.drawEllipsized(c, regular, desc, textX, nameY + DESC_H, textRight - textX, UiTheme.TEXT_3);
 		}
 
-		// Settings chevron (small, left of the switch).
+		// The settings chevron sits between the name and the switch.
 		if (hasSettings()) {
-			int cx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3 - CHEVRON_W + 2;
-			int cy = y + UiTheme.CARD_H / 2 - 6;
-			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT, Math.max(hv, expand.value() * 0.7f));
-			UiIcons.chevron(g, cx, cy, 11, chev, expand.value());
+			int cx = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W - UiTheme.SP_4 + 2;
+			int cy = y + (UiTheme.CARD_H - 12) / 2;
+			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT, Math.max(hv, expand.value() * 0.8f));
+			UiIcons.chevron(c, cx, cy, 12, chev, expand.value());
 		}
 
-		// Switch.
-		int tx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W;
+		// The switch.
+		int tx = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W;
 		int ty = y + (UiTheme.CARD_H - UiTheme.TOGGLE_H) / 2;
 		toggle.update(module.isEnabled(), hovered, delta);
-		toggle.render(g, tx, ty, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
+		toggle.render(c, tx, ty, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
 
-		// Settings well: an inset surface holding the setting rows.
+		// The settings well: an inset surface that holds the setting rows.
 		int full = settingsFullHeight();
 		if (full > 0 && expand.value() > 0.01f) {
 			int clipH = Math.round(full * expand.value());
-			if (Ui.beginClip(g, x + 1, y + UiTheme.CARD_H, w - 2, clipH)) {
-				int wy = y + UiTheme.CARD_H;
-				Ui.surface(g, x + UiTheme.SP_3, wy, w - UiTheme.SP_3 * 2, full - 2, UiTheme.RADIUS,
-						UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
-				Ui.outline(g, x + UiTheme.SP_3, wy, w - UiTheme.SP_3 * 2, full - 2, UiTheme.RADIUS, 0x33FFFFFF);
+			c.pushClip(x + 1, y + UiTheme.CARD_H, w - 2, clipH);
+			int wy = y + UiTheme.CARD_H;
+			int inset = UiTheme.SP_3;
+			Ui.surface(c, x + inset, wy, w - inset * 2, full - 2, UiTheme.RADIUS,
+					UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
+			Ui.outline(c, x + inset, wy, w - inset * 2, full - 2, UiTheme.RADIUS, 0x26FFFFFF);
 
-				int cy = wy + PAD;
-				for (Setting<?> s : module.settings()) {
-					cy += renderSetting(g, s, x, w, cy, mouseX, mouseY, delta);
-				}
-				Ui.endClip(g);
+			int cy = wy + PAD;
+			for (Setting<?> s : module.settings()) {
+				cy += renderSetting(c, type, s, x, w, cy, mouseX, mouseY, delta);
 			}
+			c.popClip();
 		}
 	}
 
 	/** Renders one setting row and returns the height it consumed. */
-	private int renderSetting(GuiGraphics g, Setting<?> s, int x, int w, int rowY, int mouseX, int mouseY, float delta) {
-		Font regular = UiFonts.regular();
-		int contentX = x + UiTheme.SP_4 + 4;
-		int contentW = w - UiTheme.SP_4 * 2 - 8;
+	private int renderSetting(UiCanvas c, UiType type, Setting<?> s, int x, int w, int rowY, int mouseX, int mouseY, float delta) {
+		UiText regular = type.regular();
+		int contentX = x + UiTheme.SP_6;
+		int contentW = w - UiTheme.SP_6 * 2;
 
 		if (s instanceof SliderSetting slider) {
 			UiSlider ui = sliders.get(slider);
 			int trackX0 = contentX;
-			int trackX1 = x + w - UiTheme.SP_4 - 4;
-			int trackY = rowY + 24;
+			int trackX1 = x + w - UiTheme.SP_6;
+			int trackY = rowY + 28;
 			ui.bind(sliderLabels.get(slider), sliderValueText(slider), trackX0, trackX1, trackY);
-			ui.render(g, regular, trackX0, trackX1 - trackX0);
+			ui.render(c, regular, trackX0, trackX1 - trackX0);
 			sliderBounds.put(slider, new int[]{trackX0, trackX1, rowY, rowY + ROW_SLIDER});
 			return ROW_SLIDER;
 		}
@@ -328,22 +318,22 @@ public class ModuleCard {
 			String label = settingLabel(bool.key());
 			int tw = UiTheme.TOGGLE_W;
 			int th = UiTheme.TOGGLE_H;
-			int tx = x + w - UiTheme.SP_4 - 4 - tw;
+			int tx = x + w - UiTheme.SP_6 - tw;
 			int ty = rowY + (ROW_TOGGLE - th) / 2;
-			boolean rowHovered = mouseX >= contentX && mouseX < x + w - UiTheme.SP_4 - 4
+			boolean rowHovered = mouseX >= contentX && mouseX < x + w - UiTheme.SP_6
 					&& mouseY >= rowY && mouseY < rowY + ROW_TOGGLE;
 			sw.update(bool.value(), rowHovered, delta);
-			sw.render(g, tx, ty, tw, th);
-			Ui.drawEllipsized(g, regular, label, contentX, rowY + (ROW_TOGGLE - regular.lineHeight) / 2,
+			sw.render(c, tx, ty, tw, th);
+			Ui.drawEllipsized(c, regular, label, contentX, rowY + (ROW_TOGGLE - regular.lineHeight()) / 2,
 					(tx - contentX) - UiTheme.SP_3, rowHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
-			switchBounds.put(bool, new int[]{contentX, x + w - UiTheme.SP_4 - 4, rowY, rowY + ROW_TOGGLE});
+			switchBounds.put(bool, new int[]{contentX, x + w - UiTheme.SP_6, rowY, rowY + ROW_TOGGLE});
 			return ROW_TOGGLE;
 		}
 
 		if (s instanceof WatchlistSetting watch) {
 			UiWatchlist ui = watchlists.get(watch);
 			ui.bind(contentX, rowY, contentW);
-			ui.render(g, regular, contentX, rowY, contentW, mouseX, mouseY, delta);
+			ui.render(c, regular, contentX, rowY, contentW, mouseX, mouseY, delta);
 			return settingHeight(s);
 		}
 
@@ -357,8 +347,8 @@ public class ModuleCard {
 
 	private String unitFor(SliderSetting slider) {
 		String key = "capy.module." + module.id() + "." + slider.key() + ".unit";
-		String s = net.minecraft.network.chat.Component.translatable(key).getString();
-		return s.equals(key) ? "" : s;
+		String s = UiLabels.translate(key, null);
+		return s == null ? "" : s;
 	}
 
 	// ---------------------------------------------------------------- input

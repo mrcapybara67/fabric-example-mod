@@ -1,23 +1,60 @@
 package com.capy.client.gui;
 
 import java.util.Random;
-import net.minecraft.client.gui.GuiGraphics;
 
 /**
- * Cherry blossom petals that drift across the screen while the GUI is open.
+ * Cherry blossom petals.
  *
- * They are drawn *behind* the window, so they can never cover a label or
- * intercept a click — they simply fall past the panel. The whole system lives
- * inside the screen instance, so it stops the moment the GUI closes and no
- * animation loop survives it.
+ * The system is a fixed pool of petal objects that are recycled for the whole
+ * lifetime of the owner — nothing is allocated per frame. Each petal carries
+ * its own position, drift, fall speed, rotation, rotation speed, scale, shape
+ * variant, colour and sway, so the motion looks organic but stays
+ * deterministic (the pool is seeded, so a session always looks the same).
+ *
+ * Three depth layers give the scene its depth:
+ * <ul>
+ *   <li>{@code BACK} — small, faint petals far behind the interface;</li>
+ *   <li>{@code MID} — medium petals drifting through the workspace;</li>
+ *   <li>{@code FRONT} — a few larger, softer petals that pass in front of
+ *       the panels.</li>
+ * </ul>
+ *
+ * The system is inert unless it is updated, so a closed screen costs nothing.
  */
 public final class UiPetals {
-	private static final int MAX_PETALS = 22;
+	/** Maximum number of live petals. */
+	public static final int CAPACITY = 64;
 
-	private final Petal[] petals = new Petal[MAX_PETALS];
-	private final Random random = new Random(0x5A4B1C);
-	private int width;
-	private int height;
+	/** Depth layer of a petal. */
+	public enum Layer {
+		BACK(0.75f, 0.58f, 2.0f, 4.5f, 0.34f),
+		MID(1.0f, 0.72f, 3.5f, 7.0f, 0.55f),
+		FRONT(1.3f, 0.46f, 7.0f, 13.0f, 0.40f);
+
+		final float scale;
+		final float alpha;
+		final float sizeMin;
+		final float sizeMax;
+		final float speed;
+
+		Layer(float scale, float alpha, float sizeMin, float sizeMax, float speed) {
+			this.scale = scale;
+			this.alpha = alpha;
+			this.sizeMin = sizeMin;
+			this.sizeMax = sizeMax;
+			this.speed = speed;
+		}
+	}
+
+	/** Petal silhouette variants. */
+	public enum Shape {
+		/** Wide, notched petal - the classic cherry blossom petal. */
+		NOTCHED,
+		/** Narrow teardrop. */
+		SLIM,
+		/** Rounded, almost circular petal. */
+		ROUND
+	}
 
 	private static final class Petal {
 		float x;
@@ -26,73 +63,206 @@ public final class UiPetals {
 		float vy;
 		float rotation;
 		float spin;
+		float scale;
 		float size;
+		float alpha;
+		float swayPhase;
+		float swayAmount;
 		float life;
+		float maxLife;
 		int color;
+		Layer layer;
+		Shape shape;
 	}
 
-	/** (Re)seeds the petals for a screen of the given size. */
-	public void reset(int width, int height) {
-		this.width = width;
-		this.height = height;
-		for (int i = 0; i < petals.length; i++) {
-			Petal petal = petals[i];
-			if (petal == null) {
-				petal = new Petal();
-				petals[i] = petal;
-			}
-			respawn(petal, random.nextFloat() * height);
-			petal.life = random.nextFloat();
+	private final Petal[] pool = new Petal[CAPACITY];
+	private final Random random = new Random(0x5A4B1C0L);
+	private int live;
+	private float width;
+	private float height;
+
+	public UiPetals() {
+		for (int i = 0; i < pool.length; i++) {
+			pool[i] = new Petal();
 		}
 	}
 
-	private void respawn(Petal petal, float y) {
-		petal.x = random.nextFloat() * Math.max(1, width);
-		petal.y = y;
-		petal.vx = -6f - random.nextFloat() * 10f;
-		petal.vy = 8f + random.nextFloat() * 16f;
-		petal.rotation = random.nextFloat() * 6.28f;
-		petal.spin = (random.nextFloat() - 0.5f) * 1.4f;
-		petal.size = 1.6f + random.nextFloat() * 1.8f;
-		petal.color = random.nextFloat() < 0.35f
-				? Ui.withAlpha(UiTheme.ACCENT_2, 0x6E)
-				: Ui.withAlpha(UiTheme.ACCENT, 0x59);
+	/**
+	 * Prepares the pool for a screen of the given size and fills it with
+	 * drifting petals.
+	 */
+	public void reset(int width, int height) {
+		this.width = width;
+		this.height = height;
+		this.live = 0;
+		for (int i = 0; i < pool.length; i++) {
+			Layer layer = layerFor(i);
+			spawn(pool[i], layer, random.nextFloat() * height, true);
+		}
+		this.live = pool.length;
 	}
 
-	/** Advances the petals and recycles the ones that leave the screen. */
+	/** Advances every petal. */
 	public void update(float delta, int width, int height) {
 		this.width = width;
 		this.height = height;
 		float dt = Math.min(0.1f, delta);
-		for (Petal petal : petals) {
-			if (petal == null) {
+		for (Petal petal : pool) {
+			if (petal == null || petal.maxLife <= 0) {
 				continue;
 			}
-			petal.x += petal.vx * dt;
+			petal.life += dt;
+			if (petal.life >= petal.maxLife) {
+				// The petal has settled: recycle it at the top.
+				spawn(petal, petal.layer, -6f, false);
+				continue;
+			}
+			petal.swayPhase += dt * petal.swayAmount;
+			float sway = (float) Math.sin(petal.swayPhase) * 9.0f;
+			petal.x += (petal.vx + sway) * dt;
 			petal.y += petal.vy * dt;
 			petal.rotation += petal.spin * dt;
-			petal.life += dt * 0.28f;
-			if (petal.y > height + 12 || petal.x < -12) {
-				respawn(petal, -8f);
-				petal.life = 0f;
+			if (petal.y > height + 20 || petal.x < -30 || petal.x > width + 30) {
+				spawn(petal, petal.layer, -8f, false);
 			}
 		}
 	}
 
-	/** Draws every petal. */
-	public void render(GuiGraphics g) {
-		for (Petal petal : petals) {
-			if (petal == null) {
+	/** Draws every petal of the given layer. */
+	public void render(UiCanvas canvas, Layer layer, float alpha) {
+		if (alpha <= 0.01f) {
+			return;
+		}
+		for (Petal petal : pool) {
+			if (petal == null || petal.layer != layer || petal.maxLife <= 0) {
 				continue;
 			}
-			// Fade in and out over the petal's life so nothing pops.
-			float fade = petal.life < 0.25f ? petal.life / 0.25f
-					: (petal.life > 0.8f ? Math.max(0f, (1f - petal.life) / 0.2f) : 1f);
+			float fade = fade(petal);
 			if (fade <= 0.02f) {
 				continue;
 			}
-			int color = Ui.withAlpha(petal.color, Math.round(((petal.color >>> 24) & 0xFF) * fade));
-			UiIcons.petal(g, petal.x, petal.y, petal.size, petal.rotation, color);
+			int color = Ui.fadeAlpha(petal.color, fade * alpha);
+			drawPetal(canvas, petal, color);
+		}
+	}
+
+	/** Draws every layer, back to front. */
+	public void renderAll(UiCanvas canvas, float alpha) {
+		render(canvas, Layer.BACK, alpha);
+		render(canvas, Layer.MID, alpha);
+		render(canvas, Layer.FRONT, alpha);
+	}
+
+	/**
+	 * Releases a burst of petals from a point, used when the alert portrait
+	 * appears. The burst reuses pooled objects, so it never allocates.
+	 */
+	public void burst(float x, float y, int count, float strength) {
+		for (int i = 0; i < count; i++) {
+			Petal petal = null;
+			for (Petal candidate : pool) {
+				if (candidate.maxLife <= 0) {
+					petal = candidate;
+					break;
+				}
+			}
+			if (petal == null) {
+				petal = pool[random.nextInt(pool.length)];
+			}
+			double angle = -Math.PI / 2 + (random.nextFloat() - 0.5) * 2.4;
+			float speed = (28f + random.nextFloat() * 34f) * strength;
+			spawn(petal, Layer.FRONT, y, false);
+			petal.x = x + (random.nextFloat() - 0.5f) * 18f;
+			petal.y = y + (random.nextFloat() - 0.5f) * 12f;
+			petal.vx = (float) Math.cos(angle) * speed;
+			petal.vy = (float) Math.sin(angle) * speed;
+			petal.spin = (random.nextFloat() - 0.5f) * 5.5f;
+			petal.swayAmount = 1.4f + random.nextFloat() * 2.2f;
+			petal.maxLife = 1.1f + random.nextFloat() * 0.8f;
+			petal.life = 0f;
+		}
+	}
+
+	/** True when the pool holds petals that are still moving. */
+	public boolean isActive() {
+		for (Petal petal : pool) {
+			if (petal != null && petal.maxLife > 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// --------------------------------------------------------------- internals
+
+	private Layer layerFor(int index) {
+		if (index < CAPACITY * 0.47f) {
+			return Layer.BACK;
+		}
+		if (index < CAPACITY * 0.85f) {
+			return Layer.MID;
+		}
+		return Layer.FRONT;
+	}
+
+	private void spawn(Petal petal, Layer layer, float y, boolean scattered) {
+		petal.layer = layer;
+		petal.shape = Shape.values()[random.nextInt(Shape.values().length)];
+		petal.scale = layer.scale * (0.8f + random.nextFloat() * 0.5f);
+		petal.size = layer.sizeMin + random.nextFloat() * (layer.sizeMax - layer.sizeMin);
+		petal.x = random.nextFloat() * Math.max(1f, width);
+		petal.y = y;
+		petal.vx = (-6f - random.nextFloat() * 10f) * layer.speed;
+		petal.vy = (10f + random.nextFloat() * 16f) * layer.speed;
+		petal.rotation = random.nextFloat() * 6.283f;
+		petal.spin = (random.nextFloat() - 0.5f) * 1.6f;
+		petal.swayPhase = random.nextFloat() * 6.283f;
+		petal.swayAmount = 0.5f + random.nextFloat() * 1.4f;
+		petal.life = 0f;
+		petal.maxLife = scattered ? 6f + random.nextFloat() * 8f : 5f + random.nextFloat() * 7f;
+		petal.color = random.nextFloat() < 0.4f
+				? UiTheme.ACCENT_2
+				: UiTheme.ACCENT;
+		petal.alpha = layer.alpha;
+	}
+
+	/** Fade in at the start of a petal's life, fade out at the end. */
+	private float fade(Petal petal) {
+		float in = Math.min(1f, petal.life / 0.8f);
+		float out = Math.min(1f, (petal.maxLife - petal.life) / 1.4f);
+		return Math.max(0f, Math.min(in, out)) * petal.alpha;
+	}
+
+	/**
+	 * Draws one petal.
+	 *
+	 * A petal is a tapered almond: three overlapping discs along the major
+	 * axis, the outer ones smaller so the shape comes to a point. Building it
+	 * from discs keeps the edge smooth at any rotation, which a per row
+	 * ellipse cannot do.
+	 */
+	private void drawPetal(UiCanvas c, Petal petal, int color) {
+		float size = petal.size;
+		float aspect = petal.shape == Shape.SLIM ? 0.42f : (petal.shape == Shape.ROUND ? 0.86f : 0.62f);
+		float minor = size * aspect;
+		float rr = minor * 0.5f;
+		double angle = petal.rotation;
+
+		if (rr < 0.7f) {
+			// Too small for a shape: a single soft dot.
+			c.fill((int) petal.x, (int) petal.y, (int) petal.x + 2, (int) petal.y + 2, color);
+			return;
+		}
+		float major = size;
+		float reach = Math.max(0f, major * 0.5f - rr);
+		final int steps = 3;
+		for (int i = 0; i < steps; i++) {
+			float t = (i / (float) (steps - 1)) * 2f - 1f;
+			float ox = t * reach;
+			float px = petal.x + (float) (ox * Math.cos(angle));
+			float py = petal.y + (float) (ox * Math.sin(angle));
+			int rad = Math.max(1, Math.round(rr * (1f - 0.30f * Math.abs(t))));
+			Ui.circle(c, (int) Math.round(px), (int) Math.round(py), rad, color);
 		}
 	}
 }

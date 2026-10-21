@@ -10,12 +10,12 @@ import java.util.UUID;
  * per player.
  *
  * The rules are deliberately simple:
- *   - a player who is inside the radius raises an alert the first time they
- *     are seen;
- *   - while that player stays nearby the alert is not raised again until the
- *     cooldown has passed, so one admin walking around cannot spam the
+ *   - a watched player the client can observe raises an alert the first time
+ *     they are seen;
+ *   - while that player stays observable the alert is not raised again until
+ *     the cooldown has passed, so one player walking around cannot spam the
  *     screen;
- *   - a different admin takes over immediately, because that is the more
+ *   - a different player takes over immediately, because that is the more
  *     urgent situation.
  */
 public final class AlertManager {
@@ -36,26 +36,27 @@ public final class AlertManager {
 	/**
 	 * Raises an alert when the cooldown allows it.
 	 *
-	 * @param candidates watched players inside the radius, nearest first
+	 * @param matches watched players the client can observe, strongest first
 	 * @param cooldownMs cooldown between two alerts for the same player
 	 * @param onAlert called when a new alert is raised (used for the sound)
 	 */
-	public void update(List<AdminDetector.Candidate> candidates, long cooldownMs, Runnable onAlert, long now) {
+	public boolean update(List<AdminDetector.Match> matches, long cooldownMs, Runnable onAlert, long now) {
 		if (active != null && active.finished(now)) {
 			active = null;
 		}
-		if (candidates.isEmpty()) {
-			return;
+		if (matches.isEmpty()) {
+			return false;
 		}
-		AdminDetector.Candidate nearest = candidates.get(0);
-		long last = lastAlertAt.getOrDefault(nearest.uuid(), Long.MIN_VALUE / 2);
+		AdminDetector.Match strongest = matches.get(0);
+		long last = lastAlertAt.getOrDefault(strongest.uuid(), Long.MIN_VALUE / 2);
 		if (now - last < cooldownMs) {
-			return;
+			return false;
 		}
-		lastAlertAt.put(nearest.uuid(), now);
-		active = new AdminAlert(nearest, now);
+		lastAlertAt.put(strongest.uuid(), now);
+		active = new AdminAlert(strongest, now);
 		if (onAlert != null) {
 			onAlert.run();
 		}
+		return true;
 	}
 }

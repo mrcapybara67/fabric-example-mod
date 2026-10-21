@@ -56,6 +56,8 @@ public final class UiTheme {
 			int accentSoft,
 			int accentDeep,
 			int accentGlow,
+			int blossom,
+			int paleCherry,
 			int text,
 			int textSecondary,
 			int textMuted,
@@ -68,24 +70,26 @@ public final class UiTheme {
 			"sakura",
 			"Sakura",
 			0x8C0A0710,
-			0xFF1B1620,
-			0xFF120E15,
-			0xFF221B25,
-			0xFF1B1520,
-			0xFF2B202C,
-			0xFF261E2A,
-			0xFF1F1822,
-			0xFF32283A,
-			0xFF271D2E,
-			0xFF1A141F,
-			0xFF151019,
-			0xFF1E1724,
-			0xFF18121D,
+			0xFF221B28,
+			0xFF171220,
+			0xFF2B2231,
+			0xFF231B29,
+			0xFF332838,
+			0xFF322839,
+			0xFF281F2E,
+			0xFF3D3147,
+			0xFF302639,
+			0xFF1D1624,
+			0xFF17111C,
+			0xFF241D2B,
+			0xFF1D1624,
 			0xFF463342,
 			0xFFFF8FB8,
 			0xFFFFC4D8,
 			0xFFD9578B,
 			0x33FF8FB8,
+			0xFFFFD1E1,
+			0xFFFFEAF1,
 			0xFFFFF4F8,
 			0xFFBBAAB7,
 			0xFF8A7A88,
@@ -97,24 +101,26 @@ public final class UiTheme {
 			"sakura_deep",
 			"Deep Sakura",
 			0x9A06050C,
-			0xFF130F18,
-			0xFF0A080E,
-			0xFF1A1520,
-			0xFF14101A,
-			0xFF221A28,
-			0xFF1F1928,
-			0xFF18121F,
-			0xFF2B2136,
-			0xFF201829,
-			0xFF140F1A,
-			0xFF100C15,
-			0xFF1A1422,
-			0xFF140E1B,
+			0xFF1A1522,
+			0xFF0D0A11,
+			0xFF221B2B,
+			0xFF1A1523,
+			0xFF2A2133,
+			0xFF282031,
+			0xFF1E1928,
+			0xFF362A44,
+			0xFF2A2135,
+			0xFF171120,
+			0xFF120E18,
+			0xFF20182A,
+			0xFF181222,
 			0xFF3B2B3A,
 			0xFFFF74A8,
 			0xFFFFB3D2,
 			0xFFC23A70,
 			0x33FF74A8,
+			0xFFFFC2DC,
+			0xFFFFE2EE,
 			0xFFFFF4F8,
 			0xFFBBAAB7,
 			0xFF877787,
@@ -126,24 +132,26 @@ public final class UiTheme {
 			"sakura_blush",
 			"Blush Sakura",
 			0x8A140A14,
-			0xFF231B25,
-			0xFF1A141C,
-			0xFF2C2230,
-			0xFF251C29,
-			0xFF35293A,
-			0xFF302633,
-			0xFF281F2C,
-			0xFF3C3145,
-			0xFF302638,
-			0xFF201829,
-			0xFF1A1422,
-			0xFF241C2B,
-			0xFF1E1724,
+			0xFF2B2230,
+			0xFF1F1824,
+			0xFF342939,
+			0xFF2A2130,
+			0xFF3C3044,
+			0xFF3A2D40,
+			0xFF302636,
+			0xFF473A52,
+			0xFF392C3F,
+			0xFF241C2C,
+			0xFF1D1626,
+			0xFF2A2130,
+			0xFF221A29,
 			0xFF513C4D,
 			0xFFFFA0C4,
 			0xFFFFD3E4,
 			0xFFE0699A,
 			0x33FFA0C4,
+			0xFFFFD8E8,
+			0xFFFFEFF5,
 			0xFFFFF6FA,
 			0xFFC7B4C2,
 			0xFF95838F,
@@ -214,6 +222,10 @@ public final class UiTheme {
 	public static int ACCENT_DEEP = active.accentDeep();
 	/** Very low alpha accent for washes and bloom. */
 	public static int ACCENT_GLOW = active.accentGlow();
+	/** Blossom highlight - the lightest pink, used on fine details. */
+	public static int BLOSSOM = active.blossom();
+	/** Pale cherry - a near white pink for the brightest highlights. */
+	public static int PALE_CHERRY = active.paleCherry();
 
 	// ---- Text -------------------------------------------------------------
 	public static int TEXT = active.text();
@@ -228,29 +240,33 @@ public final class UiTheme {
 	public static int SHADOW_MID = 0x38000000;
 	public static int SHADOW_TIGHT = 0x44000000;
 
-	// ---- Spacing scale (2 / 4 / 8 / 12 / 16) -----------------------------
+	// ---- Spacing scale (2 / 4 / 6 / 8 / 12 / 16 / 20 / 24) ---------------
 	public static final int SP_1 = 2;
 	public static final int SP_2 = 4;
-	public static final int SP_3 = 8;
-	public static final int SP_4 = 12;
-	public static final int SP_5 = 16;
+	public static final int SP_3 = 6;
+	public static final int SP_4 = 8;
+	public static final int SP_5 = 12;
+	public static final int SP_6 = 16;
+	public static final int SP_7 = 20;
+	public static final int SP_8 = 24;
 
 	// ---- Radii ------------------------------------------------------------
-	public static final int RADIUS = 8;       // controls, cards
-	public static final int RADIUS_LG = 12;   // inner panels
-	public static final int RADIUS_XL = 18;   // window shell
-	public static final int RADIUS_PILL = 99; // clamped by Ui.roundRect
+	public static final int RADIUS = 10;      // controls
+	public static final int RADIUS_LG = 14;   // inner panels
+	public static final int RADIUS_XL = 20;   // window shell
+	public static final int RADIUS_PILL = 99; // clamped by the drawing layer
 
 	// ---- Layout -----------------------------------------------------------
-	public static final int HEADER_H = 52;
-	public static final int SIDEBAR_W = 168;
-	public static final int CARD_H = 46;
-	public static final int CARD_GAP = 8;
-	public static final int TOGGLE_W = 38;
-	public static final int TOGGLE_H = 20;
-	public static final int SEARCH_W = 172;
-	public static final int SEARCH_H = 28;
-	public static final int CLOSE_BTN = 24;
+	public static final int HEADER_H = 58;
+	public static final int SIDEBAR_W = 190;
+	public static final int CARD_H = 54;
+	public static final int CARD_GAP = 10;
+	public static final int TOGGLE_W = 40;
+	public static final int TOGGLE_H = 22;
+	public static final int SEARCH_W = 190;
+	public static final int SEARCH_H = 30;
+	public static final int CLOSE_BTN = 26;
+	public static final int CATEGORY_H = 34;
 
 	/** Copies the palette values into the mutable token fields above. */
 	private static void refresh() {
@@ -273,6 +289,8 @@ public final class UiTheme {
 		ACCENT_2 = active.accentSoft();
 		ACCENT_DEEP = active.accentDeep();
 		ACCENT_GLOW = active.accentGlow();
+		BLOSSOM = active.blossom();
+		PALE_CHERRY = active.paleCherry();
 		TEXT = active.text();
 		TEXT_2 = active.textSecondary();
 		TEXT_3 = active.textMuted();

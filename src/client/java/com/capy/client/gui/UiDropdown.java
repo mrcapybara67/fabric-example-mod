@@ -1,8 +1,6 @@
 package com.capy.client.gui;
 
 import java.util.List;
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
 
 /**
  * Dropdown control: a compact selector that opens a list of options.
@@ -59,7 +57,7 @@ public class UiDropdown {
 		this.upward = upward;
 	}
 
-	/** Height of the open list, including its padding. */
+	/** Height of the open list, including its paddinc. */
 	public int overlayHeight() {
 		return options.size() * ROW_H + PAD * 2;
 	}
@@ -108,26 +106,26 @@ public class UiDropdown {
 	}
 
 	/** Draws the collapsed control. */
-	public void render(GuiGraphics g, Font font, int mouseX, int mouseY, float delta) {
+	public void render(UiCanvas c, UiText font, int mouseX, int mouseY, float delta) {
 		open.to(expanded ? 1f : 0f, delta);
 		boolean hovered = contains(mouseX, mouseY);
 		int r = UiTheme.RADIUS;
 
 		int top = Ui.lerpColor(UiTheme.TRACK_TOP, UiTheme.PANEL_ALT, hovered ? 0.6f : 0f);
 		int bottom = Ui.lerpColor(UiTheme.TRACK_BOTTOM, UiTheme.PANEL_TOP, hovered ? 0.6f : 0f);
-		Ui.surface(g, x, y, w, h, r, top, bottom);
-		Ui.surfaceEdge(g, x, y, w, h, r, 0x2EFFFFFF, 0x12FFFFFF);
+		Ui.surface(c, x, y, w, h, r, top, bottom);
+		Ui.surfaceEdge(c, x, y, w, h, r, 0x2EFFFFFF, 0x12FFFFFF);
 
 		int tx = x + UiTheme.SP_3;
-		int ty = y + (h - font.lineHeight) / 2;
-		Ui.drawEllipsized(g, font, selectedLabel(), tx, ty, w - UiTheme.SP_3 * 2 - 10, UiTheme.TEXT_2);
+		int ty = y + (h - font.lineHeight()) / 2;
+		Ui.drawEllipsized(c, font, selectedLabel(), tx, ty, w - UiTheme.SP_3 * 2 - 10, UiTheme.TEXT_2);
 
-		UiIcons.chevron(g, x + w - 14, y + (h - 8) / 2, 8,
+		UiIcons.chevron(c, x + w - 14, y + (h - 8) / 2, 8,
 				Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT, open.value()), open.value());
 	}
 
 	/** Draws the open list. Called after the rest of the interface. */
-	public void renderOverlay(GuiGraphics g, Font font, int mouseX, int mouseY, float delta) {
+	public void renderOverlay(UiCanvas c, UiText font, int mouseX, int mouseY, float delta) {
 		open.to(expanded ? 1f : 0f, delta);
 		float t = open.value();
 		if (t <= 0.02f) {
@@ -136,25 +134,25 @@ public class UiDropdown {
 		int oy = overlayY();
 		int oh = overlayHeight();
 
-		Ui.shadow(g, x, oy, w, oh, UiTheme.RADIUS);
-		Ui.surface(g, x, oy, w, oh, UiTheme.RADIUS,
+		Ui.shadow(c, x, oy, w, oh, UiTheme.RADIUS);
+		Ui.surface(c, x, oy, w, oh, UiTheme.RADIUS,
 				Ui.withAlpha(UiTheme.PANEL_ALT, Math.round(255 * t)),
 				Ui.withAlpha(UiTheme.PANEL_TOP, Math.round(255 * t)));
-		Ui.outline(g, x, oy, w, oh, UiTheme.RADIUS, Ui.withAlpha(UiTheme.BORDER, Math.round(255 * t)));
+		Ui.outline(c, x, oy, w, oh, UiTheme.RADIUS, Ui.withAlpha(UiTheme.BORDER, Math.round(255 * t)));
 
 		for (int i = 0; i < options.size(); i++) {
 			int rowY = oy + PAD + i * ROW_H;
 			boolean hovered = mouseY >= rowY && mouseY < rowY + ROW_H
 					&& mouseX >= x && mouseX < x + w;
 			if (hovered) {
-				Ui.roundRect(g, x + 1, rowY, w - 2, ROW_H, UiTheme.RADIUS,
+				Ui.roundRect(c, x + 1, rowY, w - 2, ROW_H, UiTheme.RADIUS,
 						Ui.withAlpha(UiTheme.ACCENT, 0x2E));
 			}
 			int color = i == selected ? UiTheme.ACCENT : (hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
-			Ui.drawEllipsized(g, font, options.get(i), x + UiTheme.SP_3, rowY + (ROW_H - font.lineHeight) / 2,
+			Ui.drawEllipsized(c, font, options.get(i), x + UiTheme.SP_3, rowY + (ROW_H - font.lineHeight()) / 2,
 					w - UiTheme.SP_3 * 2 - 12, color);
 			if (i == selected) {
-				UiIcons.draw(g, UiIcons.Icon.CHECK, x + w - 14, rowY + (ROW_H - 8) / 2, 8, UiTheme.ACCENT);
+				UiIcons.draw(c, UiIcons.Icon.CHECK, x + w - 14, rowY + (ROW_H - 8) / 2, 8, UiTheme.ACCENT);
 			}
 		}
 	}

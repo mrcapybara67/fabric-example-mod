@@ -1,7 +1,5 @@
 package com.capy.client.gui;
 
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import org.lwjgl.glfw.GLFW;
@@ -102,7 +100,7 @@ public class UiTextField {
 		return false;
 	}
 
-	public void render(GuiGraphics g, Font font, int mouseX, int mouseY, float delta) {
+	public void render(UiCanvas c, UiText font, int mouseX, int mouseY, float delta) {
 		focus.to(focused ? 1f : 0f, delta);
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
 		hover.to(hovered ? 1f : 0f, delta);
@@ -111,28 +109,28 @@ public class UiTextField {
 		int r = UiTheme.RADIUS;
 
 		if (f > 0.02f) {
-			Ui.roundRect(g, x - 3, y - 3, w + 6, h + 6, r + 3,
+			Ui.roundRect(c, x - 3, y - 3, w + 6, h + 6, r + 3,
 					Ui.lerpColor(0x00000000, UiTheme.ACCENT_GLOW, f * 0.9f));
 		}
 
 		int top = Ui.lerpColor(UiTheme.TRACK_TOP, UiTheme.PANEL_ALT, Math.max(f, hover.value() * 0.5f));
 		int bottom = Ui.lerpColor(UiTheme.TRACK_BOTTOM, UiTheme.PANEL_TOP, Math.max(f, hover.value() * 0.5f));
-		Ui.surface(g, x, y, w, h, r, top, bottom);
-		Ui.surfaceEdge(g, x, y, w, h, r,
+		Ui.surface(c, x, y, w, h, r, top, bottom);
+		Ui.surfaceEdge(c, x, y, w, h, r,
 				Ui.lerpColor(0x30FFFFFF, 0x99FFFFFF, f),
 				Ui.lerpColor(0x10FFFFFF, 0x30FFFFFF, f));
 
 		int tx = x + UiTheme.SP_3;
-		int ty = y + (h - font.lineHeight) / 2;
+		int ty = y + (h - font.lineHeight()) / 2;
 		if (text.isEmpty()) {
-			g.drawString(font, placeholder, tx, ty, UiTheme.PLACEHOLDER, false);
+			font.draw(c, placeholder, tx, ty, UiTheme.PLACEHOLDER);
 		} else {
-			Ui.drawEllipsized(g, font, text, tx, ty, w - UiTheme.SP_3 * 2, UiTheme.TEXT);
+			Ui.drawEllipsized(c, font, text, tx, ty, w - UiTheme.SP_3 * 2, UiTheme.TEXT);
 		}
 
 		if (focused && (System.currentTimeMillis() / 530L) % 2L == 0L) {
 			int cx = text.isEmpty() ? tx : tx + font.width(text);
-			g.fill(cx, ty - 1, cx + 1, ty + font.lineHeight + 1, UiTheme.ACCENT);
+			c.fill(cx, ty - 1, cx + 1, ty + font.lineHeight() + 1, UiTheme.ACCENT);
 		}
 	}
 }

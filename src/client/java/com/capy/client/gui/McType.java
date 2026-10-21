@@ -1,0 +1,38 @@
+package com.capy.client.gui;
+
+/**
+ * {@link UiType} backed by the bundled Inter faces.
+ */
+public final class McType implements UiType {
+	private final UiText regular;
+	private final UiText medium;
+	private final UiText bold;
+	private final UiText display;
+
+	public McType() {
+		this.regular = new McText(UiFonts.regular());
+		this.medium = new McText(UiFonts.medium());
+		this.bold = new McText(UiFonts.bold());
+		this.display = new McText(UiFonts.display());
+	}
+
+	@Override
+	public UiText regular() {
+		return regular;
+	}
+
+	@Override
+	public UiText medium() {
+		return medium;
+	}
+
+	@Override
+	public UiText bold() {
+		return bold;
+	}
+
+	@Override
+	public UiText display() {
+		return display;
+	}
+}

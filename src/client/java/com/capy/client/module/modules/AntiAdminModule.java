@@ -1,6 +1,11 @@
 package com.capy.client.module.modules;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.gui.McCanvas;
+import com.capy.client.gui.McType;
+import com.capy.client.gui.UiCanvas;
+import com.capy.client.gui.UiPetals;
+import com.capy.client.gui.UiType;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
 import com.capy.client.module.Configurable;
@@ -57,7 +62,12 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private final BooleanSetting sound = setting(new BooleanSetting("sound", true));
 	private final SliderSetting cooldown = setting(new SliderSetting("cooldown", DEFAULT_COOLDOWN, MIN_COOLDOWN, MAX_COOLDOWN));
 
+	/** The typefaces are created once and reused for every frame. */
+	private static final UiType TYPE = new McType();
+
 	private final AlertManager alerts = new AlertManager();
+	/** The petals that are released when an alert appears. */
+	private final UiPetals alertPetals = new UiPetals();
 	private int ticksUntilScan;
 
 	public AntiAdminModule() {
@@ -100,18 +110,24 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		long now = System.currentTimeMillis();
 		long cooldownMs = Math.max(0, cooldown.get()) * 1000L;
 		boolean playSound = sound.value();
-		alerts.update(
+		boolean raised = alerts.update(
 				AdminDetector.scan(mc, watchlist, detectionRange()),
 				cooldownMs,
 				playSound ? AlertSound::play : null,
 				now);
+		if (raised) {
+			// A few blossoms leave the portrait as it appears.
+			alertPetals.burst(AlertRenderer.PORTRAIT_CX, AlertRenderer.PORTRAIT_CY, 7, 1.0f);
+		}
 	}
 
 	/** Draws the alerts over the HUD. */
-	public void onHudRender(GuiGraphics g, int screenW, int screenH) {
+	public void onHudRender(GuiGraphics g, int screenW, int screenH, float deltaTicks) {
 		if (!isEnabled()) {
 			return;
 		}
+		// The petals of the alert keep drifting while it is on screen.
+		alertPetals.update(deltaTicks, screenW, screenH);
 		AdminAlert alert = alerts.active();
 		if (alert == null) {
 			return;
@@ -120,11 +136,14 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		if (alpha <= 0.01f) {
 			return;
 		}
+		UiCanvas canvas = McCanvas.of(g);
+		UiType type = TYPE;
 		if (faceAlert.value()) {
-			AlertRenderer.renderFaceAlert(g, screenW, screenH, alert, alpha);
+			AlertRenderer.renderFaceAlert(canvas, type.regular(), type.medium(), type.display(), g,
+					alertPetals, screenW, screenH, alert, alpha);
 		}
 		if (notification.value()) {
-			AlertRenderer.renderNotification(g, screenW, screenH, alert, alpha);
+			AlertRenderer.renderNotification(canvas, type.regular(), type.medium(), screenW, screenH, alert, alpha);
 		}
 	}
 

@@ -134,11 +134,20 @@ public final class UiFonts {
 			LOGGER.error("Capy: failed to load bundled Inter fonts ({} / {} / {} / {}); falling back to the vanilla font.",
 					LIGHT_TTF, REGULAR_TTF, MEDIUM_TTF, BOLD_TTF, t);
 			failed = true;
-			Minecraft mc = Minecraft.getInstance();
-			regular = mc.font;
-			medium = mc.font;
-			bold = mc.font;
-			display = mc.font;
+			try {
+				Minecraft mc = Minecraft.getInstance();
+				regular = mc.font;
+				medium = mc.font;
+				bold = mc.font;
+				display = mc.font;
+			} catch (Throwable ignored) {
+				// No game is running (an offline render, for instance). The
+				// typefaces stay empty instead of taking the client down.
+				regular = null;
+				medium = null;
+				bold = null;
+				display = null;
+			}
 		} finally {
 			initializing = false;
 		}

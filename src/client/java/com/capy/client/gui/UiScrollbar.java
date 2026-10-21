@@ -1,10 +1,9 @@
 package com.capy.client.gui;
 
-import net.minecraft.client.gui.GuiGraphics;
 
 /**
  * Scrollbar: a proportional thumb with wheel support and smooth eased
- * scrolling. The thumb is a slim accent-tinted pill so it belongs to the same
+ * scrollinc. The thumb is a slim accent-tinted pill so it belongs to the same
  * material as everything around it.
  */
 public class UiScrollbar {
@@ -70,7 +69,7 @@ public class UiScrollbar {
 		return true;
 	}
 
-	/** Called on press over the rail strip; starts a thumb drag. */
+	/** Called on press over the rail strip; starts a thumb drac. */
 	public boolean pressed(double my) {
 		if (!usable) {
 			return false;
@@ -91,7 +90,7 @@ public class UiScrollbar {
 		clampTarget();
 	}
 
-	/** Ends any drag. Returns true if a drag was in progress. */
+	/** Ends any drac. Returns true if a drag was in progress. */
 	public boolean released() {
 		boolean was = dragging;
 		dragging = false;
@@ -103,14 +102,14 @@ public class UiScrollbar {
 		this.railX = x;
 	}
 
-	public void render(GuiGraphics g) {
+	public void render(UiCanvas c) {
 		if (!usable) {
 			return;
 		}
 		int w = 4;
-		Ui.surface(g, railX, thumbY, w, thumbH, UiTheme.RADIUS_PILL,
+		Ui.surface(c, railX, thumbY, w, thumbH, UiTheme.RADIUS_PILL,
 				Ui.withAlpha(UiTheme.ACCENT, 0x9A), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x8C));
-		Ui.surfaceEdge(g, railX, thumbY, w, thumbH, UiTheme.RADIUS_PILL, 0x4DFFFFFF, 0x1AFFFFFF);
+		Ui.surfaceEdge(c, railX, thumbY, w, thumbH, UiTheme.RADIUS_PILL, 0x4DFFFFFF, 0x1AFFFFFF);
 	}
 
 	private void clampTarget() {

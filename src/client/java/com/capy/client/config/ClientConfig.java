@@ -153,6 +153,18 @@ public final class ClientConfig {
 	}
 
 	/**
+	 * Writes the configuration to the client's config directory. Safe to call
+	 * when no loader is available (for example in a headless preview).
+	 */
+	public static void saveNow() {
+		net.fabricmc.loader.api.FabricLoader loader = net.fabricmc.loader.api.FabricLoader.getInstance();
+		if (loader == null) {
+			return;
+		}
+		instance.save(loader.getConfigDir());
+	}
+
+	/**
 	 * Writes the configuration to {@code configDir}. Failures are logged, not
 	 * thrown — a read-only config directory must not break the game.
 	 */
