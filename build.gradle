@@ -15,7 +15,7 @@ loom {
 	splitEnvironmentSourceSets()
 
 	mods {
-		"griefer" {
+		"capy" {
 			sourceSet sourceSets.main
 			sourceSet sourceSets.client
 		}
@@ -80,3 +80,8 @@ publishing {
 		// retrieving dependencies.
 	}
 }
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.compilerArgs << "-Xlint:deprecation" << "-Xlint:unchecked"
+}
+

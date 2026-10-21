@@ -1,0 +1,18 @@
+{
+	"capy.gui.title": "Capy Client",
+	"key.capy.open_gui": "Open Capy GUI",
+	"key.category.capy.keybind": "Capy Keybind",
+	"capy.module.swing_speed.name": "Swing Speed",
+	"capy.module.swing_speed.desc": "Visual swing animation speed. Actual attack/mining speed untouched.",
+	"capy.module.swing_speed.speed": "Speed",
+	"capy.module.anti_admin.name": "Anti Admin",
+	"capy.module.anti_admin.desc": "Alerts when a watched staff member is nearby. Only sees what the server tells the client.",
+	"capy.module.anti_admin.watchlist": "Watched usernames",
+	"capy.module.anti_admin.range": "Detection range",
+	"capy.module.anti_admin.range.unit": "blocks",
+	"capy.module.anti_admin.face_alert": "Guardian face alert",
+	"capy.module.anti_admin.notification": "On-screen notification",
+	"capy.module.anti_admin.sound": "Alert sound",
+	"capy.module.anti_admin.cooldown": "Alert cooldown",
+	"capy.module.anti_admin.cooldown.unit": "s"
+}

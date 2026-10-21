@@ -1,27 +1,27 @@
 {
 	"schemaVersion": 1,
-	"id": "griefer",
+	"id": "capy",
 	"version": "${version}",
-	"name": "Griefer Client",
-	"description": "Anarchy utility client.",
+	"name": "Capy Client",
+	"description": "Sakura-themed Minecraft client with a configurable ClickGUI and the Anti Admin proximity alert module.",
 	"authors": [
-		"Me!"
+		"Capy"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",
 		"sources": "https://github.com/FabricMC/fabric-example-mod"
 	},
 	"license": "CC0-1.0",
-	"icon": "assets/griefer/icon.png",
+	"icon": "assets/capy/icon.png",
 	"environment": "client",
 	"entrypoints": {
 		"client": [
-			"com.griefer.client.GrieferClient"
+			"com.capy.client.CapyClient"
 		]
 	},
 	"mixins": [
 		{
-			"config": "griefer.client.mixins.json",
+			"config": "capy.client.mixins.json",
 			"environment": "client"
 		}
 	],
