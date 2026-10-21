@@ -11,10 +11,6 @@ public final class Motion {
 	private Motion() {
 	}
 
-	/** Linear. */
-	public static float linear(float t) {
-		return clamp01(t);
-	}
 
 	/** Fast start, gentle end - the default for entrances. */
 	public static float easeOutCubic(float t) {
@@ -49,10 +45,6 @@ public final class Motion {
 		return 1f + c3 * inv * inv * inv + c1 * inv * inv;
 	}
 
-	/** A soft pulse that rises and falls between 0 and 1. */
-	public static float pulse(float phase) {
-		return 0.5f + 0.5f * (float) Math.sin(phase * Math.PI * 2.0);
-	}
 
 	/** Frame rate independent exponential approach. */
 	public static float approach(float current, float target, float speed, float deltaSeconds) {
@@ -65,8 +57,4 @@ public final class Motion {
 		return value < 0f ? 0f : (value > 1f ? 1f : value);
 	}
 
-	/** Clamps a value into the given range. */
-	public static float clamp(float value, float min, float max) {
-		return value < min ? min : (value > max ? max : value);
-	}
 }

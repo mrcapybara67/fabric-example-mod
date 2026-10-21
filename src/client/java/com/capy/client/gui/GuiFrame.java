@@ -35,18 +35,17 @@ public final class GuiFrame {
 	private static final int SECTION_HEADER_H = 26;
 
 	/**
-	 * The space the sidebar needs: the categories, the theme picker and the
-	 * keybind hint. The window never gets shorter than this.
+	 * The space the sidebar needs: the section label, every category row, the
+	 * theme picker and the keybind hint. The window never gets shorter than
+	 * this, so the sidebar can never overflow.
 	 */
-	private static final int SIDEBAR_MIN_H = 348;
+	private static int sidebarMinHeight() {
+		int label = UiTheme.SP_5 + 16;
+		int rows = CATEGORIES.length * (UiTheme.CATEGORY_H + UiTheme.SP_1);
+		int footer = 58 + UiTheme.SP_6;
+		return UiTheme.HEADER_H + label + rows + footer;
+	}
 
-	private static final UiIcons.Icon[] CATEGORY_ICONS = {
-			UiIcons.Icon.TARGET, // Base Finder
-			UiIcons.Icon.WORLD,
-			UiIcons.Icon.VISUAL,
-			UiIcons.Icon.DONUT,
-			UiIcons.Icon.MISC
-	};
 
 	private final Map<Category, List<ModuleCard>> cards = new EnumMap<>(Category.class);
 	private final UiScrollbar scrollbar = new UiScrollbar();
@@ -151,7 +150,7 @@ public final class GuiFrame {
 		}
 		int needed = UiTheme.HEADER_H + UiTheme.SP_6 + SECTION_HEADER_H + content + UiTheme.SP_6;
 		int max = Math.min(520, (int) (height * 0.82f));
-		int min = Math.min(max, SIDEBAR_MIN_H);
+		int min = Math.min(max, sidebarMinHeight());
 		return Math.max(min, Math.min(max, needed));
 	}
 
@@ -236,10 +235,13 @@ public final class GuiFrame {
 		Ui.outline(c, wx, wy, ww, wh, r, UiTheme.BORDER);
 		Ui.innerBevel(c, wx, wy, ww, wh, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 
-		// The accent reveal: a soft pink light that washes over the window as
-		// it opens.
+		// The accent reveal: a soft pink light sweeps down over the window
+		// while it opens.
 		if (fade < 1f) {
-			Ui.glow(c, wx, wy, ww, Math.round(wh * 0.5f), UiTheme.ACCENT, (1f - fade) * 0.35f);
+			int sweepH = Math.round(wh * 0.55f);
+			int sweepY = wy + Math.round((1f - ease) * (wh - sweepH));
+			Ui.glow(c, wx, wy, ww, sweepH, UiTheme.ACCENT_2, (1f - fade) * 0.16f);
+			Ui.glow(c, wx, sweepY, ww, sweepH, UiTheme.ACCENT, (1f - fade) * 0.10f);
 		}
 
 		for (int i = 0; i < select.length; i++) {
@@ -252,8 +254,8 @@ public final class GuiFrame {
 		switchProgress = Motion.approach(switchProgress, 1f, 12f, delta / 20f);
 
 		renderHeader(c, type, wx, wy, ww, mouseX, mouseY, delta);
-		renderSidebar(c, type, wx, wy, ww, wh, mouseX, mouseY, delta);
-		renderContent(c, type, mouseX, mouseY, delta);
+		renderSidebar(c, type, wx, wy, ww, wh, mouseX, mouseY, delta, (1f - ease) * 12f);
+		renderContent(c, type, mouseX, mouseY, delta, (1f - ease) * 10f);
 
 		// A few petals pass in front of the window for depth. They are very
 		// faint so they never compete with the content.
@@ -318,8 +320,8 @@ public final class GuiFrame {
 	}
 
 	private void renderSidebar(UiCanvas c, UiType type, int wx, int wy, int ww, int wh, int mouseX, int mouseY,
-			float delta) {
-		int px = wx + UiTheme.SP_4;
+			float delta, float slide) {
+		int px = wx + UiTheme.SP_4 - Math.round(slide);
 		int py = wy + UiTheme.HEADER_H - UiTheme.SP_1;
 		int pw = UiTheme.SIDEBAR_W - UiTheme.SP_4;
 		int ph = wh - UiTheme.HEADER_H + UiTheme.SP_1 - UiTheme.SP_4;
@@ -358,14 +360,8 @@ public final class GuiFrame {
 						Ui.withAlpha(UiTheme.PANEL_TOP, 0x90));
 			}
 
-			int iconBox = 16;
-			int iconX = sx0 + UiTheme.SP_4;
-			int iconY = y + (rowH - iconBox) / 2;
-			int resting = Ui.withAlpha(category.accent, 0xB0);
-			int iconColor = Ui.lerpColor(resting, UiTheme.ACCENT, Math.max(sel, hovered ? 0.9f : 0f));
-			UiIcons.draw(c, CATEGORY_ICONS[i], iconX, iconY, iconBox, iconColor);
-
-			int textX = iconX + iconBox + UiTheme.SP_3;
+			// The category rows are typographic: no symbol on every entry.
+			int textX = sx0 + UiTheme.SP_4;
 			UiText medium = type.medium();
 			int textY = y + (rowH - medium.lineHeight()) / 2;
 			int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(sel * 0.9f, hovered ? 0.7f : 0f));
@@ -419,9 +415,9 @@ public final class GuiFrame {
 		}
 	}
 
-	private void renderContent(UiCanvas c, UiType type, int mouseX, int mouseY, float delta) {
+	private void renderContent(UiCanvas c, UiType type, int mouseX, int mouseY, float delta, float slide) {
 		int cx = contentX();
-		int top = contentTop();
+		int top = contentTop() + Math.round(slide);
 		int bottom = contentBottom();
 		int cw = contentW();
 		int viewportH = Math.max(0, bottom - top);
@@ -444,7 +440,7 @@ public final class GuiFrame {
 		int listH = Math.max(0, bottom - listTop);
 
 		// Content that moves between pages slides a little.
-		float slide = showCategory ? 0f : (1f - switchProgress) * 10f;
+		float pageSlide = showCategory ? 0f : (1f - switchProgress) * 10f;
 
 		int contentH = 0;
 		for (int i = 0; i < list.size(); i++) {
@@ -470,7 +466,7 @@ public final class GuiFrame {
 				Ui.withAlpha(UiTheme.ACCENT, 0x0F));
 
 		c.pushClip(cx, listTop, cw, listH);
-		int y = listTop - (int) Math.round(scrollbar.scroll()) + Math.round(slide);
+		int y = listTop - (int) Math.round(scrollbar.scroll()) + Math.round(pageSlide);
 		for (int i = 0; i < list.size(); i++) {
 			ModuleCard card = list.get(i);
 			if (y + card.height() >= listTop - 40 && y <= bottom) {

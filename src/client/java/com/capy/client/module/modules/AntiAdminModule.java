@@ -68,6 +68,9 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private final AlertManager alerts = new AlertManager();
 	/** The petals that are released when an alert appears. */
 	private final UiPetals alertPetals = new UiPetals();
+	/** The size of the screen the alert was last drawn on. */
+	private int lastScreenWidth = 854;
+	private int lastScreenHeight = 480;
 	private int ticksUntilScan;
 
 	public AntiAdminModule() {
@@ -117,17 +120,21 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 				now);
 		if (raised) {
 			// A few blossoms leave the portrait as it appears.
-			alertPetals.burst(AlertRenderer.PORTRAIT_CX, AlertRenderer.PORTRAIT_CY, 7, 1.0f);
+			int cx = AlertRenderer.portraitCenterX(lastScreenWidth);
+			int cy = AlertRenderer.portraitCenterY(lastScreenHeight);
+			alertPetals.burst(cx, cy, 9, 1.2f);
 		}
 	}
 
 	/** Draws the alerts over the HUD. */
 	public void onHudRender(GuiGraphics g, int screenW, int screenH, float deltaTicks) {
+		lastScreenWidth = screenW;
+		lastScreenHeight = screenH;
+		// The petals keep drifting (and expire) even when the alert is gone.
+		alertPetals.update(deltaTicks, screenW, screenH);
 		if (!isEnabled()) {
 			return;
 		}
-		// The petals of the alert keep drifting while it is on screen.
-		alertPetals.update(deltaTicks, screenW, screenH);
 		AdminAlert alert = alerts.active();
 		if (alert == null) {
 			return;

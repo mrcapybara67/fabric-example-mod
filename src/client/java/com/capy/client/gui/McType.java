@@ -2,6 +2,9 @@ package com.capy.client.gui;
 
 /**
  * {@link UiType} backed by the bundled Inter faces.
+ *
+ * The faces are resolved lazily, so creating this object is cheap and safe at
+ * any point during startup.
  */
 public final class McType implements UiType {
 	private final UiText regular;
@@ -10,10 +13,10 @@ public final class McType implements UiType {
 	private final UiText display;
 
 	public McType() {
-		this.regular = new McText(UiFonts.regular());
-		this.medium = new McText(UiFonts.medium());
-		this.bold = new McText(UiFonts.bold());
-		this.display = new McText(UiFonts.display());
+		this.regular = new McText(UiFonts::regular);
+		this.medium = new McText(UiFonts::medium);
+		this.bold = new McText(UiFonts::bold);
+		this.display = new McText(UiFonts::display);
 	}
 
 	@Override

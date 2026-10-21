@@ -20,21 +20,11 @@ public final class UiIcons {
 	/** Draws the given icon into the box (x, y, size, size). */
 	public static void draw(UiCanvas c, Icon icon, int x, int y, int size, int color) {
 		switch (icon) {
-			case TARGET -> target(c, x, y, size, color);
-			case WORLD -> world(c, x, y, size, color);
-			case VISUAL -> visual(c, x, y, size, color);
-			case DONUT -> donut(c, x, y, size, color);
-			case MISC -> misc(c, x, y, size, color);
 			case SEARCH -> search(c, x, y, size, color);
 			case CLOSE -> close(c, x, y, size, color);
 			case BLOSSOM -> blossom(c, x, y, size, color);
-			case USER -> user(c, x, y, size, color);
 			case ALERT -> alert(c, x, y, size, color);
-			case SOUND -> sound(c, x, y, size, color);
-			case LIST -> list(c, x, y, size, color);
 			case PLUS -> plus(c, x, y, size, color);
-			case MINUS -> minus(c, x, y, size, color);
-			case GEAR -> gear(c, x, y, size, color);
 			case CHECK -> check(c, x, y, size, color);
 			case CHEVRON -> chevron(c, x, y, size, color, 0f);
 		}
@@ -58,82 +48,19 @@ public final class UiIcons {
 	}
 
 	public enum Icon {
-		TARGET,
-		WORLD,
-		VISUAL,
-		DONUT,
-		MISC,
 		SEARCH,
 		CLOSE,
 		BLOSSOM,
-		USER,
 		ALERT,
-		SOUND,
-		LIST,
 		PLUS,
-		MINUS,
-		GEAR,
 		CHECK,
 		CHEVRON
 	}
 
-	// ---- target: ring + center dot ---------------------------------------
-	private static void target(UiCanvas c, int x, int y, int s, int col) {
-		circleOutline(c, x, y, s, col);
-		int cx = x + s / 2 - 1;
-		c.fill(cx, y + s / 2 - 1, cx + 2, y + s / 2 + 1, col);
-	}
 
-	// ---- globe: circle + vertical arcs + equator --------------------------
-	private static void world(UiCanvas c, int x, int y, int s, int col) {
-		circleOutline(c, x, y, s, col);
-		int cx = x + s / 2;
-		int cy = y + s / 2;
-		int arc = Math.max(1, s / 4);
-		for (int dy = -arc; dy <= arc; dy++) {
-			int row = cy + dy;
-			if (row < y || row >= y + s) {
-				continue;
-			}
-			c.fill(cx - arc, row, cx - arc + 1, row + 1, col);
-			c.fill(cx + arc - 1, row, cx + arc, row + 1, col);
-		}
-		c.fill(x + 2, cy, x + s - 2, cy + 1, col);
-	}
 
-	// ---- eye: lens outline + pupil -----------------------------------------
-	private static void visual(UiCanvas c, int x, int y, int s, int col) {
-		int cy = y + s / 2;
-		for (int i = 0; i < s; i++) {
-			int dy = Math.abs(i - s / 2);
-			int inset = (int) Math.round((dy * dy) / (float) Math.max(1, s / 2));
-			if (inset >= 1) {
-				c.fill(x + i, cy - inset, x + i + 1, cy - inset + 1, col);
-				c.fill(x + i, cy + inset - 1, x + i + 1, cy + inset, col);
-			}
-		}
-		int px = x + s / 2 - 1;
-		c.fill(px, cy - 2, px + 3, cy + 2, col);
-	}
 
-	// ---- torus: ring (interior transparent, reads as the hole) -----------
-	private static void donut(UiCanvas c, int x, int y, int s, int col) {
-		circleOutline(c, x, y, s, col);
-		int cx = x + s / 2;
-		int cy = y + s / 2;
-		c.fill(cx - 1, y + 1, cx + 2, y + 2, col);
-		c.fill(x + 1, cy - 1, x + s - 1, cy + 2, col);
-	}
 
-	// ---- sliders: three lines with offset knobs ----------------------------
-	private static void misc(UiCanvas c, int x, int y, int s, int col) {
-		for (int row = 0; row < 3; row++) {
-			int ly = y + 3 + row * 4;
-			c.fill(x + 1, ly, x + s - 1, ly + 1, col);
-			int kx = x + 2 + ((row * 5) % Math.max(1, s - 5));
-			c.fill(kx, ly - 1, kx + 2, ly + 2, col);
-		}
-	}
 
 	// ---- magnifier: circle + handle ---------------------------------------
 	private static void search(UiCanvas c, int x, int y, int s, int col) {
@@ -170,19 +97,6 @@ public final class UiIcons {
 		disc(c, cx, cy, Math.max(1.2f, s * 0.09f), col);
 	}
 
-	// ---- user: head + shoulders ---------------------------------------------
-	private static void user(UiCanvas c, int x, int y, int s, int col) {
-		int cx = x + s / 2;
-		int head = Math.max(2, s / 4);
-		disc(c, cx, y + head, head * 0.9f, col);
-		int bodyTop = y + head * 2;
-		int bodyH = s - head * 2;
-		if (bodyH > 0) {
-			int w = Math.max(2, s / 2);
-			c.fill(cx - w / 2, bodyTop, cx + w / 2, bodyTop + 2, col);
-			c.fill(cx - w / 2 - 1, bodyTop + 2, cx + w / 2 + 1, y + s, col);
-		}
-	}
 
 	// ---- alert: warning triangle with an exclamation mark ------------------
 	private static void alert(UiCanvas c, int x, int y, int s, int col) {
@@ -202,30 +116,9 @@ public final class UiIcons {
 		c.fill(cx, base - 3, cx + 1, base - 2, col);
 	}
 
-	// ---- sound: speaker + two arcs -----------------------------------------
-	private static void sound(UiCanvas c, int x, int y, int s, int col) {
-		int cx = x + s / 2;
-		int cy = y + s / 2;
-		c.fill(cx - 5, cy - 2, cx - 2, cy + 3, col);
-		c.fill(cx - 2, cy - 4, cx, cy + 5, col);
-		for (int i = 0; i < 3; i++) {
-			int r = 2 + i * 2;
-			int yy = cy - r / 2;
-			c.fill(cx + 1, yy, cx + 2, yy + 1, col);
-			c.fill(cx + 1 + r / 2, yy - 1, cx + 2 + r / 2, yy + 2, col);
-		}
-	}
 
-	// ---- list: three rows with leading dots --------------------------------
-	private static void list(UiCanvas c, int x, int y, int s, int col) {
-		for (int row = 0; row < 3; row++) {
-			int ly = y + 3 + row * 4;
-			c.fill(x + 1, ly, x + s - 1, ly + 1, col);
-			c.fill(x, ly - 1, x + 1, ly + 2, col);
-		}
-	}
 
-	// ---- plus / minus --------------------------------------------------------
+	// ---- plus ----------------------------------------------------------------
 	private static void plus(UiCanvas c, int x, int y, int s, int col) {
 		int cx = x + s / 2;
 		int cy = y + s / 2;
@@ -234,26 +127,6 @@ public final class UiIcons {
 		c.fill(cx, cy - r, cx + 1, cy + r + 1, col);
 	}
 
-	private static void minus(UiCanvas c, int x, int y, int s, int col) {
-		int cx = x + s / 2;
-		int cy = y + s / 2;
-		int r = Math.max(2, s / 2 - 1);
-		c.fill(cx - r, cy, cx + r + 1, cy + 1, col);
-	}
-
-	// ---- gear: ring with teeth ----------------------------------------------
-	private static void gear(UiCanvas c, int x, int y, int s, int col) {
-		int cx = x + s / 2;
-		int cy = y + s / 2;
-		int teeth = 6;
-		for (int i = 0; i < teeth; i++) {
-			double angle = i * (2.0 * Math.PI / teeth);
-			int tx = cx + (int) Math.round(Math.cos(angle) * s * 0.36f);
-			int ty = cy + (int) Math.round(Math.sin(angle) * s * 0.36f);
-			c.fill(tx, ty, tx + 2, ty + 2, col);
-		}
-		circleOutline(c, cx - s / 4, cy - s / 4, s / 2, col);
-	}
 
 	// ---- check mark ------------------------------------------------------------
 	private static void check(UiCanvas c, int x, int y, int s, int col) {

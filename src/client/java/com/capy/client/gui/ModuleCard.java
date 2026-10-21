@@ -340,6 +340,19 @@ public class ModuleCard {
 		return 0;
 	}
 
+	/** Cuts a string to the given width, adding an ellipsis. */
+	private static String ellipsize(UiText font, String text, int maxWidth) {
+		if (text == null || text.isEmpty() || font.width(text) <= maxWidth) {
+			return text == null ? "" : text;
+		}
+		String ell = font.width("…") > maxWidth ? "..." : "…";
+		String s = text;
+		while (s.length() > 1 && font.width(s + ell) > maxWidth) {
+			s = s.substring(0, s.length() - 1);
+		}
+		return s + ell;
+	}
+
 	private String sliderValueText(SliderSetting slider) {
 		String unit = unitFor(slider);
 		return unit.isEmpty() ? String.valueOf(slider.get()) : slider.get() + " " + unit;

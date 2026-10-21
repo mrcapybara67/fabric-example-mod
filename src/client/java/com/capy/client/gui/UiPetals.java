@@ -183,15 +183,6 @@ public final class UiPetals {
 		}
 	}
 
-	/** True when the pool holds petals that are still moving. */
-	public boolean isActive() {
-		for (Petal petal : pool) {
-			if (petal != null && petal.maxLife > 0) {
-				return true;
-			}
-		}
-		return false;
-	}
 
 	// --------------------------------------------------------------- internals
 
@@ -255,9 +246,10 @@ public final class UiPetals {
 		}
 		float major = size;
 		float reach = Math.max(0f, major * 0.5f - rr);
-		final int steps = 3;
+		// Small petals need one disc, big ones three.
+		final int steps = rr < 1.6f ? 1 : (rr < 2.6f ? 2 : 3);
 		for (int i = 0; i < steps; i++) {
-			float t = (i / (float) (steps - 1)) * 2f - 1f;
+			float t = steps == 1 ? 0f : (i / (float) (steps - 1)) * 2f - 1f;
 			float ox = t * reach;
 			float px = petal.x + (float) (ox * Math.cos(angle));
 			float py = petal.y + (float) (ox * Math.sin(angle));

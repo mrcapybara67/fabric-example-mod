@@ -14,51 +14,57 @@ import net.minecraft.world.entity.player.PlayerSkin;
 /**
  * Draws the Anti Admin alert.
  *
- * The alert is a horizontal "player card" that appears in the upper left of
- * the screen, clear of the crosshair, the hotbar and the chat:
+ * The alert imitates the guardian effect of vanilla Minecraft: the screen
+ * darkens, a large face appears in the middle and pulses while the message is
+ * shown. The only difference is whose face it is - instead of a guardian the
+ * player sees the face of the watched account that was detected.
  *
- * <pre>
- *   ( o )  WATCHLIST MATCH
- *          Notch
- *          12.4 blocks away
- * </pre>
- *
- * The sequence is staged:
+ * The sequence:
  *   <ol>
- *     <li>the card fades in and a soft pink halo blooms around it;</li>
- *     <li>the portrait scales up out of the card and the Sakura ring draws
- *         itself around it;</li>
- *     <li>the identity is revealed;</li>
- *     <li>the alert holds with a slow breathing accent;</li>
- *     <li>it leaves again, shrinking slightly.</li>
+ *     <li>the screen darkens and a pink light blooms around the centre;</li>
+ *     <li>the portrait scales up into the middle of the screen;</li>
+ *     <li>the name and the message are revealed;</li>
+ *     <li>the face pulses while the alert holds;</li>
+ *     <li>everything fades and the portrait shrinks away.</li>
  *   </ol>
  *
- * The presentation reflects the evidence: a player whose entity the server
- * sent is shown as <i>nearby</i> with a distance, a player the server only
- * lists is shown as <i>online</i> with an unknown position and a quieter
- * accent. The alert never claims that a matched player is an administrator.
+ * The alert is a picture only: it never takes the input away and it never
+ * blocks the crosshair for longer than it takes to read it.
+ *
+ * The wording reflects what the client actually observed. A player whose
+ * entity the server sent is reported as nearby with a distance, a player the
+ * server only lists is reported as online with an unknown position. Neither
+ * is called an administrator: the watchlist says which accounts to watch, not
+ * what they are.
  */
 public final class AlertRenderer {
-	private static final int CARD_W = 268;
-	private static final int CARD_H = 80;
-	private static final int PORTRAIT = 54;
-
-	/** Where the card sits on the screen. */
-	public static final int CARD_X = 16;
-	public static final int CARD_Y = 16;
-	/** The centre of the portrait, where the blossom burst starts. */
-	public static final int PORTRAIT_CX = CARD_X + 14 + PORTRAIT / 2;
-	public static final int PORTRAIT_CY = CARD_Y + CARD_H / 2;
+	/** The translated labels, resolved once instead of every frame. */
+	private static final String LABEL_WATCHING = UiLabels.translate("capy.alert.watching", "%s is watching you");
+	private static final String LABEL_GOOD_LUCK = UiLabels.translate("capy.alert.good_luck", "good luck, capy user");
+	private static final String LABEL_UNKNOWN =
+			UiLabels.translate("capy.alert.position_unknown", "online - position unknown");
+	private static final String LABEL_NEARBY = UiLabels.translate("capy.alert.nearby", "WATCHLIST PLAYER NEARBY");
+	private static final String LABEL_ONLINE = UiLabels.translate("capy.alert.online", "WATCHLIST PLAYER ONLINE");
 
 	private AlertRenderer() {
 	}
 
+	/** Horizontal centre of the portrait. */
+	public static int portraitCenterX(int screenW) {
+		return screenW / 2;
+	}
+
+	/** Vertical centre of the portrait, a little above the middle. */
+	public static int portraitCenterY(int screenH) {
+		return (int) (screenH * 0.42f);
+	}
+
 	/**
-	 * Draws the cinematic alert.
+	 * Draws the guardian style alert.
 	 *
-	 * @param graphics the Minecraft graphics handle used for the skin
-	 *                 texture; may be null, in which case a neutral
-	 *                 silhouette is drawn instead
+	 * @param graphics the Minecraft graphics handle used for the skin texture;
+	 *                 may be null, in which case a neutral silhouette is drawn
+	 *                 instead
 	 */
 	public static void renderFaceAlert(UiCanvas c, UiText regular, UiText medium, UiText display,
 			GuiGraphics graphics, UiPetals petals, int screenW, int screenH, AdminAlert alert, float alpha) {
@@ -68,106 +74,58 @@ public final class AlertRenderer {
 		long now = System.currentTimeMillis();
 		float reveal = alert.revealProgress(now);
 		float portrait = alert.portraitProgress(now);
-		float ring = alert.ringProgress(now);
 		float pulse = alert.pulse(now);
 		boolean nearby = alert.evidence() == Evidence.NEARBY;
 
 		int accent = nearby ? UiTheme.ACCENT : UiTheme.ACCENT_DEEP;
 
-		// Stage 1: a restrained emphasis behind the alert. The vignette is
-		// deliberately faint so it never flashes the whole screen.
-		int vignetteAlpha = Math.round(26 * alpha);
-		if (vignetteAlpha > 0) {
-			for (int i = 0; i < 14; i++) {
-				int inset = i * 3;
-				int a = Math.round(vignetteAlpha * (1f - i / 14f));
-				if (a <= 0) {
-					continue;
-				}
-				int shade = (a << 24) | (UiTheme.ACCENT_DEEP & 0x00FFFFFF);
-				c.fill(inset, inset, screenW - inset, inset + 3, shade);
-				c.fill(inset, screenH - inset - 3, screenW - inset, screenH - inset, shade);
-				c.fill(inset, inset, inset + 3, screenH - inset, shade);
-				c.fill(screenW - inset - 3, inset, screenW - inset, screenH - inset, shade);
-			}
+		// Stage 1: the screen darkens, the way the guardian effect does. The
+		// veil is one flat tint that breathes, exactly like the vanilla one.
+		int veil = Math.round(158 * alpha * (0.92f + 0.08f * pulse));
+		if (veil > 0) {
+			c.fill(0, 0, screenW, screenH, (veil << 24) | 0x0A0510);
 		}
 
-		// The card drifts in from the left while it fades.
-		int slide = Math.round((1f - alpha) * -18f);
-		int cardX = CARD_X + slide;
-		int cardY = CARD_Y;
+		// The portrait: large, centred and slightly above the middle so it
+		// never sits on the crosshair.
+		int base = Math.min(screenW, screenH);
+		int faceSize = Math.max(110, Math.min(210, (int) (base * 0.26f)));
+		int cx = portraitCenterX(screenW);
+		int cy = portraitCenterY(screenH);
+		int size = Math.max(8, Math.round(faceSize * (0.72f + 0.28f * portrait)));
 
-		// Stage 1: the halo blooms around the portrait.
-		int portraitCx = cardX + 14 + PORTRAIT / 2;
-		int portraitCy = cardY + CARD_H / 2;
-		int haloRadius = PORTRAIT / 2 + 16;
-		Ui.halo(c, portraitCx, portraitCy, haloRadius, accent,
-				(0.35f + 0.25f * pulse) * alpha * portrait);
+		// The bloom behind the portrait.
+		Ui.halo(c, cx, cy, (int) (size * 0.9f), accent, (0.30f + 0.25f * pulse) * alpha * portrait);
 
-		// The card body.
-		int topColor = Ui.withAlpha(UiTheme.PANEL_ALT, Math.round(238 * alpha));
-		int bottomColor = Ui.withAlpha(UiTheme.PANEL_TOP, Math.round(238 * alpha));
-		Ui.shadow(c, cardX, cardY, CARD_W, CARD_H, UiTheme.RADIUS_LG);
-		Ui.surface(c, cardX, cardY, CARD_W, CARD_H, UiTheme.RADIUS_LG, topColor, bottomColor);
-		Ui.outline(c, cardX, cardY, CARD_W, CARD_H, UiTheme.RADIUS_LG,
-				Ui.withAlpha(accent, Math.round((120 + 60 * pulse) * alpha)));
-		Ui.innerBevel(c, cardX, cardY, CARD_W, CARD_H, UiTheme.RADIUS_LG, UiTheme.HIGHLIGHT, UiTheme.SHADE);
+		// The face itself, drawn from the player's own skin.
+		drawPortrait(c, graphics, alert.skin(), cx - size / 2, cy - size / 2, size, alpha);
 
-		// The accent edge on the leading side of the card.
-		Ui.surface(c, cardX + 1, cardY + 14, 2, CARD_H - 28, 1,
-				Ui.withAlpha(accent, Math.round(200 * alpha)),
-				Ui.withAlpha(accent, Math.round(120 * alpha)));
-
-		// Stage 2: the portrait.
-		int size = Math.max(6, Math.round(PORTRAIT * (0.72f + 0.28f * portrait)));
-		int px = portraitCx - size / 2;
-		int py = portraitCy - size / 2;
-		drawPortrait(c, graphics, alert.skin(), px, py, size, portraitCx, portraitCy, size, alpha);
-
-		// Stage 2: the Sakura ring draws itself around the portrait.
-		if (ring > 0.02f) {
-			int ringRadius = PORTRAIT / 2 + 4;
-			Ui.ring(c, portraitCx, portraitCy, ringRadius, 2,
-					Ui.withAlpha(accent, Math.round(235 * alpha)), ring);
-			if (nearby) {
-				// A second, softer ring that breathes while the alert holds.
-				Ui.ring(c, portraitCx, portraitCy, ringRadius + 3, 1,
-						Ui.withAlpha(UiTheme.ACCENT_2, Math.round((60 + 50 * pulse) * alpha)), 1f);
-			}
+		// A Sakura ring that pulses around the portrait.
+		if (portrait > 0.4f) {
+			int ring = size / 2 + 6;
+			Ui.ring(c, cx, cy, ring, 2, Ui.withAlpha(accent, Math.round(150 * alpha)), 1f);
+			Ui.ring(c, cx, cy, ring + 4 + Math.round(3 * pulse), 1,
+					Ui.withAlpha(UiTheme.ACCENT_2, Math.round((40 + 60 * pulse) * alpha)), 1f);
 		}
 
 		// Stage 3: the identity.
-		int textX = cardX + 14 + PORTRAIT + 16;
-		int textW = CARD_W - (textX - cardX) - 14;
-		int labelY = cardY + 16;
-		int nameY = labelY + 13;
-		int detailY = nameY + 16;
-
 		int revealAlpha = Math.round(255 * alpha * reveal);
 		if (revealAlpha > 0) {
-			// The label states what the client actually observed.
-			String label = UiLabels.translate(nearby ? "capy.alert.match" : "capy.alert.match_online", "");
-			UiIcons.draw(c, UiIcons.Icon.ALERT, textX, labelY - 1, 9,
-					Ui.withAlpha(accent, revealAlpha));
-			Ui.drawEllipsized(c, medium, label, textX + 13, labelY, textW - 13,
-					Ui.withAlpha(accent, revealAlpha));
+			String message = LABEL_WATCHING.replace("%s", alert.username());
+			int titleY = cy + size / 2 + 18;
+			Ui.drawCentered(c, display, message, cx, titleY, Ui.withAlpha(UiTheme.TEXT, revealAlpha));
 
-			Ui.drawEllipsized(c, display, alert.username(), textX, nameY, textW,
-					Ui.withAlpha(UiTheme.TEXT, revealAlpha));
+			int subY = titleY + display.lineHeight() + 6;
+			String sub = LABEL_GOOD_LUCK;
+			Ui.drawCentered(c, medium, sub, cx, subY, Ui.withAlpha(accent, revealAlpha));
 
-			String detail = alert.hasDistance()
-					? alert.distanceText()
-					: UiLabels.translate("capy.alert.position_unknown", "position unknown");
-			Ui.drawEllipsized(c, regular, detail, textX, detailY, textW,
-					Ui.withAlpha(UiTheme.TEXT_2, Math.round(revealAlpha * 0.9f)));
+			// The evidence line: what the client actually knows.
+			int infoY = subY + medium.lineHeight() + 8;
+			String info = nearby ? alert.distanceText() : LABEL_UNKNOWN;
+			Ui.drawCentered(c, regular, info, cx, infoY, Ui.withAlpha(UiTheme.TEXT_2, revealAlpha));
 		}
 
-		// A blossom in the far corner of the card.
-		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, cardX + CARD_W - 24, cardY + 12, 13,
-				Ui.withAlpha(UiTheme.ACCENT_2, Math.round(150 * alpha * reveal)));
-
-		// The petals that were released when the portrait appeared drift away
-		// in front of the card.
+		// The petals that were released when the portrait appeared.
 		if (petals != null) {
 			petals.renderAll(c, alpha);
 		}
@@ -184,7 +142,7 @@ public final class AlertRenderer {
 		boolean nearby = alert.evidence() == Evidence.NEARBY;
 		int accent = nearby ? UiTheme.ACCENT : UiTheme.ACCENT_DEEP;
 
-		String title = UiLabels.translate(nearby ? "capy.alert.nearby" : "capy.alert.online", "");
+		String title = nearby ? LABEL_NEARBY : LABEL_ONLINE;
 		String name = alert.username();
 		int w = Math.max(medium.width(title), regular.width(name)) + 52;
 		int h = 42;
@@ -208,66 +166,37 @@ public final class AlertRenderer {
 	}
 
 	/**
-	 * Draws the player's face inside a perfect circle.
+	 * Draws the player's face.
 	 *
 	 * The face is drawn with Minecraft's own player face renderer, so the UVs
-	 * and the texture are exactly the ones the game uses. The pixels outside
-	 * the circle are then painted with the colour of the card behind it, which
-	 * turns the square head into a clean circular portrait without stretching
-	 * the texture or uploading anything twice.
+	 * and the texture are exactly the ones the game uses - no stretching and
+	 * no second upload. When the client has no usable skin, a neutral
+	 * silhouette is drawn instead.
 	 */
 	private static void drawPortrait(UiCanvas c, GuiGraphics graphics, PlayerSkin skin, int x, int y, int size,
-			int cx, int cy, int faceSize, float alpha) {
-		int r = size / 2;
-		if (r <= 0) {
-			return;
-		}
-		// The card colour behind the portrait, used to mask the corners.
-		int backdrop = Ui.withAlpha(UiTheme.PANEL_ALT, Math.round(238 * alpha));
-
+			float alpha) {
 		if (skin != null && skin.body() != null && skin.body().texturePath() != null && graphics != null) {
 			try {
 				PlayerFaceRenderer.draw(graphics, skin, x, y, size);
-			} catch (RuntimeException e) {
-				// A broken skin must not take the alert down; fall through to
-				// the silhouette below.
-				drawSilhouette(c, cx, cy, r, alpha, backdrop);
-				maskCircle(c, x, y, size, cx, cy, backdrop);
 				return;
+			} catch (RuntimeException e) {
+				// A broken skin must not stop the alert from being shown.
 			}
-			maskCircle(c, x, y, size, cx, cy, backdrop);
-			// Fade the portrait in with the rest of the alert.
-			int fade = Math.round((1f - alpha) * 255);
-			if (fade > 0) {
-				Ui.circle(c, cx, cy, r, (fade << 24) | (backdrop & 0x00FFFFFF));
-			}
-		} else {
-			drawSilhouette(c, cx, cy, r, alpha, backdrop);
 		}
-	}
-
-	/** Paints everything outside the portrait circle with the backdrop colour. */
-	private static void maskCircle(UiCanvas c, int x, int y, int size, int cx, int cy, int backdrop) {
-		int r = size / 2;
-		for (int row = 0; row < size; row++) {
-			int dy = y + row - cy;
-			int half = (int) Math.sqrt(Math.max(0, (double) r * r - (double) dy * dy));
-			int inset = r - half;
-			if (inset <= 0) {
-				continue;
-			}
-			c.fill(x, y + row, x + inset, y + row + 1, backdrop);
-			c.fill(x + size - inset, y + row, x + size, y + row + 1, backdrop);
-		}
+		drawSilhouette(c, x + size / 2, y + size / 2, size / 2, alpha);
 	}
 
 	/** A neutral head and shoulders silhouette used when no skin is available. */
-	private static void drawSilhouette(UiCanvas c, int cx, int cy, int r, float alpha, int backdrop) {
-		int head = Math.max(3, (int) (r * 0.86f));
-		int body = Math.max(4, (int) (r * 1.5f));
-		Ui.circle(c, cx, cy, r, backdrop);
+	private static void drawSilhouette(UiCanvas c, int cx, int cy, int r, float alpha) {
+		int plate = Ui.withAlpha(UiTheme.PANEL_ALT, Math.round(240 * alpha));
 		int silhouette = Ui.withAlpha(UiTheme.TEXT_3, Math.round(235 * alpha));
+		Ui.roundRect(c, cx - r, cy - r, r * 2, r * 2, Math.max(4, r / 4), plate);
+		int head = Math.max(3, (int) (r * 0.78f));
 		Ui.circle(c, cx, cy - (int) (r * 0.24f), head / 2, silhouette);
-		c.fill(cx - body / 2, cy + r - (int) (r * 0.62f), cx + body / 2, cy + r, silhouette);
+		// Rounded shoulders.
+		int bodyW = Math.max(4, (int) (r * 1.45f));
+		int bodyH = Math.max(4, (int) (r * 0.58f));
+		Ui.roundRect(c, cx - bodyW / 2, cy + r - bodyH, bodyW, bodyH, Math.max(2, bodyH / 2), silhouette);
 	}
+
 }

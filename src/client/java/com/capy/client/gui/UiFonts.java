@@ -5,6 +5,7 @@ import com.mojang.blaze3d.font.TrueTypeGlyphProvider;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
@@ -79,6 +80,7 @@ public final class UiFonts {
 	private static Font display;
 	private static boolean initializing;
 	private static boolean failed;
+	private static int attempts;
 
 	private UiFonts() {
 	}
@@ -104,25 +106,39 @@ public final class UiFonts {
 		return display;
 	}
 
+	/**
+	 * Loads the bundled faces.
+	 *
+	 * The faces are rasterised into a GPU texture, so this can only run once
+	 * the client has a render context. A first attempt that happens too early
+	 * must not poison the client for the rest of the session, therefore a
+	 * failure is retried a few times before the vanilla font is used for good.
+	 */
 	private static void ensureCreated() {
 		if (regular != null || initializing || failed) {
 			return;
 		}
+		if (attempts >= MAX_ATTEMPTS) {
+			failed = true;
+			return;
+		}
+		attempts++;
 		initializing = true;
+		List<GlyphProvider> loaded = new ArrayList<>();
 		try {
 			Minecraft mc = Minecraft.getInstance();
 
-			GlyphProvider p400 = loadFromBundle(LIGHT_TTF, SIZE);
-			GlyphProvider p500 = loadFromBundle(REGULAR_TTF, SIZE);
-			GlyphProvider p600 = loadFromBundle(MEDIUM_TTF, SIZE);
-			GlyphProvider p700 = loadFromBundle(BOLD_TTF, SIZE);
-			GlyphProvider pDisplay = loadFromBundle(BOLD_TTF, DISPLAY_SIZE);
-			providers = List.of(p400, p500, p600, p700, pDisplay);
+			loaded.add(loadFromBundle(LIGHT_TTF, SIZE));
+			loaded.add(loadFromBundle(REGULAR_TTF, SIZE));
+			loaded.add(loadFromBundle(MEDIUM_TTF, SIZE));
+			loaded.add(loadFromBundle(BOLD_TTF, SIZE));
+			loaded.add(loadFromBundle(BOLD_TTF, DISPLAY_SIZE));
+			providers = List.copyOf(loaded);
 
-			setRegular = buildSet(mc, "regular", p400);
-			setMedium = buildSet(mc, "medium", p500);
-			setBold = buildSet(mc, "bold", p600);
-			setDisplay = buildSet(mc, "display", p700);
+			setRegular = buildSet(mc, "regular", loaded.get(0));
+			setMedium = buildSet(mc, "medium", loaded.get(1));
+			setBold = buildSet(mc, "bold", loaded.get(2));
+			setDisplay = buildSet(mc, "display", loaded.get(3));
 
 			regular = fontFor(setRegular);
 			medium = fontFor(setMedium);
@@ -130,28 +146,33 @@ public final class UiFonts {
 			display = fontFor(setDisplay);
 		} catch (Throwable t) {
 			// Loud on purpose: a silent fallback is impossible to tell apart
-			// from shipping the wrong font.
-			LOGGER.error("Capy: failed to load bundled Inter fonts ({} / {} / {} / {}); falling back to the vanilla font.",
-					LIGHT_TTF, REGULAR_TTF, MEDIUM_TTF, BOLD_TTF, t);
-			failed = true;
-			try {
-				Minecraft mc = Minecraft.getInstance();
-				regular = mc.font;
-				medium = mc.font;
-				bold = mc.font;
-				display = mc.font;
-			} catch (Throwable ignored) {
-				// No game is running (an offline render, for instance). The
-				// typefaces stay empty instead of taking the client down.
-				regular = null;
-				medium = null;
-				bold = null;
-				display = null;
+			// from shipping the wrong font. The load is retried, because the
+			// usual cause is a missing render context during startup.
+			if (attempts == 1) {
+				LOGGER.error("Capy: could not build the bundled Inter fonts ({} / {} / {} / {}), retrying.",
+						LIGHT_TTF, REGULAR_TTF, MEDIUM_TTF, BOLD_TTF, t);
+			} else {
+				LOGGER.warn("Capy: still no bundled Inter fonts (attempt {}), retrying.", attempts);
 			}
+			// Give the faces that were already opened back.
+			for (GlyphProvider provider : loaded) {
+				try {
+					provider.close();
+				} catch (Throwable ignored) {
+					// Nothing else to do, the face is gone either way.
+				}
+			}
+			loaded.clear();
 		} finally {
 			initializing = false;
 		}
 	}
+
+	/**
+	 * The number of attempts before the client stops trying to build the
+	 * bundled faces and uses the vanilla font for good.
+	 */
+	private static final int MAX_ATTEMPTS = 4;
 
 	/**
 	 * Opens one bundled TTF and rasterizes it with FreeType.

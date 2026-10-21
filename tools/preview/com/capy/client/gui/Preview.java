@@ -53,6 +53,7 @@ public final class Preview {
 		ModuleManager modules = ModuleManager.get();
 		modules.register(new SwingSpeedModule());
 		modules.register(new AntiAdminModule());
+		modules.register(new com.capy.client.module.modules.HudModule());
 
 		SwingType type = new SwingType();
 
@@ -134,7 +135,7 @@ public final class Preview {
 		float alpha = alert.alpha(System.currentTimeMillis());
 		// Only the burst is alive: the module never fills the alert pool.
 		com.capy.client.gui.UiPetals petals = new com.capy.client.gui.UiPetals();
-		petals.burst(AlertRenderer.PORTRAIT_CX, AlertRenderer.PORTRAIT_CY, 7, 1.0f);
+		petals.burst(AlertRenderer.portraitCenterX(w), AlertRenderer.portraitCenterY(h), 9, 1.2f);
 		for (int i = 0; i < Math.max(1, at / 20); i++) {
 			petals.update(1f, w, h);
 		}
@@ -164,6 +165,9 @@ public final class Preview {
 		for (int i = 0; i < frames; i++) {
 			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
 		}
+		SwingCanvas.fills = 0;
+		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
+		System.out.println("frame draw calls at " + w + "x" + h + ": " + SwingCanvas.fills);
 	}
 
 	private static void save(Path file, GuiFrame frame, SwingType type, int w, int h) throws Exception {
@@ -176,6 +180,8 @@ public final class Preview {
 
 	/** A {@link UiCanvas} that rasterises into a BufferedImage. */
 	static final class SwingCanvas implements UiCanvas {
+		/** Counts the draw calls, so the cost of a frame can be measured. */
+		static long fills;
 		private final BufferedImage image;
 		final Graphics2D g;
 		private final List<Shape> clips = new ArrayList<>();
@@ -194,6 +200,7 @@ public final class Preview {
 
 		@Override
 		public void fill(int x1, int y1, int x2, int y2, int argb) {
+			fills++;
 			if (x2 <= x1 || y2 <= y1) {
 				return;
 			}
@@ -293,8 +300,4 @@ public final class Preview {
 		}
 	}
 
-	/** Unused helper kept for symmetry with the client code. */
-	static List<String> empty() {
-		return new ArrayList<>();
-	}
 }

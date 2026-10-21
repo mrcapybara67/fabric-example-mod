@@ -11,17 +11,16 @@ package com.capy.client.module;
  * an empty category as a clean, designed empty state.
  */
 public enum Category {
-	BASE_FINDER("Base Finder", 0xFFFF8FB8),
-	WORLD("World", 0xFFC9A6D8),
-	VISUAL("Visual", 0xFFFFC4D8),
-	DONUT_SMP("DonutSMP", 0xFFD9578B),
-	MISC("Misc", 0xFFBBAAB7);
+	BASE_FINDER("Base Finder"),
+	WORLD("World"),
+	VISUAL("Visual"),
+	DONUT_SMP("DonutSMP"),
+	MISC("Misc"),
+	HUD("HUD");
 
 	public final String title;
-	public final int accent;
 
-	Category(String title, int accent) {
+	Category(String title) {
 		this.title = title;
-		this.accent = accent;
 	}
 }

@@ -73,6 +73,10 @@ public final class AdminDetector {
 			if (player == local || player.isRemoved()) {
 				continue;
 			}
+			// Every loaded player counts as observed, even when they are out
+			// of range: their position is known, so they are neither nearby
+			// nor "online with an unknown position".
+			seen.add(player.getUUID());
 			String profileName = player.getGameProfile() == null ? null : player.getGameProfile().name();
 			String identity = matchIdentity(mc, player, profileName, watchlist);
 			if (identity == null) {
@@ -82,7 +86,6 @@ public final class AdminDetector {
 			if (distanceSq > rangeSq) {
 				continue;
 			}
-			seen.add(player.getUUID());
 			out.add(new Match(player.getUUID(),
 					profileName == null || profileName.isEmpty() ? identity : profileName,
 					identity,
@@ -94,7 +97,10 @@ public final class AdminDetector {
 		// 2. Players the server lists but did not send an entity for.
 		if (mc.getConnection() != null) {
 			for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
-				if (info == null || seen.contains(info.getProfile().id())) {
+				if (info == null || info.getProfile() == null) {
+					continue;
+				}
+				if (seen.contains(info.getProfile().id()) || info.getProfile().id().equals(local.getUUID())) {
 					continue;
 				}
 				String identity = matchIdentity(mc, info, watchlist);

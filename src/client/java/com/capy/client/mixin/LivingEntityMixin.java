@@ -6,57 +6,49 @@ import com.capy.client.module.modules.SwingSpeedModule;
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
 /**
- * Root-cause fix for the Swing Speed module.
+ * Swing Speed, implemented as a scale on vanilla's own swing duration.
  *
  * How vanilla drives the first-person swing animation (verified against the
  * 1.21.11 bytecode):
  *
- *   LivingEntity.updateSwingTime()   // called from Player.aiStep() every tick
+ *   LivingEntity.updateSwingTime()   // called every tick from baseTick()
  *       duration = getCurrentSwingDuration()
- *       if swinging:  swingTime++; if swingTime >= duration -> reset swing
+ *       if swinging:  swingTime++; if swingTime >= duration -> reset the swing
  *       else:         swingTime = 0
  *       attackAnim = swingTime / duration   // <- what the hand renderer reads
  *
- * The previous mixin overrode {@code getCurrentSwingDuration} — a method only
- * consulted inside {@code updateSwingTime} — and vanilla's own duration math
- * still applied, so the configured value never produced a visibly re-timed
- * animation. Cancelling {@code updateSwingTime} itself and replicating its
- * exact 6-line tick with our duration re-times the animation loop cleanly:
- * no flicker, no desync, and when the module is off vanilla runs untouched.
+ * {@code getCurrentSwingDuration()} is <em>per item</em>: it reads the held
+ * stack's {@code swing_animation} component and then applies the dig speed and
+ * mining fatigue effects. A sword, a pickaxe and a block all swing with
+ * their own rhythm, and mining fatigue slows them down.
  *
- * Only the local player is affected — every other entity keeps vanilla behavior.
+ * The earlier implementation cancelled {@code updateSwingTime} and replayed it
+ * with a fixed duration. That threw the per item rhythm away: every tool fell
+ * back to the same generic swing, which is what made the sword look wrong.
+ *
+ * This mixin instead scales the duration vanilla computed, so:
+ *   - every tool keeps its own animation shape;
+ *   - mining fatigue and dig speed keep working, because vanilla still
+ *     computes them and the module only multiplies the result;
+ *   - the swing state machine, the interpolation between ticks and the
+ *     block breaking animation stay completely vanilla, which is what makes
+ *     the slowed swing smooth instead of stuttery.
  */
 @Mixin(LivingEntity.class)
 public abstract class LivingEntityMixin {
-	@Inject(method = "updateSwingTime", at = @At("HEAD"), cancellable = true)
-	private void capy$overrideSwingTime(CallbackInfo ci) {
+	@ModifyVariable(method = "updateSwingTime", at = @At("STORE"), ordinal = 0)
+	private int capy$scaleSwingDuration(int duration) {
 		SwingSpeedModule module = ModuleManager.get().get(SwingSpeedModule.class);
 		if (module == null || !module.isEnabled()) {
-			return;
+			return duration;
 		}
-		// Only affect OUR arm — other players'/entities' swings stay vanilla.
+		// Only our own arm is affected; other players keep the vanilla rhythm.
 		if (MinecraftAccessorHolder.player() != (Object) this) {
-			return;
+			return duration;
 		}
-
-		LivingEntity self = (LivingEntity) (Object) this;
-		int duration = module.swingTicks();
-
-		if (self.swinging) {
-			self.swingTime++;
-			if (self.swingTime >= duration) {
-				self.swingTime = 0;
-				self.swinging = false;
-			}
-		} else {
-			self.swingTime = 0;
-		}
-		self.attackAnim = (float) self.swingTime / (float) duration;
-
-		ci.cancel();
+		return module.scaleSwingDuration(duration);
 	}
 }

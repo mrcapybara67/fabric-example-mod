@@ -38,11 +38,15 @@ public class SwingSpeedModule extends Module implements Configurable {
 	}
 
 	/**
-	 * Swing animation duration in ticks while this module is enabled.
-	 * Always clamped to a sane positive range.
+	 * Scales the swing duration vanilla computed for the held item.
+	 *
+	 * @param vanillaDuration the duration in ticks vanilla wants to use
+	 * @return the scaled duration, never below one tick
 	 */
-	public int swingTicks() {
-		return clampTicks((int) Math.round(60f / clampedSpeed()));
+	public int scaleSwingDuration(int vanillaDuration) {
+		int base = Math.max(1, vanillaDuration);
+		float factor = 10f / clampedSpeed();
+		return clampTicks(Math.round(base * factor));
 	}
 
 	private int clampedSpeed() {

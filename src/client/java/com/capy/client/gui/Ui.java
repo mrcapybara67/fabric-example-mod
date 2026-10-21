@@ -64,23 +64,23 @@ public final class Ui {
 			return;
 		}
 		float p = Math.min(1f, progress);
-		int outer = radius + thickness / 2;
-		int inner = radius - thickness / 2;
-		if (inner < 0) {
-			inner = 0;
-		}
-		int total = Math.max(1, (int) (Math.PI * 2 * radius));
-		int drawn = (int) (total * p);
-		for (int i = 0; i < drawn; i++) {
-			double angle = -Math.PI / 2 + (i / (double) total) * Math.PI * 2;
-			int px = cx + (int) Math.round(Math.cos(angle) * radius);
-			int py = cy + (int) Math.round(Math.sin(angle) * radius);
-			c.fill(px - thickness / 2, py - thickness / 2,
-					px - thickness / 2 + thickness, py - thickness / 2 + thickness, color);
-		}
-		if (inner >= 0 && p >= 1f) {
-			// Nothing to do; the ring is complete.
-			return;
+		double start = -Math.PI / 2.0;
+		double sweep = Math.PI * 2.0 * p;
+		for (int row = -radius; row <= radius; row++) {
+			double dy = row;
+			double dx = Math.sqrt((double) radius * radius - dy * dy);
+			for (int side = -1; side <= 1; side += 2) {
+				double angle = Math.atan2(dy, dx * side) - start;
+				if (angle < 0) {
+					angle += Math.PI * 2.0;
+				}
+				if (angle > sweep) {
+					continue;
+				}
+				int px = cx + (int) Math.round(dx * side);
+				int half = thickness / 2;
+				c.fill(px - half, cy + row - half, px - half + thickness, cy + row - half + thickness, color);
+			}
 		}
 	}
 
@@ -127,23 +127,57 @@ public final class Ui {
 	}
 
 	/**
-	 * One pixel rim whose colour is interpolated from top to bottom. Used for
-	 * the hairline border of a surface and for accent lines.
+	 * One pixel rim whose colour is interpolated from top to bottom.
+	 *
+	 * The rim is drawn as four straight edges plus the corner arcs instead of
+	 * one fill per row. A panel that is five hundred pixels tall therefore
+	 * costs about ninety fills instead of a thousand, which matters because
+	 * the GUI redraws the shell every frame.
 	 */
 	public static void surfaceEdge(UiCanvas c, int x, int y, int w, int h, int radius, int topColor, int bottomColor) {
 		if (w <= 0 || h <= 0) {
 			return;
 		}
 		int r = clampRadius(radius, w, h);
-		boolean flat = topColor == bottomColor || h <= 1;
-		for (int i = 0; i < h; i++) {
-			int color = flat ? topColor : lerpColor(topColor, bottomColor, i / (float) (h - 1));
-			int inset = r <= 0 ? 0 : Math.max(cornerInset(r, i), cornerInset(r, h - 1 - i));
-			c.fill(x + inset, y + i, x + inset + 1, y + i + 1, color);
-			c.fill(x + w - inset - 1, y + i, x + w - inset, y + i + 1, color);
-			if (i == 0 || i == h - 1) {
-				c.fill(x + inset, y + i, x + w - inset, y + i + 1, color);
-			}
+		// The outermost row of a corner is cut the most, and the top and the
+		// bottom row of a rounded rectangle are cut the same way.
+		int edgeInset = r <= 0 ? 0 : cornerInset(r, 0);
+
+		// The straight edges.
+		c.fill(x + edgeInset, y, x + w - edgeInset, y + 1, topColor);
+		c.fill(x + edgeInset, y + h - 1, x + w - edgeInset, y + h, bottomColor);
+		drawColumn(c, x, y + edgeInset, h - edgeInset * 2, topColor, bottomColor);
+		drawColumn(c, x + w - 1, y + edgeInset, h - edgeInset * 2, topColor, bottomColor);
+
+		// The corner arcs, mirrored top and bottom.
+		for (int i = 0; i < r; i++) {
+			int inset = cornerInset(r, i);
+			int rowTop = y + i;
+			int rowBottom = y + h - 1 - i;
+			int colorTop = lerpColor(topColor, bottomColor, i / (float) Math.max(1, h - 1));
+			int colorBottom = lerpColor(topColor, bottomColor, (h - 1 - i) / (float) Math.max(1, h - 1));
+			c.fill(x + inset, rowTop, x + inset + 1, rowTop + 1, colorTop);
+			c.fill(x + w - 1 - inset, rowTop, x + w - inset, rowTop + 1, colorTop);
+			c.fill(x + inset, rowBottom, x + inset + 1, rowBottom + 1, colorBottom);
+			c.fill(x + w - 1 - inset, rowBottom, x + w - inset, rowBottom + 1, colorBottom);
+		}
+	}
+
+	/** A vertical line split into four segments so the rim can fade. */
+	private static void drawColumn(UiCanvas c, int x, int y, int height, int topColor, int bottomColor) {
+		if (height <= 0) {
+			return;
+		}
+		int quarter = height / 4;
+		if (quarter <= 0) {
+			c.fill(x, y, x + 1, y + height, topColor);
+			return;
+		}
+		for (int i = 0; i < 4; i++) {
+			int segY = y + i * quarter;
+			int segH = (i == 3) ? (y + height) - segY : quarter;
+			float t = (i * quarter) / (float) Math.max(1, height - 1);
+			c.fill(x, segY, x + 1, segY + segH, lerpColor(topColor, bottomColor, t));
 		}
 	}
 
@@ -263,7 +297,7 @@ public final class Ui {
 		if (radius <= 0 || strength <= 0.01f) {
 			return;
 		}
-		final int layers = 5;
+		final int layers = 4;
 		for (int i = layers; i >= 1; i--) {
 			float t = i / (float) layers;
 			int r = Math.round(radius * t);

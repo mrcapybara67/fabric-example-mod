@@ -8,6 +8,7 @@ import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.AntiAdminModule;
+import com.capy.client.module.modules.HudModule;
 import com.capy.client.module.modules.SwingSpeedModule;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -32,6 +33,8 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(new SwingSpeedModule());
 		AntiAdminModule antiAdmin = new AntiAdminModule();
 		modules.register(antiAdmin);
+		HudModule hud = new HudModule();
+		modules.register(hud);
 
 		// Harden stored settings once after registration (clamps invalid
 		// config values before anything can read them).
@@ -66,6 +69,10 @@ public class CapyClient implements ClientModInitializer {
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anti_admin"),
 				(graphics, deltaTracker) -> antiAdmin.onHudRender(graphics, graphics.guiWidth(),
 						graphics.guiHeight(), deltaTracker.getGameTimeDeltaPartialTick(false)));
+
+		// The optional information panel.
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "hud"),
+				(graphics, deltaTracker) -> hud.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight()));
 
 		// Transient detection state must not survive a world change or a
 		// disconnect: the players of the old world are gone.
