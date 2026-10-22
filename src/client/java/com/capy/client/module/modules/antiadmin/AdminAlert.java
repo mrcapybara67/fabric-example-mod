@@ -30,7 +30,12 @@ public final class AdminAlert {
 		/** The player joined the server: announced once per session. */
 		JOINED,
 		/** The player is in the world, inside the detection radius. */
-		NEARBY
+		NEARBY,
+		/**
+		 * The player was hidden from the tab list while staying connected: a
+		 * server side vanish. Announced once per session, like a join.
+		 */
+		VANISHED
 	}
 
 	/** Vanilla's elder guardian particle lives for 30 ticks. */

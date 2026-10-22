@@ -2,6 +2,7 @@ package com.capy.client.module.modules.antiadmin;
 
 import com.capy.client.module.WatchlistSetting;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -32,16 +33,20 @@ import net.minecraft.world.entity.player.PlayerSkin;
  * detection radius cannot be measured from it at all. Those false positives
  * are gone: the list is no longer consulted when deciding whether to alert.
  *
+ * There is one case where a watched player is deliberately hidden but the
+ * client still knows about them, and {@link #scanVanished} covers it: a vanish
+ * plugin that unlists an account instead of removing it.
+ *
  * What this class deliberately does <em>not</em> do:
  * <ul>
  *   <li>infer nearby presence from a name alone;</li>
  *   <li>claim that a matched player is an administrator - the watchlist says
  *       "watch this account", nothing more;</li>
- *   <li>detect a player the server never sends. A server side vanish system
- *       removes the player from the client entirely, so nothing on the client
- *       can see them; a player in spectator mode is not sent to other clients
- *       either. Missing information is treated as unknown, never as evidence
- *       that nobody is around.</li>
+ *   <li>detect a player the server never sends. A vanish system that removes
+ *       the account from the client leaves nothing behind, so nothing on the
+ *       client can see them; a player in spectator mode is not sent to other
+ *       clients either. Missing information is treated as unknown, never as
+ *       evidence that nobody is around.</li>
  * </ul>
  */
 public final class AdminDetector {
@@ -181,6 +186,70 @@ public final class AdminDetector {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Collects watched players that the server has just hidden from the tab
+	 * list while keeping their account connected.
+	 *
+	 * A vanish plugin does not have to remove the account. The modern way is
+	 * {@code UPDATE_LISTED} with {@code listed = false}: the client drops the
+	 * entry from its listed set but leaves it in the player info map, and the
+	 * tab overlay only draws the listed set. The player disappears from the
+	 * screen while the client still knows the name, the skin and the ping.
+	 * That difference is the whole detection.
+	 *
+	 * Only the transition counts. An account that is already unlisted when the
+	 * client connects is not reported, because some lobbies unlist players for
+	 * reasons that have nothing to do with a vanish, and the very first scan
+	 * therefore only records the baseline. An account that was listed on the
+	 * previous scan and is not listed now was hidden while the player was
+	 * watching, which is the event worth announcing.
+	 *
+	 * A server that removes the account outright leaves nothing behind, so that
+	 * case stays invisible - see the class comment.
+	 *
+	 * @param listedLast UUIDs listed on the previous scan; refreshed in place
+	 * @return the watched players hidden since the previous scan
+	 */
+	public static List<Match> scanVanished(Minecraft mc, WatchlistSetting watchlist, Set<UUID> listedLast) {
+		List<Match> out = new ArrayList<>();
+		if (mc == null || watchlist == null || listedLast == null || mc.getConnection() == null) {
+			return out;
+		}
+		Set<UUID> listedNow = new HashSet<>();
+		for (PlayerInfo info : mc.getConnection().getListedOnlinePlayers()) {
+			if (info != null && info.getProfile() != null && info.getProfile().id() != null) {
+				listedNow.add(info.getProfile().id());
+			}
+		}
+
+		for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
+			if (info == null || info.getProfile() == null || info.getProfile().id() == null) {
+				continue;
+			}
+			UUID id = info.getProfile().id();
+			// Still listed, or never listed in the first place: not a vanish.
+			if (listedNow.contains(id) || !listedLast.contains(id)) {
+				continue;
+			}
+			String identity = matchIdentity(info, watchlist);
+			if (identity == null) {
+				continue;
+			}
+			String name = info.getProfile().name();
+			out.add(new Match(id,
+					name == null || name.isEmpty() ? identity : name,
+					identity,
+					-1.0,
+					info.getSkin()));
+		}
+
+		// The next scan compares against this one. Replacing the whole set
+		// also drops everyone who has disconnected.
+		listedLast.clear();
+		listedLast.addAll(listedNow);
+		return out;
 	}
 
 	private static PlayerInfo playerInfo(Minecraft mc, AbstractClientPlayer player) {

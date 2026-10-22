@@ -20,6 +20,7 @@ import com.capy.client.module.modules.antiadmin.AlertSound;
 import com.google.gson.JsonObject;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
@@ -40,6 +41,11 @@ import net.minecraft.client.gui.GuiGraphics;
  *         client has been on the server is a join, and is announced once. It
  *         is never announced again for that session, even if the same player
  *         comes near, which is what makes the two kinds of alert distinct;</li>
+ *     <li>a watched name that <em>leaves</em> the tab list while its account
+ *         stays connected has been made invisible with the modern vanish
+ *         update, and is announced once. That is the one hidden state the
+ *         client can still see, and it is exactly the one this module exists
+ *         for;</li>
  *     <li>the alert is the elder guardian effect with the watched player's own
  *         face, then "&lt;name&gt; is watching you" and the sign-off, plus the
  *         corner notification and (optionally) a sound;</li>
@@ -48,9 +54,11 @@ import net.minecraft.client.gui.GuiGraphics;
  *   </ul>
  *
  * Honest limits: the module can only see what the server tells the client.
- * A server side vanish system that removes the player from the client, and a
- * player in spectator mode, are not sent to other clients at all, so nothing
- * on the client can detect them - and this module does not pretend to. Names
+ * A vanish system that removes the account from the client instead of merely
+ * unlisting it, and a player in spectator mode, are not sent to other clients
+ * at all, so nothing on the client can detect them - and this module does not
+ * pretend to. A vanish is also only noticed at the next scan, so a player who
+ * vanishes and returns within the same four ticks is missed. Names
  * are matched case-insensitively against the identity the client observes
  * (game profile and player list), so a cross-platform server only matches
  * when it exposes that identity.
@@ -77,7 +85,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	 * joined, which is exactly the false alarm this module exists to avoid.
 	 */
 	private static final int JOIN_GRACE_TICKS = 40;
-	/** Watched arrivals that may wait their turn on screen. */
+	/** Announced events that may wait their turn on screen. */
 	private static final int JOIN_QUEUE_MAX = 5;
 
 	private final WatchlistSetting watchlist = setting(new WatchlistSetting("watchlist"));
@@ -90,11 +98,19 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	/** The typefaces are created once and reused for every frame. */
 	private static final UiType TYPE = new McType();
 
+	/** An announced event waiting for the screen to be free. */
+	private record Pending(AdminDetector.Match match, AdminAlert.Kind kind) {
+	}
+
 	private final AlertManager alerts = new AlertManager();
 	/** UUIDs already listed this session, so one arrival is announced once. */
 	private final Set<UUID> joinSeen = new HashSet<>();
-	/** Watched arrivals waiting for the screen to be free. */
-	private final ArrayDeque<AdminDetector.Match> joinQueue = new ArrayDeque<>();
+	/** UUIDs already reported as vanished this session. */
+	private final Set<UUID> vanishSeen = new HashSet<>();
+	/** UUIDs listed on the previous scan, used to spot a vanish. */
+	private final Set<UUID> listedLast = new HashSet<>();
+	/** Announced events waiting for the screen to be free. */
+	private final ArrayDeque<Pending> pending = new ArrayDeque<>();
 	private int ticksUntilScan;
 	/** Ticks since the session started, used for the join grace period. */
 	private int ticksSinceSessionStart;
@@ -112,7 +128,9 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			// online: clearing the baseline restarts the grace period, which
 			// re-learns who is already there without alerting.
 			joinSeen.clear();
-			joinQueue.clear();
+			vanishSeen.clear();
+			listedLast.clear();
+			pending.clear();
 			ticksSinceSessionStart = 0;
 		} else {
 			reset();
@@ -123,7 +141,9 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	public void reset() {
 		alerts.reset();
 		joinSeen.clear();
-		joinQueue.clear();
+		vanishSeen.clear();
+		listedLast.clear();
+		pending.clear();
 		ticksUntilScan = 0;
 		ticksSinceSessionStart = 0;
 	}
@@ -162,14 +182,34 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		// Join announcements. Every listed player is remembered the first time
 		// it is seen, so a single arrival is announced exactly once and a server
 		// that rebuilds its tab list cannot re-report the same person.
-		for (AdminDetector.Match joined : AdminDetector.scanJoins(mc, watchlist, joinSeen)) {
-			if (ticksSinceSessionStart >= JOIN_GRACE_TICKS && joinQueue.size() < JOIN_QUEUE_MAX) {
-				joinQueue.add(joined);
+		List<AdminDetector.Match> joined = AdminDetector.scanJoins(mc, watchlist, joinSeen);
+
+		// Vanish: an account that was listed on the previous scan and is not
+		// listed now. Scanning is unconditional so the baseline is current, but
+		// nothing is announced until the grace window has passed.
+		List<AdminDetector.Match> vanished = AdminDetector.scanVanished(mc, watchlist, listedLast);
+
+		if (ticksSinceSessionStart >= JOIN_GRACE_TICKS) {
+			for (AdminDetector.Match match : joined) {
+				if (pending.size() >= JOIN_QUEUE_MAX) {
+					break;
+				}
+				pending.add(new Pending(match, AdminAlert.Kind.JOINED));
+			}
+			// One vanish report per player per session, so a plugin that flaps
+			// the listed flag cannot spam the screen.
+			for (AdminDetector.Match match : vanished) {
+				if (pending.size() >= JOIN_QUEUE_MAX) {
+					break;
+				}
+				if (vanishSeen.add(match.uuid())) {
+					pending.add(new Pending(match, AdminAlert.Kind.VANISHED));
+				}
 			}
 		}
-		if (!joinQueue.isEmpty() && !alerts.isBusy(now)) {
-			AdminDetector.Match next = joinQueue.poll();
-			if (next != null && alerts.raise(next, AdminAlert.Kind.JOINED, now) && playSound) {
+		if (!pending.isEmpty() && !alerts.isBusy(now)) {
+			Pending next = pending.poll();
+			if (next != null && alerts.raise(next.match(), next.kind(), now) && playSound) {
 				AlertSound.play();
 			}
 		}

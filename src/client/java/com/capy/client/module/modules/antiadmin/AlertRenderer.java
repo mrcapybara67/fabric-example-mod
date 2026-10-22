@@ -41,11 +41,14 @@ public final class AlertRenderer {
 	/** Resolved once, not every frame. */
 	private static final String LABEL_WATCHING = UiLabels.translate("capy.alert.watching", "%s is watching you");
 	private static final String LABEL_JOINED = UiLabels.translate("capy.alert.joined", "%s joined the server");
+	private static final String LABEL_VANISHED = UiLabels.translate("capy.alert.vanished", "%s has vanished");
 	private static final String LABEL_SIGN_OFF =
 			UiLabels.translate("capy.alert.stay_safe", "stay safe capy client user");
 	private static final String LABEL_NEARBY = UiLabels.translate("capy.alert.nearby", "WATCHLIST PLAYER NEARBY");
 	private static final String LABEL_JOINED_TITLE =
 			UiLabels.translate("capy.alert.joined_title", "WATCHLIST PLAYER JOINED");
+	private static final String LABEL_VANISHED_TITLE =
+			UiLabels.translate("capy.alert.vanished_title", "WATCHLIST PLAYER VANISHED");
 
 	/** Gap between the name line and the sign-off. */
 	private static final int LINE_GAP = 10;
@@ -109,7 +112,11 @@ public final class AlertRenderer {
 		int maxWidth = Math.max(40, screenW - 48);
 
 		if (nameAlpha > 0.01f) {
-			String pattern = alert.kind() == AdminAlert.Kind.JOINED ? LABEL_JOINED : LABEL_WATCHING;
+			String pattern = switch (alert.kind()) {
+				case JOINED -> LABEL_JOINED;
+				case VANISHED -> LABEL_VANISHED;
+				case NEARBY -> LABEL_WATCHING;
+			};
 			String line = pattern.replace("%s", alert.username());
 			drawShadowedCentered(c, display, line, screenW / 2, top, maxWidth,
 					Ui.withAlpha(UiTheme.TEXT, Math.round(255f * nameAlpha)));
@@ -173,9 +180,13 @@ public final class AlertRenderer {
 		int accent = UiTheme.ACCENT;
 
 		boolean nearby = alert.hasDistance();
-		String title = nearby ? LABEL_NEARBY : LABEL_JOINED_TITLE;
-		// The distance is only known for a nearby detection; a join carries no
-		// position at all, so the name stands alone there.
+		String title = switch (alert.kind()) {
+			case NEARBY -> LABEL_NEARBY;
+			case JOINED -> LABEL_JOINED_TITLE;
+			case VANISHED -> LABEL_VANISHED_TITLE;
+		};
+		// The distance is only known for a nearby detection; a join and a
+		// vanish carry no position at all, so the name stands alone there.
 		String name = nearby ? alert.username() + "  ·  " + alert.distanceText() : alert.username();
 		int w = Math.max(medium.width(title), regular.width(name)) + 52;
 		int h = 42;

@@ -69,5 +69,7 @@
 	"capy.alert.joined_title": "WATCHLIST PLAYER JOINED",
 	"capy.alert.watching": "%s is watching you",
 	"capy.alert.joined": "%s joined the server",
+	"capy.alert.vanished": "%s has vanished",
+	"capy.alert.vanished_title": "WATCHLIST PLAYER VANISHED",
 	"capy.alert.stay_safe": "stay safe capy client user"
 }
