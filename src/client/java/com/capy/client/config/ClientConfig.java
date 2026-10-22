@@ -46,6 +46,8 @@ public final class ClientConfig {
 
 	private static final String KEY_THEME = "theme";
 	private static final String KEY_MODULES = "modules";
+	/** Per module: whether it was switched on when the game was last closed. */
+	private static final String KEY_ENABLED = "enabled";
 
 	private static ClientConfig instance = new ClientConfig();
 
@@ -119,14 +121,19 @@ public final class ClientConfig {
 	/** Pushes the stored values into the modules that asked for them. */
 	private void applyToModules() {
 		for (Module module : ModuleManager.get().modules()) {
+			JsonObject data = moduleData(module.id());
 			if (module instanceof Configurable configurable) {
 				try {
-					configurable.loadConfig(moduleData(module.id()));
+					configurable.loadConfig(data);
 				} catch (RuntimeException e) {
 					LOGGER.warn("Capy: module '{}' rejected its stored settings ({}); using defaults.",
 							module.id(), e.toString());
 				}
 			}
+			// Whether a module is switched on is part of its state. Without this
+			// every module came back switched off after a restart, so a HUD
+			// element the user had turned on silently disappeared.
+			module.setEnabled(ConfigValues.boolValue(data, KEY_ENABLED, module.isEnabled()));
 		}
 	}
 
@@ -137,16 +144,17 @@ public final class ClientConfig {
 
 		JsonObject modules = new JsonObject();
 		for (Module module : ModuleManager.get().modules()) {
+			JsonObject data = new JsonObject();
 			if (module instanceof Configurable configurable) {
-				JsonObject data = new JsonObject();
 				try {
 					configurable.saveConfig(data);
 				} catch (RuntimeException e) {
 					LOGGER.warn("Capy: module '{}' failed to save its settings ({}).", module.id(), e.toString());
 					continue;
 				}
-				modules.add(module.id(), data);
 			}
+			data.addProperty(KEY_ENABLED, module.isEnabled());
+			modules.add(module.id(), data);
 		}
 		root.add(KEY_MODULES, modules);
 		return root;

@@ -111,9 +111,10 @@ public class UiWatchlist {
 				addHovered ? UiTheme.ON_ACCENT : UiTheme.TEXT_2);
 		cy += INPUT_H + UiTheme.SP_2;
 
-		// Status line (only while the message is fresh).
+		// Status line (only while the message is fresh), centred in the band
+		// that is reserved for it so it can never push the list down.
 		if (!status.isEmpty() && System.currentTimeMillis() < statusUntil) {
-			font.draw(c, status, x, cy, UiTheme.ACCENT_DEEP);
+			font.draw(c, status, x, Ui.centerTextY(cy, STATUS_H, font), UiTheme.ACCENT_DEEP);
 		}
 		cy += STATUS_H;
 
@@ -135,7 +136,7 @@ public class UiWatchlist {
 
 			// Blossom bullet.
 			UiIcons.draw(c, UiIcons.Icon.BLOSSOM, x + UiTheme.SP_2, rowY + 3, 9, UiTheme.ACCENT_2);
-			font.draw(c, entry, x + UiTheme.SP_2 + 13, rowY + 4, UiTheme.TEXT);
+			font.draw(c, entry, x + UiTheme.SP_2 + 13, Ui.centerTextY(rowY, ENTRY_H - 2, font), UiTheme.TEXT);
 
 			// Remove button.
 			int rm = 12;

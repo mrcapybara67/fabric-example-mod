@@ -34,18 +34,27 @@ public final class GuiFrame {
 	/** Height of the section header above the card list. */
 	private static final int SECTION_HEADER_H = 26;
 
+	/** Height of the theme picker button at the foot of the sidebar. */
+	private static final int THEME_PICKER_H = 26;
+	/** Height of the "THEME" caption above that button. */
+	private static final int THEME_CAPTION_H = 14;
+
+	/** Everything below the last category row, from the caption down. */
+	private static final int SIDEBAR_FOOTER_H = UiTheme.SP_8 + THEME_PICKER_H
+			+ UiTheme.SP_2 + THEME_CAPTION_H + UiTheme.SP_3;
+
+	/** The smallest a category row may get before it stops being usable. */
+	private static final int CATEGORY_H_MIN = 15;
+
 	/**
-	 * The space the sidebar needs: the section label, every category row, the
-	 * theme picker and the keybind hint. The window never gets shorter than
-	 * this, so the sidebar can never overflow.
+	 * The space the sidebar needs at its smallest usable row height. The window
+	 * never gets shorter than this, so every category stays reachable.
 	 */
 	private static int sidebarMinHeight() {
-		int label = UiTheme.SP_5 + 16;
-		int rows = CATEGORIES.length * (UiTheme.CATEGORY_H + UiTheme.SP_1);
-		int footer = 58 + UiTheme.SP_6;
-		return UiTheme.HEADER_H + label + rows + footer;
+		int label = UiTheme.SP_5 + UiTheme.SP_6;
+		int rows = CATEGORIES.length * (CATEGORY_H_MIN + UiTheme.SP_1);
+		return UiTheme.HEADER_H + label + rows + SIDEBAR_FOOTER_H;
 	}
-
 
 	private final Map<Category, List<ModuleCard>> cards = new EnumMap<>(Category.class);
 	private final UiScrollbar scrollbar = new UiScrollbar();
@@ -150,7 +159,11 @@ public final class GuiFrame {
 		}
 		int needed = UiTheme.HEADER_H + UiTheme.SP_6 + SECTION_HEADER_H + content + UiTheme.SP_6;
 		int max = Math.min(520, (int) (height * 0.82f));
-		int min = Math.min(max, sidebarMinHeight());
+		// The sidebar is allowed to push the window past the content cap, but
+		// never off the screen: on a short window showing every category
+		// matters more than the empty space the 82% rule would leave.
+		int hardMax = Math.min(520, (int) (height * 0.94f));
+		int min = Math.min(hardMax, sidebarMinHeight());
 		return Math.max(min, Math.min(max, needed));
 	}
 
@@ -160,6 +173,82 @@ public final class GuiFrame {
 
 	private int windowY() {
 		return (height - windowHeight()) / 2;
+	}
+
+	// ---- Sidebar geometry ------------------------------------------------
+	// The renderer and the hit test both go through these, so a click can
+	// never land on a row that was drawn somewhere else.
+
+	private int sidebarX() {
+		return windowX() + UiTheme.SP_4;
+	}
+
+	private int sidebarY() {
+		return windowY() + UiTheme.HEADER_H - UiTheme.SP_1;
+	}
+
+	private int sidebarW() {
+		return UiTheme.SIDEBAR_W - UiTheme.SP_4;
+	}
+
+	private int sidebarH() {
+		return windowHeight() - UiTheme.HEADER_H + UiTheme.SP_1 - UiTheme.SP_4;
+	}
+
+	/**
+	 * The height of one category row for the current window height.
+	 *
+	 * This is the fix for the "missing" HUD category. The rows used to have a
+	 * fixed height, so on a short window the last categories were laid out
+	 * below the bottom edge of the sidebar and were never drawn - the panel
+	 * simply looked like it had fewer categories than it has. HUD is the last
+	 * category, so it was the one that vanished. The rows now shrink to fit
+	 * instead of running off the panel.
+	 */
+	private int categoryRowHeight() {
+		int listTop = UiTheme.SP_5 + UiTheme.SP_6;
+		int available = footerTop() - UiTheme.SP_3 - listTop;
+		int perRow = available / CATEGORIES.length - UiTheme.SP_1;
+		return Math.max(CATEGORY_H_MIN, Math.min(UiTheme.CATEGORY_H, perRow));
+	}
+
+	/**
+	 * True when the sidebar is tall enough for the theme picker and the hint
+	 * under the category list.
+	 */
+	private boolean footerFitted() {
+		int listTop = UiTheme.SP_5 + UiTheme.SP_6;
+		int needed = listTop + CATEGORIES.length * (CATEGORY_H_MIN + UiTheme.SP_1) + SIDEBAR_FOOTER_H;
+		return needed <= sidebarH();
+	}
+
+	/**
+	 * Where the footer begins, measured from the top of the sidebar: the rows
+	 * must end above this, and the theme caption is drawn just below it.
+	 *
+	 * On a very short window the footer is dropped entirely rather than letting
+	 * it eat the category list - a GUI that cannot show the categories is worse
+	 * than one without the theme picker.
+	 */
+	private int footerTop() {
+		if (!footerFitted()) {
+			return sidebarH() - UiTheme.SP_2;
+		}
+		return sidebarH() - UiTheme.SP_8 - THEME_PICKER_H - UiTheme.SP_2 - THEME_CAPTION_H;
+	}
+
+	/** The y of the first category row. */
+	private int categoryListY() {
+		return sidebarY() + UiTheme.SP_5 + UiTheme.SP_6;
+	}
+
+	/** The x of the category rows, inside the panel padding. */
+	private int categoryRowX() {
+		return sidebarX() + UiTheme.SP_2;
+	}
+
+	private int categoryRowW() {
+		return sidebarW() - UiTheme.SP_2 * 2;
 	}
 
 	private int contentX() {
@@ -218,13 +307,15 @@ public final class GuiFrame {
 		petals.update(delta, width, height);
 		petals.render(c, UiPetals.Layer.BACK, fade);
 
-		// The window settles into place: it rises a little and scales up
-		// very slightly while it fades in.
-		float ease = Motion.easeOutCubic(fade);
-		int ww = Math.round(windowWidth() * (0.965f + 0.035f * ease));
-		int wh = Math.round(windowHeight() * (0.965f + 0.035f * ease));
+		// The window pops into place: it grows out of 88% with a small
+		// overshoot, drops in from above and fades up. The overshoot is what
+		// makes the opening feel springy instead of merely fading.
+		float ease = Motion.easeOutQuint(fade);
+		float pop = Motion.easeOutBack(fade, 2.2f);
+		int ww = Math.round(windowWidth() * (0.88f + 0.12f * pop));
+		int wh = Math.round(windowHeight() * (0.88f + 0.12f * pop));
 		int wx = (width - ww) / 2;
-		int wy = (height - wh) / 2 + Math.round((1f - ease) * 10f);
+		int wy = (height - wh) / 2 + Math.round((1f - ease) * 18f);
 		int r = UiTheme.RADIUS_XL;
 
 		Ui.shadow(c, wx, wy, ww, wh, r);
@@ -254,14 +345,20 @@ public final class GuiFrame {
 		switchProgress = Motion.approach(switchProgress, 1f, 12f, delta / 20f);
 
 		renderHeader(c, type, wx, wy, ww, mouseX, mouseY, delta);
-		renderSidebar(c, type, wx, wy, ww, wh, mouseX, mouseY, delta, (1f - ease) * 12f);
-		renderContent(c, type, mouseX, mouseY, delta, (1f - ease) * 10f);
+		// The sidebar arrives with the shell, the workspace a beat later, so
+		// the eye is led from the frame to the content instead of being hit by
+		// a whole finished window at once.
+		float contentEase = Motion.easeOutCubic(Motion.clamp01(fade * 1.18f - 0.18f));
+		renderSidebar(c, type, wx, wy, ww, wh, mouseX, mouseY, delta, (1f - ease) * 22f);
+		renderContent(c, type, mouseX, mouseY, delta, (1f - contentEase) * 26f);
 
 		// A few petals pass in front of the window for depth. They are very
 		// faint so they never compete with the content.
 		petals.render(c, UiPetals.Layer.FRONT, fade * 0.7f);
 
-		themePicker.renderOverlay(c, type.regular(), mouseX, mouseY, delta);
+		if (footerFitted()) {
+			themePicker.renderOverlay(c, type.regular(), mouseX, mouseY, delta);
+		}
 		tooltip.render(c, type.regular());
 	}
 
@@ -282,19 +379,25 @@ public final class GuiFrame {
 		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, markX + 7, cy + 7, 20, UiTheme.ACCENT);
 		Ui.glow(c, markX - 6, cy - 6, mark + 12, mark + 12, UiTheme.ACCENT, 0.16f);
 
-		// Wordmark.
+		// Wordmark. Every line in the header is centred inside the header band,
+		// so the wordmark, the page title and the search placeholder share a
+		// common centre line even though they use different weights.
 		UiText display = type.display();
+		UiText pageFont = type.medium();
 		int nameX = markX + mark + UiTheme.SP_4;
-		int nameY = wy + (UiTheme.HEADER_H - display.lineHeight()) / 2 - 3;
+		int nameY = Ui.centerTextY(wy, UiTheme.HEADER_H, display);
 		display.draw(c, "Capy Client", nameX, nameY, UiTheme.TEXT);
 
 		// The current page, separated from the wordmark by a hairline.
 		int pageX = nameX + display.width("Capy Client") + UiTheme.SP_4;
 		int fieldX = searchX(wx, ww);
 		if (fieldX - pageX > UiTheme.SP_6 * 2) {
-			Ui.surface(c, pageX - UiTheme.SP_3, nameY + 3, 1, display.lineHeight() - 4, 0, UiTheme.BORDER);
+			int ruleH = display.lineHeight() - 4;
+			int ruleY = wy + (UiTheme.HEADER_H - ruleH) / 2;
+			Ui.surface(c, pageX - UiTheme.SP_3, ruleY, 1, ruleH, 0, UiTheme.BORDER);
 			String page = search.query().isEmpty() ? CATEGORIES[selected].title : "Search results";
-			Ui.drawEllipsized(c, type.medium(), page, pageX + UiTheme.SP_3, nameY + 1,
+			Ui.drawEllipsized(c, pageFont, page, pageX + UiTheme.SP_3,
+					Ui.centerTextY(wy, UiTheme.HEADER_H, pageFont),
 					fieldX - pageX - UiTheme.SP_6, UiTheme.TEXT_2);
 		}
 
@@ -321,28 +424,30 @@ public final class GuiFrame {
 
 	private void renderSidebar(UiCanvas c, UiType type, int wx, int wy, int ww, int wh, int mouseX, int mouseY,
 			float delta, float slide) {
-		int px = wx + UiTheme.SP_4 - Math.round(slide);
-		int py = wy + UiTheme.HEADER_H - UiTheme.SP_1;
-		int pw = UiTheme.SIDEBAR_W - UiTheme.SP_4;
-		int ph = wh - UiTheme.HEADER_H + UiTheme.SP_1 - UiTheme.SP_4;
+		int px = sidebarX() - Math.round(slide);
+		int py = sidebarY();
+		int pw = sidebarW();
+		int ph = sidebarH();
 
 		// The sidebar is a panel set into the shell.
 		Ui.surface(c, px, py, pw, ph, UiTheme.RADIUS_LG, UiTheme.PANEL_TOP, UiTheme.PANEL_BOTTOM);
 		Ui.outline(c, px, py, pw, ph, UiTheme.RADIUS_LG, UiTheme.BORDER);
 
-		int sx0 = px + UiTheme.SP_2;
-		int sw = pw - UiTheme.SP_2 * 2;
-		int y = py + UiTheme.SP_5;
+		int sx0 = categoryRowX();
+		int sw = categoryRowW();
+		int y = categoryListY();
+		// One row height for the whole list, taken from the same helper the
+		// hit test uses: rows shrink instead of running past the panel.
+		int rowH = categoryRowHeight();
+		int rowPitch = rowH + UiTheme.SP_1;
 
-		Ui.drawEllipsized(c, type.regular(), "CATEGORIES", sx0 + UiTheme.SP_3, y, sw - UiTheme.SP_5,
-				UiTheme.TEXT_3);
-		y += UiTheme.SP_6;
+		Ui.drawEllipsized(c, type.regular(), "CATEGORIES", sx0 + UiTheme.SP_3, py + UiTheme.SP_5,
+				sw - UiTheme.SP_5, UiTheme.TEXT_3);
 
 		for (int i = 0; i < CATEGORIES.length; i++) {
 			Category category = CATEGORIES[i];
-			boolean hovered = mouseX >= sx0 && mouseX < sx0 + sw && mouseY >= y && mouseY < y + UiTheme.CATEGORY_H;
+			boolean hovered = mouseX >= sx0 && mouseX < sx0 + sw && mouseY >= y && mouseY < y + rowH;
 			float sel = select[i];
-			int rowH = UiTheme.CATEGORY_H;
 			int rr = UiTheme.RADIUS;
 
 			if (sel > 0.02f) {
@@ -363,7 +468,7 @@ public final class GuiFrame {
 			// The category rows are typographic: no symbol on every entry.
 			int textX = sx0 + UiTheme.SP_4;
 			UiText medium = type.medium();
-			int textY = y + (rowH - medium.lineHeight()) / 2;
+			int textY = Ui.centerTextY(y, rowH, medium);
 			int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(sel * 0.9f, hovered ? 0.7f : 0f));
 			Ui.drawEllipsized(c, medium, category.title, textX, textY, sx0 + sw - UiTheme.SP_5 - textX, nameColor);
 
@@ -377,11 +482,11 @@ public final class GuiFrame {
 				Ui.surface(c, bx, by, bw, 14, 7,
 						Ui.lerpColor(Ui.withAlpha(UiTheme.PANEL_ALT, 0xD0), Ui.withAlpha(UiTheme.ACCENT, 0x59), sel),
 						Ui.lerpColor(Ui.withAlpha(UiTheme.PANEL_TOP, 0xD0), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x33), sel));
-				Ui.drawCentered(c, regular, label, bx + bw / 2, by + (14 - regular.lineHeight()) / 2,
+				Ui.drawCentered(c, regular, label, bx + bw / 2, Ui.centerTextY(by, 14, regular),
 						Ui.lerpColor(UiTheme.TEXT_3, UiTheme.TEXT, sel));
 			}
 
-			y += rowH + UiTheme.SP_1;
+			y += rowPitch;
 		}
 
 		// A large, very faint blossom fills the space between the categories
@@ -391,19 +496,24 @@ public final class GuiFrame {
 		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, px + pw / 2 - 48, py + ph / 2 - 48, 96,
 				Ui.withAlpha(UiTheme.ACCENT, 0x0D));
 
-		// Theme picker at the foot of the sidebar.
-		int pickerH = 26;
-		int pickerY = py + ph - UiTheme.SP_8 - pickerH;
-		Ui.drawEllipsized(c, type.regular(), "THEME", sx0 + UiTheme.SP_3, pickerY - UiTheme.SP_4,
+		if (!footerFitted()) {
+			return;
+		}
+
+		// Theme picker at the foot of the sidebar. The caption is placed from
+		// the bottom of its own band, so it can never sit on top of the button.
+		int pickerY = py + ph - UiTheme.SP_8 - THEME_PICKER_H;
+		int captionY = pickerY - UiTheme.SP_2 - type.regular().lineHeight();
+		Ui.drawEllipsized(c, type.regular(), "THEME", sx0 + UiTheme.SP_3, captionY,
 				sw - UiTheme.SP_5, UiTheme.TEXT_3);
-		themePicker.bind(sx0 + UiTheme.SP_2, pickerY, sw - UiTheme.SP_4, pickerH, true);
+		themePicker.bind(sx0 + UiTheme.SP_2, pickerY, sw - UiTheme.SP_4, THEME_PICKER_H, true);
 		themePicker.render(c, type.regular(), mouseX, mouseY, delta);
 
 		// Keybind hint.
 		String hint = ClientKeybinds.openClickGui() == null
 				? "?"
 				: ClientKeybinds.openClickGui().getTranslatedKeyMessage().getString();
-		int hintY = py + ph - UiTheme.SP_5;
+		int hintY = Ui.textYFromBottom(py + ph, UiTheme.SP_5, type.regular());
 		int hintX = sx0 + UiTheme.SP_3;
 		Ui.drawEllipsized(c, type.regular(), hint + "  to close", hintX, hintY, sw - UiTheme.SP_4, UiTheme.TEXT_3);
 		boolean hintHovered = mouseX >= hintX && mouseX < hintX + sw - UiTheme.SP_4
@@ -428,11 +538,12 @@ public final class GuiFrame {
 		// The section header: what is shown and how much of it there is.
 		int headerH = SECTION_HEADER_H;
 		UiText bold = type.bold();
+		UiText meta = type.regular();
 		String title = showCategory ? "Search results" : CATEGORIES[selected].title;
-		Ui.drawEllipsized(c, bold, title, cx, top, cw - 60, UiTheme.TEXT);
-		Ui.drawRightAligned(c, type.regular(),
+		Ui.drawEllipsized(c, bold, title, cx, Ui.centerTextY(top, headerH, bold), cw - 60, UiTheme.TEXT);
+		Ui.drawRightAligned(c, meta,
 				list.size() + (list.size() == 1 ? " module" : " modules"),
-				cx + cw, top + 2, UiTheme.TEXT_3);
+				cx + cw, Ui.centerTextY(top, headerH, meta), UiTheme.TEXT_3);
 		// A delicate line under the section header.
 		Ui.fadeLine(c, cx, top + headerH - 6, cw, Ui.withAlpha(UiTheme.BORDER, 0xC0));
 
@@ -549,7 +660,9 @@ public final class GuiFrame {
 		}
 
 		// The theme list floats above everything, so it gets the first refusal.
-		if (themePicker.isExpanded() && themePicker.mouseClicked(mx, my)) {
+		// It is skipped while the footer is hidden on a very short window, so a
+		// stale hit region can never change a theme from off screen.
+		if (footerFitted() && themePicker.isExpanded() && themePicker.mouseClicked(mx, my)) {
 			applyThemeIfChanged();
 			return true;
 		}
@@ -576,24 +689,25 @@ public final class GuiFrame {
 			}
 		}
 
-		// Sidebar rows.
-		int px = wx + UiTheme.SP_4;
-		int py = wy + UiTheme.HEADER_H - UiTheme.SP_1;
-		int pw = UiTheme.SIDEBAR_W - UiTheme.SP_4;
-		int sx0 = px + UiTheme.SP_2;
-		int sw = pw - UiTheme.SP_2 * 2;
-		int rowY = py + UiTheme.SP_5 + UiTheme.SP_6;
+		// Sidebar rows. The row height comes from the same helper the renderer
+		// uses, so a click always lands on the row that was actually drawn.
+		int rowH = categoryRowHeight();
+		int rowPitch = rowH + UiTheme.SP_1;
+		int sx0 = categoryRowX();
+		int sw = categoryRowW();
+		int rowY = categoryListY();
 		if (mx >= sx0 && mx < sx0 + sw && my >= rowY) {
-			int index = (int) ((my - rowY) / (UiTheme.CATEGORY_H + UiTheme.SP_1));
-			if (index >= 0 && index < CATEGORIES.length) {
+			int index = (int) ((my - rowY) / rowPitch);
+			int rowTop = rowY + index * rowPitch;
+			if (index >= 0 && index < CATEGORIES.length && my < rowTop + rowH) {
 				selected = index;
 				search.clear();
 				return true;
 			}
 		}
 
-		// Theme picker.
-		if (themePicker.contains(mx, my)) {
+		// Theme picker (only when the footer is on screen).
+		if (footerFitted() && themePicker.contains(mx, my)) {
 			themePicker.mouseClicked(mx, my);
 			applyThemeIfChanged();
 			return true;

@@ -65,9 +65,13 @@ public class UiSlider {
 	 * scissor-clipped by the caller.
 	 */
 	public void render(UiCanvas c, UiText font, int rowX, int rowW) {
-		Ui.drawEllipsized(c, font, label, rowX, trackY - 17,
+		// The label and the value share one line, and that line sits far enough
+		// above the track that the knob can never ride over the text at either
+		// end of its travel.
+		int labelY = trackY - 24;
+		Ui.drawEllipsized(c, font, label, rowX, labelY,
 				rowW - font.width(valueText) - UiTheme.SP_3, UiTheme.TEXT_2);
-		Ui.drawRightAligned(c, font, valueText, rowX + rowW, trackY - 17, UiTheme.TEXT);
+		Ui.drawRightAligned(c, font, valueText, rowX + rowW, labelY, UiTheme.TEXT);
 
 		int trackH = 8;
 		int half = trackH / 2;

@@ -8,8 +8,9 @@ import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.AntiAdminModule;
-import com.capy.client.module.modules.HudModule;
 import com.capy.client.module.modules.SwingSpeedModule;
+import com.capy.client.module.modules.hud.HudElements;
+import com.capy.client.module.modules.hud.HudRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
@@ -33,8 +34,8 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(new SwingSpeedModule());
 		AntiAdminModule antiAdmin = new AntiAdminModule();
 		modules.register(antiAdmin);
-		HudModule hud = new HudModule();
-		modules.register(hud);
+		// The HUD is a set of independent elements, not one panel.
+		HudElements.register(modules);
 
 		// Harden stored settings once after registration (clamps invalid
 		// config values before anything can read them).
@@ -65,14 +66,14 @@ public class CapyClient implements ClientModInitializer {
 			}
 		});
 
+		// The HUD chips go first, so an alert is never hidden behind them.
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "hud"),
+				(graphics, deltaTracker) -> HudRenderer.render(graphics, graphics.guiWidth(), graphics.guiHeight()));
+
 		// The Anti Admin alerts are drawn over the HUD.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anti_admin"),
 				(graphics, deltaTracker) -> antiAdmin.onHudRender(graphics, graphics.guiWidth(),
-						graphics.guiHeight(), deltaTracker.getGameTimeDeltaPartialTick(false)));
-
-		// The optional information panel.
-		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "hud"),
-				(graphics, deltaTracker) -> hud.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight()));
+						graphics.guiHeight()));
 
 		// Transient detection state must not survive a world change or a
 		// disconnect: the players of the old world are gone.

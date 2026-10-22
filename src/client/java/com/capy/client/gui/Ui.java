@@ -346,6 +346,29 @@ public final class Ui {
 		font.draw(c, text, x - font.width(text) / 2, y, color);
 	}
 
+	/**
+	 * The y a line of text must be drawn at to sit vertically centred inside a
+	 * box of the given height.
+	 *
+	 * Every label, value, hint and caption in the interface goes through this
+	 * one rule instead of a hand tuned offset. Hand tuned offsets were the
+	 * reason text on the same row drifted apart: each font has its own line
+	 * height, so "+2" happened to look right for one face and was wrong for
+	 * the next.
+	 */
+	public static int centerTextY(int boxTop, int boxHeight, UiText font) {
+		if (font == null) {
+			return boxTop;
+		}
+		return boxTop + (boxHeight - font.lineHeight()) / 2;
+	}
+
+	/** The y that puts the bottom of a line of text {@code gap} above boxBottom. */
+	public static int textYFromBottom(int boxBottom, int gap, UiText font) {
+		int lineHeight = font == null ? 9 : font.lineHeight();
+		return boxBottom - gap - lineHeight;
+	}
+
 	// ------------------------------------------------------------- utilities
 
 	private static int clampRadius(int radius, int w, int h) {

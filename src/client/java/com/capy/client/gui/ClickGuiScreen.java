@@ -16,16 +16,26 @@ import net.minecraft.network.chat.Component;
  * with the window. All layout and drawing lives in the frame, which is what
  * makes the interface reviewable outside the game.
  *
- * The transition is a short fade with a small rise and a slight scale - it
- * must never delay the interface, and it must never leave the screen stuck
- * in a state where it cannot be closed again.
+ * The transition is driven by a plain timeline here, not by an easing curve:
+ * the frame owns the easing, so the timing stays predictable and the opening
+ * and the closing can have different durations. Closing is shorter than
+ * opening on purpose - leaving an interface should never feel like waiting.
+ *
+ * The screen must never get stuck in a state where it cannot be closed again,
+ * so the progress is clamped at both ends and the close always completes.
  */
 public class ClickGuiScreen extends Screen {
 	/** The typefaces are created once and reused for every frame. */
 	private static final UiType UI_TYPE = new McType();
 
+	/** Seconds the window takes to open. */
+	private static final float OPEN_SECONDS = 0.26f;
+	/** Seconds the window takes to close. Shorter: leaving should feel instant. */
+	private static final float CLOSE_SECONDS = 0.17f;
+
 	private final GuiFrame frame = new GuiFrame();
-	private final Anim open = new Anim(0f, 11f);
+	/** 0 closed .. 1 open. Advanced by wall time, eased by the frame. */
+	private float progress;
 	private boolean closing;
 
 	public ClickGuiScreen() {
@@ -37,7 +47,7 @@ public class ClickGuiScreen extends Screen {
 		frame.rebuild();
 		frame.resize(this.width, this.height);
 		closing = false;
-		open.snap(0f);
+		progress = 0f;
 	}
 
 	@Override
@@ -50,12 +60,15 @@ public class ClickGuiScreen extends Screen {
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-		open.to(closing ? 0f : 1f, partialTick);
-		float progress = open.value();
-		if (progress <= 0.015f) {
-			if (closing) {
-				finishClose();
-			}
+		float step = Math.max(0f, partialTick) / 20f;
+		float duration = closing ? CLOSE_SECONDS : OPEN_SECONDS;
+		progress += (closing ? -step : step) / duration;
+		progress = Math.max(0f, Math.min(1f, progress));
+		if (closing && progress <= 0f) {
+			finishClose();
+			return;
+		}
+		if (progress <= 0f) {
 			return;
 		}
 		frame.render(McCanvas.of(g), UI_TYPE, mouseX, mouseY, partialTick, progress);

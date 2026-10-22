@@ -24,8 +24,12 @@ import java.util.Map;
  *   - Click a setting control   -> drives that setting, never the module
  */
 public class ModuleCard {
+	/** Width of the clickable strip that holds the settings chevron. */
 	private static final int CHEVRON_W = 16;
-	private static final int DESC_H = 13;
+	/** Size of the chevron glyph itself, centred in that strip. */
+	private static final int CHEVRON_SIZE = 12;
+	/** Gap between the module name and its description. */
+	private static final int DESC_GAP = 3;
 	private static final int PAD = 10;
 
 	private static final int ROW_SLIDER = 40;
@@ -246,29 +250,34 @@ public class ModuleCard {
 					Ui.withAlpha(UiTheme.ACCENT_DEEP, Math.round(255 * onv)));
 		}
 
-		// Name and description, aligned on one left edge.
+		// Name and description, aligned on one left edge. The two lines are
+		// centred as one block in the card header, so a card with a
+		// description and a card without both look deliberate instead of one
+		// of them sitting high.
 		UiText medium = type.medium();
 		UiText regular = type.regular();
 		int textX = x + UiTheme.SP_6;
-		int textRight = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W - UiTheme.SP_4;
-		if (hasSettings()) {
-			textRight -= CHEVRON_W;
-		}
+		int textRight = hasSettings()
+				? chevronLeft(w) - UiTheme.SP_3
+				: x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W - UiTheme.SP_4;
 		String desc = showCategory ? taggedDescription : description;
 		boolean hasDesc = desc != null && !desc.isEmpty();
-		int nameY = hasDesc ? y + 11 : y + (UiTheme.CARD_H - medium.lineHeight()) / 2;
+		int blockH = hasDesc ? medium.lineHeight() + DESC_GAP + regular.lineHeight() : medium.lineHeight();
+		int nameY = y + (UiTheme.CARD_H - blockH) / 2;
 		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.8f));
 		Ui.drawEllipsized(c, medium, title, textX, nameY, textRight - textX, nameColor);
 		if (hasDesc) {
-			Ui.drawEllipsized(c, regular, desc, textX, nameY + DESC_H, textRight - textX, UiTheme.TEXT_3);
+			Ui.drawEllipsized(c, regular, desc, textX, nameY + medium.lineHeight() + DESC_GAP,
+					textRight - textX, UiTheme.TEXT_3);
 		}
 
-		// The settings chevron sits between the name and the switch.
+		// The settings chevron sits in its own strip between the name and the
+		// switch. That strip is the hit target, so it is defined once.
 		if (hasSettings()) {
-			int cx = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W - UiTheme.SP_4 + 2;
-			int cy = y + (UiTheme.CARD_H - 12) / 2;
+			int cx = chevronLeft(w) + (CHEVRON_W - CHEVRON_SIZE) / 2;
+			int cy = y + (UiTheme.CARD_H - CHEVRON_SIZE) / 2;
 			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT, Math.max(hv, expand.value() * 0.8f));
-			UiIcons.chevron(c, cx, cy, 12, chev, expand.value());
+			UiIcons.chevron(c, cx, cy, CHEVRON_SIZE, chev, expand.value());
 		}
 
 		// The switch.
@@ -324,7 +333,7 @@ public class ModuleCard {
 					&& mouseY >= rowY && mouseY < rowY + ROW_TOGGLE;
 			sw.update(bool.value(), rowHovered, delta);
 			sw.render(c, tx, ty, tw, th);
-			Ui.drawEllipsized(c, regular, label, contentX, rowY + (ROW_TOGGLE - regular.lineHeight()) / 2,
+			Ui.drawEllipsized(c, regular, label, contentX, Ui.centerTextY(rowY, ROW_TOGGLE, regular),
 					(tx - contentX) - UiTheme.SP_3, rowHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
 			switchBounds.put(bool, new int[]{contentX, x + w - UiTheme.SP_6, rowY, rowY + ROW_TOGGLE});
 			return ROW_TOGGLE;
@@ -338,19 +347,6 @@ public class ModuleCard {
 		}
 
 		return 0;
-	}
-
-	/** Cuts a string to the given width, adding an ellipsis. */
-	private static String ellipsize(UiText font, String text, int maxWidth) {
-		if (text == null || text.isEmpty() || font.width(text) <= maxWidth) {
-			return text == null ? "" : text;
-		}
-		String ell = font.width("…") > maxWidth ? "..." : "…";
-		String s = text;
-		while (s.length() > 1 && font.width(s + ell) > maxWidth) {
-			s = s.substring(0, s.length() - 1);
-		}
-		return s + ell;
 	}
 
 	private String sliderValueText(SliderSetting slider) {
@@ -480,11 +476,20 @@ public class ModuleCard {
 		return false;
 	}
 
+	/**
+	 * Left edge of the chevron strip: immediately left of the switch, with a
+	 * small gap. The renderer and the hit test both call this, which is what
+	 * keeps the glyph under the pointer that actually expands the card.
+	 */
+	private int chevronLeft(int cardWidth) {
+		return x + cardWidth - UiTheme.SP_5 - UiTheme.TOGGLE_W - UiTheme.SP_2 - CHEVRON_W;
+	}
+
 	private boolean overChevron(double mx, double my) {
 		if (!hasSettings()) {
 			return false;
 		}
-		int cx = x + w - UiTheme.SP_3 - UiTheme.TOGGLE_W - UiTheme.SP_3 - CHEVRON_W;
-		return mx >= cx - 2 && mx < cx + CHEVRON_W && my >= y && my < y + UiTheme.CARD_H;
+		int left = chevronLeft(w);
+		return mx >= left && mx < left + CHEVRON_W && my >= y && my < y + UiTheme.CARD_H;
 	}
 }

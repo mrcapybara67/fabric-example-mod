@@ -4,7 +4,6 @@ import com.capy.client.config.ConfigValues;
 import com.capy.client.gui.McCanvas;
 import com.capy.client.gui.McType;
 import com.capy.client.gui.UiCanvas;
-import com.capy.client.gui.UiPetals;
 import com.capy.client.gui.UiType;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
@@ -29,19 +28,23 @@ import net.minecraft.client.gui.GuiGraphics;
  *   <ul>
  *     <li>every few ticks the client looks at the player entities the server
  *         actually sent and looks for names on the watchlist;</li>
- *     <li>a match inside the configured radius raises an alert: the guardian
- *         style face overlay, the corner notification and (optionally) a
- *         sound;</li>
+ *     <li>only a player that is really in the world and inside the configured
+ *         radius raises an alert. A name that merely shows up in the player
+ *         list does not: being connected to the same server is not being near
+ *         the player, and the radius cannot be measured from it;</li>
+ *     <li>the alert is the guardian style face that drifts down the screen and
+ *         disappears, the corner notification and (optionally) a sound;</li>
  *     <li>the same player does not alert again until the cooldown has passed,
- *         so one admin walking around cannot spam the screen.</li>
+ *         so one player walking around cannot spam the screen.</li>
  *   </ul>
  *
  * Honest limits: the module can only see what the server tells the client.
- * A server side vanish system that removes the player from the client
- * entirely cannot be detected from the client, and the module never claims
- * otherwise. Names are matched case-insensitively against the identity the
- * client observes (game profile and player list), so a cross-platform server
- * only matches when it exposes that identity.
+ * A server side vanish system that removes the player from the client, and a
+ * player in spectator mode, are not sent to other clients at all, so nothing
+ * on the client can detect them - and this module does not pretend to. Names
+ * are matched case-insensitively against the identity the client observes
+ * (game profile and player list), so a cross-platform server only matches
+ * when it exposes that identity.
  */
 public class AntiAdminModule extends Module implements Configurable, Tickable {
 	/** Ticks between two scans. 4 ticks is 5 scans per second. */
@@ -66,11 +69,6 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private static final UiType TYPE = new McType();
 
 	private final AlertManager alerts = new AlertManager();
-	/** The petals that are released when an alert appears. */
-	private final UiPetals alertPetals = new UiPetals();
-	/** The size of the screen the alert was last drawn on. */
-	private int lastScreenWidth = 854;
-	private int lastScreenHeight = 480;
 	private int ticksUntilScan;
 
 	public AntiAdminModule() {
@@ -113,25 +111,15 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		long now = System.currentTimeMillis();
 		long cooldownMs = Math.max(0, cooldown.get()) * 1000L;
 		boolean playSound = sound.value();
-		boolean raised = alerts.update(
+		alerts.update(
 				AdminDetector.scan(mc, watchlist, detectionRange()),
 				cooldownMs,
 				playSound ? AlertSound::play : null,
 				now);
-		if (raised) {
-			// A few blossoms leave the portrait as it appears.
-			int cx = AlertRenderer.portraitCenterX(lastScreenWidth);
-			int cy = AlertRenderer.portraitCenterY(lastScreenHeight);
-			alertPetals.burst(cx, cy, 9, 1.2f);
-		}
 	}
 
 	/** Draws the alerts over the HUD. */
-	public void onHudRender(GuiGraphics g, int screenW, int screenH, float deltaTicks) {
-		lastScreenWidth = screenW;
-		lastScreenHeight = screenH;
-		// The petals keep drifting (and expire) even when the alert is gone.
-		alertPetals.update(deltaTicks, screenW, screenH);
+	public void onHudRender(GuiGraphics g, int screenW, int screenH) {
 		if (!isEnabled()) {
 			return;
 		}
@@ -146,8 +134,8 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		UiCanvas canvas = McCanvas.of(g);
 		UiType type = TYPE;
 		if (faceAlert.value()) {
-			AlertRenderer.renderFaceAlert(canvas, type.regular(), type.medium(), type.display(), g,
-					alertPetals, screenW, screenH, alert, alpha);
+			AlertRenderer.renderFaceAlert(canvas, type.regular(), type.display(), g,
+					screenW, screenH, alert);
 		}
 		if (notification.value()) {
 			AlertRenderer.renderNotification(canvas, type.regular(), type.medium(), screenW, screenH, alert, alpha);
