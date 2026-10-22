@@ -25,6 +25,14 @@ import net.minecraft.world.entity.player.PlayerSkin;
  * readable over a bright sky (see {@link #FACE_ALPHA_PEAK}).
  */
 public final class AdminAlert {
+	/** Why the alert was raised. It only changes the wording. */
+	public enum Kind {
+		/** The player joined the server: announced once per session. */
+		JOINED,
+		/** The player is in the world, inside the detection radius. */
+		NEARBY
+	}
+
 	/** Vanilla's elder guardian particle lives for 30 ticks. */
 	public static final long FACE_MS = 1500L;
 	/** The name line starts as soon as the face is gone. */
@@ -70,14 +78,26 @@ public final class AdminAlert {
 	private final String identity;
 	private final double distance;
 	private final PlayerSkin skin;
+	private final Kind kind;
 	private final long startMs;
 
-	public AdminAlert(AdminDetector.Match match, long startMs) {
+	public AdminAlert(AdminDetector.Match match, Kind kind, long startMs) {
 		this.username = match.username();
 		this.identity = match.identity();
 		this.distance = match.distance();
 		this.skin = match.skin();
+		this.kind = kind == null ? Kind.NEARBY : kind;
 		this.startMs = startMs;
+	}
+
+	/** Why this alert was raised. */
+	public Kind kind() {
+		return kind;
+	}
+
+	/** True when the client measured where the player is. */
+	public boolean hasDistance() {
+		return kind == Kind.NEARBY;
 	}
 
 	public String username() {
@@ -102,8 +122,11 @@ public final class AdminAlert {
 		return startMs;
 	}
 
-	/** The distance, ready to be drawn. */
+	/** The distance, ready to be drawn; empty when it cannot be measured. */
 	public String distanceText() {
+		if (!hasDistance()) {
+			return "";
+		}
 		return String.format(Locale.ROOT, "%.1f blocks away", distance);
 	}
 

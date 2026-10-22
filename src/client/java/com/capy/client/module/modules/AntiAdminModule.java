@@ -18,6 +18,10 @@ import com.capy.client.module.modules.antiadmin.AlertManager;
 import com.capy.client.module.modules.antiadmin.AlertRenderer;
 import com.capy.client.module.modules.antiadmin.AlertSound;
 import com.google.gson.JsonObject;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 
@@ -29,9 +33,13 @@ import net.minecraft.client.gui.GuiGraphics;
  *     <li>every few ticks the client looks at the player entities the server
  *         actually sent and looks for names on the watchlist;</li>
  *     <li>only a player that is really in the world and inside the configured
- *         radius raises an alert. A name that merely shows up in the player
- *         list does not: being connected to the same server is not being near
- *         the player, and the radius cannot be measured from it;</li>
+ *         radius raises a proximity alert. A name that merely shows up in the
+ *         player list does not: being connected to the same server is not
+ *         being near the player, and the radius cannot be measured from it;</li>
+ *     <li>a watched name that appears in the player list <em>after</em> the
+ *         client has been on the server is a join, and is announced once. It
+ *         is never announced again for that session, even if the same player
+ *         comes near, which is what makes the two kinds of alert distinct;</li>
  *     <li>the alert is the elder guardian effect with the watched player's own
  *         face, then "&lt;name&gt; is watching you" and the sign-off, plus the
  *         corner notification and (optionally) a sound;</li>
@@ -59,6 +67,19 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	public static final int MAX_COOLDOWN = 60;
 	public static final int DEFAULT_COOLDOWN = 10;
 
+	/**
+	 * Ticks after joining a world during which new names are treated as part of
+	 * the initial player list rather than as arrivals.
+	 *
+	 * The server sends the tab list for everyone already online right after the
+	 * connection is established. Without this window the very first scan would
+	 * announce every watched player on the server as if they had all just
+	 * joined, which is exactly the false alarm this module exists to avoid.
+	 */
+	private static final int JOIN_GRACE_TICKS = 40;
+	/** Watched arrivals that may wait their turn on screen. */
+	private static final int JOIN_QUEUE_MAX = 5;
+
 	private final WatchlistSetting watchlist = setting(new WatchlistSetting("watchlist"));
 	private final SliderSetting range = setting(new SliderSetting("range", DEFAULT_RANGE, MIN_RANGE, MAX_RANGE));
 	private final BooleanSetting faceAlert = setting(new BooleanSetting("face_alert", true));
@@ -70,7 +91,13 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private static final UiType TYPE = new McType();
 
 	private final AlertManager alerts = new AlertManager();
+	/** UUIDs already listed this session, so one arrival is announced once. */
+	private final Set<UUID> joinSeen = new HashSet<>();
+	/** Watched arrivals waiting for the screen to be free. */
+	private final ArrayDeque<AdminDetector.Match> joinQueue = new ArrayDeque<>();
 	private int ticksUntilScan;
+	/** Ticks since the session started, used for the join grace period. */
+	private int ticksSinceSessionStart;
 
 	public AntiAdminModule() {
 		super(Category.MISC, "anti_admin");
@@ -80,15 +107,25 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 
 	@Override
 	protected void onToggle(boolean state) {
-		if (!state) {
-			alerts.reset();
+		if (state) {
+			// Enabling mid-session must not announce everyone who was already
+			// online: clearing the baseline restarts the grace period, which
+			// re-learns who is already there without alerting.
+			joinSeen.clear();
+			joinQueue.clear();
+			ticksSinceSessionStart = 0;
+		} else {
+			reset();
 		}
 	}
 
 	/** Clears the transient detection state (world change, disconnect). */
 	public void reset() {
 		alerts.reset();
+		joinSeen.clear();
+		joinQueue.clear();
 		ticksUntilScan = 0;
+		ticksSinceSessionStart = 0;
 	}
 
 	/**
@@ -100,9 +137,10 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			return;
 		}
 		if (mc.level == null || mc.player == null) {
-			alerts.reset();
+			reset();
 			return;
 		}
+		ticksSinceSessionStart++;
 		if (ticksUntilScan > 0) {
 			ticksUntilScan--;
 			return;
@@ -112,11 +150,29 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		long now = System.currentTimeMillis();
 		long cooldownMs = Math.max(0, cooldown.get()) * 1000L;
 		boolean playSound = sound.value();
+
+		// Proximity first: being near is the stronger signal, so it takes the
+		// screen if both happen during the same scan.
 		alerts.update(
 				AdminDetector.scan(mc, watchlist, detectionRange()),
 				cooldownMs,
 				playSound ? AlertSound::play : null,
 				now);
+
+		// Join announcements. Every listed player is remembered the first time
+		// it is seen, so a single arrival is announced exactly once and a server
+		// that rebuilds its tab list cannot re-report the same person.
+		for (AdminDetector.Match joined : AdminDetector.scanJoins(mc, watchlist, joinSeen)) {
+			if (ticksSinceSessionStart >= JOIN_GRACE_TICKS && joinQueue.size() < JOIN_QUEUE_MAX) {
+				joinQueue.add(joined);
+			}
+		}
+		if (!joinQueue.isEmpty() && !alerts.isBusy(now)) {
+			AdminDetector.Match next = joinQueue.poll();
+			if (next != null && alerts.raise(next, AdminAlert.Kind.JOINED, now) && playSound) {
+				AlertSound.play();
+			}
+		}
 	}
 
 	/** Draws the alerts over the HUD. */

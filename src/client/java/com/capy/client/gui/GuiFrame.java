@@ -47,6 +47,15 @@ public final class GuiFrame {
 	private static final int CATEGORY_H_MIN = 15;
 
 	/**
+	 * The page the window was last showing.
+	 *
+	 * The frame is rebuilt every time the screen opens, so without this the GUI
+	 * always came back on the first category and the user had to re-navigate
+	 * every single time.
+	 */
+	private static int lastCategory;
+
+	/**
 	 * The space the sidebar needs at its smallest usable row height. The window
 	 * never gets shorter than this, so every category stays reachable.
 	 */
@@ -77,6 +86,7 @@ public final class GuiFrame {
 	private boolean closeRequested;
 
 	public GuiFrame() {
+		selected = lastCategory;
 		rebuild();
 		themeIndex = indexOfTheme(ClientConfig.get().theme());
 		themePicker.setOptions(themeLabels(), themeIndex);
@@ -95,6 +105,7 @@ public final class GuiFrame {
 		}
 		// Keep the current page when the list is rebuilt.
 		selected = Math.max(0, Math.min(CATEGORIES.length - 1, previous));
+		lastCategory = selected;
 		lastSelected = -1;
 		cachedQuery = null;
 		cachedMatches.clear();
@@ -112,6 +123,7 @@ public final class GuiFrame {
 	void setCategory(int index) {
 		if (index >= 0 && index < CATEGORIES.length) {
 			selected = index;
+			lastCategory = index;
 		}
 	}
 
@@ -701,6 +713,7 @@ public final class GuiFrame {
 			int rowTop = rowY + index * rowPitch;
 			if (index >= 0 && index < CATEGORIES.length && my < rowTop + rowH) {
 				selected = index;
+				lastCategory = index;
 				search.clear();
 				return true;
 			}
@@ -760,6 +773,14 @@ public final class GuiFrame {
 	}
 
 	public boolean mouseScrolled(double mx, double my, double amount) {
+		// Only the workspace scrolls. A wheel turn over the sidebar used to move
+		// the module list, which made the category panel feel like it was
+		// dragging the content with it.
+		int cx = contentX();
+		int cw = contentW() + UiTheme.SP_6;
+		if (mx < cx || mx >= cx + cw || my < contentTop() || my >= contentBottom()) {
+			return false;
+		}
 		return scrollbar.onScroll(amount);
 	}
 

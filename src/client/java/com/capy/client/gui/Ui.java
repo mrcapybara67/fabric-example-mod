@@ -59,32 +59,7 @@ public final class Ui {
 	 *
 	 * @param progress 0 draws nothing, 1 draws the complete ring
 	 */
-	public static void ring(UiCanvas c, int cx, int cy, int radius, int thickness, int color, float progress) {
-		if (radius <= 0 || thickness <= 0 || progress <= 0f) {
-			return;
-		}
-		float p = Math.min(1f, progress);
-		double start = -Math.PI / 2.0;
-		double sweep = Math.PI * 2.0 * p;
-		for (int row = -radius; row <= radius; row++) {
-			double dy = row;
-			double dx = Math.sqrt((double) radius * radius - dy * dy);
-			for (int side = -1; side <= 1; side += 2) {
-				double angle = Math.atan2(dy, dx * side) - start;
-				if (angle < 0) {
-					angle += Math.PI * 2.0;
-				}
-				if (angle > sweep) {
-					continue;
-				}
-				int px = cx + (int) Math.round(dx * side);
-				int half = thickness / 2;
-				c.fill(px - half, cy + row - half, px - half + thickness, cy + row - half + thickness, color);
-			}
-		}
-	}
-
-	/**
+		/**
 	 * The horizontal inset of a rounded corner at row {@code i} measured from
 	 * the top of the shape. Used to clip or mask a square image into a
 	 * rounded shape.
@@ -257,17 +232,25 @@ public final class Ui {
 			return;
 		}
 		int edge = Math.min(w / 2, 20);
-		for (int i = 0; i < w; i++) {
-			int a = color >>> 24;
-			if (i < edge) {
-				a = a * i / edge;
-			} else if (i > w - edge - 1) {
-				a = a * (w - 1 - i) / edge;
-			}
+		int baseAlpha = color >>> 24;
+		int rgb = color & 0x00FFFFFF;
+
+		// The flat middle is a single fill and only the two short ramps are
+		// drawn per pixel. It is the same picture as before, but a 500 pixel
+		// rule now costs 41 fills instead of 500 - and it is drawn every frame.
+		int midStart = x + edge;
+		int midEnd = x + w - edge;
+		if (midEnd > midStart && baseAlpha > 0) {
+			c.fill(midStart, y, midEnd, y + 1, (baseAlpha << 24) | rgb);
+		}
+		for (int i = 0; i < edge; i++) {
+			int a = baseAlpha * i / edge;
 			if (a <= 0) {
 				continue;
 			}
-			c.fill(x + i, y, x + i + 1, y + 1, (a << 24) | (color & 0x00FFFFFF));
+			int column = (a << 24) | rgb;
+			c.fill(x + i, y, x + i + 1, y + 1, column);
+			c.fill(x + w - 1 - i, y, x + w - i, y + 1, column);
 		}
 	}
 
@@ -293,23 +276,7 @@ public final class Ui {
 	 * A soft radial halo: a few concentric translucent discs, largest first,
 	 * which composite into a falloff that fades towards the edge.
 	 */
-	public static void halo(UiCanvas c, int cx, int cy, int radius, int color, float strength) {
-		if (radius <= 0 || strength <= 0.01f) {
-			return;
-		}
-		final int layers = 4;
-		for (int i = layers; i >= 1; i--) {
-			float t = i / (float) layers;
-			int r = Math.round(radius * t);
-			int a = Math.round(((color >>> 24) & 0xFF) * strength * (1f - t) * 0.55f);
-			if (a <= 0) {
-				continue;
-			}
-			circle(c, cx, cy, r, (a << 24) | (color & 0x00FFFFFF));
-		}
-	}
-
-	// ------------------------------------------------------------------ text
+		// ------------------------------------------------------------------ text
 
 	/** Draws text, appending an ellipsis if it does not fit maxWidth. */
 	public static void drawEllipsized(UiCanvas c, UiText font, String text, int x, int y, int maxWidth, int color) {
@@ -322,10 +289,21 @@ public final class Ui {
 			if (font.width(ell) > maxWidth) {
 				ell = "...";
 			}
-			while (s.length() > 1 && font.width(s + ell) > maxWidth) {
-				s = s.substring(0, s.length() - 1);
+			// A string is never narrower than its own prefix, so the cut can be
+			// binary searched. The old loop re-measured the whole string once
+			// per removed character, which is quadratic in the label length and
+			// ran for every truncated label on every frame.
+			int low = 0;
+			int high = s.length();
+			while (low < high) {
+				int mid = (low + high + 1) >>> 1;
+				if (font.width(s.substring(0, mid) + ell) > maxWidth) {
+					high = mid - 1;
+				} else {
+					low = mid;
+				}
 			}
-			s = s + ell;
+			s = s.substring(0, Math.max(1, low)) + ell;
 		}
 		font.draw(c, s, x, y, color);
 	}

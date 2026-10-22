@@ -3,6 +3,7 @@ package com.capy.client.module.modules.antiadmin;
 import com.capy.client.module.WatchlistSetting;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -97,6 +98,48 @@ public final class AdminDetector {
 	}
 
 	/**
+	 * Collects watched players that have just appeared in the player list.
+	 *
+	 * Every listed player is added to {@code seen} the first time it is seen,
+	 * so a single arrival is reported exactly once. That is also what keeps a
+	 * server that rebuilds its tab list - or a player who moves between worlds
+	 * and briefly drops out - from re-reporting the same person: once a UUID
+	 * is in the set it is never reported again for the rest of the session.
+	 *
+	 * This is a join announcement, not evidence of proximity. The distance is
+	 * therefore unknown and reported as such.
+	 *
+	 * @param seen UUIDs already listed this session; new arrivals are added
+	 * @return the watched arrivals, in player list order
+	 */
+	public static List<Match> scanJoins(Minecraft mc, WatchlistSetting watchlist, Set<UUID> seen) {
+		List<Match> out = new ArrayList<>();
+		if (mc == null || watchlist == null || seen == null || mc.getConnection() == null) {
+			return out;
+		}
+		for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
+			if (info == null || info.getProfile() == null || info.getProfile().id() == null) {
+				continue;
+			}
+			UUID id = info.getProfile().id();
+			if (!seen.add(id)) {
+				continue;
+			}
+			String identity = matchIdentity(info, watchlist);
+			if (identity == null) {
+				continue;
+			}
+			String name = info.getProfile().name();
+			out.add(new Match(id,
+					name == null || name.isEmpty() ? identity : name,
+					identity,
+					-1.0,
+					info.getSkin()));
+		}
+		return out;
+	}
+
+	/**
 	 * Returns the identity that matched the watchlist, or null when the
 	 * player is not watched.
 	 *
@@ -115,7 +158,18 @@ public final class AdminDetector {
 		if (info == null) {
 			return null;
 		}
-		String infoName = info.getProfile() == null ? null : info.getProfile().name();
+		return matchIdentity(info, watchlist);
+	}
+
+	/**
+	 * Returns the identity of a player list entry that matched the watchlist,
+	 * or null when the entry is not watched.
+	 */
+	private static String matchIdentity(PlayerInfo info, WatchlistSetting watchlist) {
+		if (info == null || info.getProfile() == null) {
+			return null;
+		}
+		String infoName = info.getProfile().name();
 		if (infoName != null && !infoName.isEmpty() && watchlist.matches(infoName)) {
 			return infoName;
 		}

@@ -147,44 +147,11 @@ public final class UiPetals {
 	}
 
 	/** Draws every layer, back to front. */
-	public void renderAll(UiCanvas canvas, float alpha) {
-		render(canvas, Layer.BACK, alpha);
-		render(canvas, Layer.MID, alpha);
-		render(canvas, Layer.FRONT, alpha);
-	}
-
-	/**
+		/**
 	 * Releases a burst of petals from a point, used when the alert portrait
 	 * appears. The burst reuses pooled objects, so it never allocates.
 	 */
-	public void burst(float x, float y, int count, float strength) {
-		for (int i = 0; i < count; i++) {
-			Petal petal = null;
-			for (Petal candidate : pool) {
-				if (candidate.maxLife <= 0) {
-					petal = candidate;
-					break;
-				}
-			}
-			if (petal == null) {
-				petal = pool[random.nextInt(pool.length)];
-			}
-			double angle = -Math.PI / 2 + (random.nextFloat() - 0.5) * 2.4;
-			float speed = (28f + random.nextFloat() * 34f) * strength;
-			spawn(petal, Layer.FRONT, y, false);
-			petal.x = x + (random.nextFloat() - 0.5f) * 18f;
-			petal.y = y + (random.nextFloat() - 0.5f) * 12f;
-			petal.vx = (float) Math.cos(angle) * speed;
-			petal.vy = (float) Math.sin(angle) * speed;
-			petal.spin = (random.nextFloat() - 0.5f) * 5.5f;
-			petal.swayAmount = 1.4f + random.nextFloat() * 2.2f;
-			petal.maxLife = 1.1f + random.nextFloat() * 0.8f;
-			petal.life = 0f;
-		}
-	}
-
-
-	// --------------------------------------------------------------- internals
+		// --------------------------------------------------------------- internals
 
 	private Layer layerFor(int index) {
 		if (index < CAPACITY * 0.47f) {

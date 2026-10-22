@@ -129,7 +129,12 @@ public class UiTextField {
 		}
 
 		if (focused && (System.currentTimeMillis() / 530L) % 2L == 0L) {
-			int cx = text.isEmpty() ? tx : tx + font.width(text);
+			// The caret is clamped to the inside of the field: at the character
+			// limit the text is ellipsized, so an unclamped caret would be drawn
+			// past the border and over the neighbouring control.
+			int caret = text.isEmpty() ? 0 : font.width(text);
+			int maxCaret = Math.max(0, w - UiTheme.SP_3 * 2);
+			int cx = tx + Math.min(caret, maxCaret);
 			c.fill(cx, ty - 1, cx + 1, ty + font.lineHeight() + 1, UiTheme.ACCENT);
 		}
 	}

@@ -41,6 +41,9 @@ public class ModuleCard {
 	private final Map<SliderSetting, int[]> sliderBounds = new IdentityHashMap<>();
 	private final Map<BooleanSetting, UiToggle> switches = new IdentityHashMap<>();
 	private final Map<BooleanSetting, int[]> switchBounds = new IdentityHashMap<>();
+	/** Resolved once: a translation lookup per row per frame is not free. */
+	private final Map<BooleanSetting, String> switchLabels = new IdentityHashMap<>();
+	private final Map<SliderSetting, String> sliderUnits = new IdentityHashMap<>();
 	private final Map<WatchlistSetting, UiWatchlist> watchlists = new IdentityHashMap<>();
 
 	private final Anim hover = new Anim(0f, 14f);
@@ -76,8 +79,10 @@ public class ModuleCard {
 				ui.bindModel(new FixedModel(slider));
 				sliders.put(slider, ui);
 				sliderLabels.put(slider, settingLabel(slider.key()));
+				sliderUnits.put(slider, unitFor(slider));
 			} else if (s instanceof BooleanSetting bool) {
 				switches.put(bool, new UiToggle());
+				switchLabels.put(bool, settingLabel(bool.key()));
 			} else if (s instanceof WatchlistSetting watch) {
 				watchlists.put(watch, new UiWatchlist(new WatchlistModel(watch), settingLabel(watch.key())));
 			}
@@ -283,7 +288,12 @@ public class ModuleCard {
 		// The switch.
 		int tx = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W;
 		int ty = y + (UiTheme.CARD_H - UiTheme.TOGGLE_H) / 2;
-		toggle.update(module.isEnabled(), hovered, delta);
+		// The switch lights up when the pointer is on the switch, not when it is
+		// anywhere on the card - otherwise hovering the name made the control
+		// look pressed.
+		boolean switchHovered = mouseX >= tx && mouseX < tx + UiTheme.TOGGLE_W
+				&& mouseY >= ty && mouseY < ty + UiTheme.TOGGLE_H;
+		toggle.update(module.isEnabled(), switchHovered, delta);
 		toggle.render(c, tx, ty, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
 
 		// The settings well: an inset surface that holds the setting rows.
@@ -324,7 +334,10 @@ public class ModuleCard {
 
 		if (s instanceof BooleanSetting bool) {
 			UiToggle sw = switches.get(bool);
-			String label = settingLabel(bool.key());
+			String label = switchLabels.get(bool);
+			if (label == null) {
+				label = settingLabel(bool.key());
+			}
 			int tw = UiTheme.TOGGLE_W;
 			int th = UiTheme.TOGGLE_H;
 			int tx = x + w - UiTheme.SP_6 - tw;
@@ -350,8 +363,8 @@ public class ModuleCard {
 	}
 
 	private String sliderValueText(SliderSetting slider) {
-		String unit = unitFor(slider);
-		return unit.isEmpty() ? String.valueOf(slider.get()) : slider.get() + " " + unit;
+		String unit = sliderUnits.get(slider);
+		return unit == null || unit.isEmpty() ? String.valueOf(slider.get()) : slider.get() + " " + unit;
 	}
 
 	private String unitFor(SliderSetting slider) {

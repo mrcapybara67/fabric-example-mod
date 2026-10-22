@@ -66,6 +66,8 @@
 	"capy.module.hud_day.offset_x": "Nudge X",
 	"capy.module.hud_day.offset_y": "Nudge Y",
 	"capy.alert.nearby": "WATCHLIST PLAYER NEARBY",
+	"capy.alert.joined_title": "WATCHLIST PLAYER JOINED",
 	"capy.alert.watching": "%s is watching you",
+	"capy.alert.joined": "%s joined the server",
 	"capy.alert.stay_safe": "stay safe capy client user"
 }

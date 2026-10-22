@@ -158,6 +158,13 @@ public final class HudElements {
 
 		@Override
 		public void onTick(Minecraft mc) {
+			// Nothing is measured while the element is off; it restarts from the
+			// current position when it is switched on again.
+			if (!isEnabled()) {
+				primed = false;
+				smoothed = 0;
+				return;
+			}
 			LocalPlayer player = mc.player;
 			if (player == null) {
 				primed = false;
@@ -222,7 +229,9 @@ public final class HudElements {
 			if (mc.level == null) {
 				return "-";
 			}
-			return String.valueOf(mc.level.getDayTime() / 24000L + 1L);
+			// getDayTime can be negative in a custom world; a day below one would
+			// read as a glitch.
+			return String.valueOf(Math.max(1L, mc.level.getDayTime() / 24000L + 1L));
 		}
 	}
 }

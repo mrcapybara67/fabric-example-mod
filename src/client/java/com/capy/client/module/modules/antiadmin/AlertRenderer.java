@@ -40,9 +40,12 @@ import net.minecraft.world.entity.player.PlayerSkin;
 public final class AlertRenderer {
 	/** Resolved once, not every frame. */
 	private static final String LABEL_WATCHING = UiLabels.translate("capy.alert.watching", "%s is watching you");
+	private static final String LABEL_JOINED = UiLabels.translate("capy.alert.joined", "%s joined the server");
 	private static final String LABEL_SIGN_OFF =
 			UiLabels.translate("capy.alert.stay_safe", "stay safe capy client user");
 	private static final String LABEL_NEARBY = UiLabels.translate("capy.alert.nearby", "WATCHLIST PLAYER NEARBY");
+	private static final String LABEL_JOINED_TITLE =
+			UiLabels.translate("capy.alert.joined_title", "WATCHLIST PLAYER JOINED");
 
 	/** Gap between the name line and the sign-off. */
 	private static final int LINE_GAP = 10;
@@ -106,7 +109,8 @@ public final class AlertRenderer {
 		int maxWidth = Math.max(40, screenW - 48);
 
 		if (nameAlpha > 0.01f) {
-			String line = LABEL_WATCHING.replace("%s", alert.username());
+			String pattern = alert.kind() == AdminAlert.Kind.JOINED ? LABEL_JOINED : LABEL_WATCHING;
+			String line = pattern.replace("%s", alert.username());
 			drawShadowedCentered(c, display, line, screenW / 2, top, maxWidth,
 					Ui.withAlpha(UiTheme.TEXT, Math.round(255f * nameAlpha)));
 		}
@@ -168,9 +172,11 @@ public final class AlertRenderer {
 		}
 		int accent = UiTheme.ACCENT;
 
-		String title = LABEL_NEARBY;
-		// The name and the distance the client actually measured.
-		String name = alert.username() + "  ·  " + alert.distanceText();
+		boolean nearby = alert.hasDistance();
+		String title = nearby ? LABEL_NEARBY : LABEL_JOINED_TITLE;
+		// The distance is only known for a nearby detection; a join carries no
+		// position at all, so the name stands alone there.
+		String name = nearby ? alert.username() + "  ·  " + alert.distanceText() : alert.username();
 		int w = Math.max(medium.width(title), regular.width(name)) + 52;
 		int h = 42;
 		int slide = Math.round((1f - alpha) * 14f);
