@@ -22,7 +22,15 @@ public final class Ui {
 
 	// ---------------------------------------------------------------- shapes
 
-	/** Filled rounded rectangle with true per-pixel corners. */
+	/**
+	 * Filled rounded rectangle.
+	 *
+	 * The straight bands are drawn once each and only the corner rows are cut
+	 * per row, so a corner never covers the middle band twice - a translucent
+	 * fill would otherwise be darker along its rounded edges than in its
+	 * middle. From a radius of three upwards the corner edge is blended by its
+	 * real coverage, which is what removes the stair steps.
+	 */
 	public static void roundRect(UiCanvas c, int x, int y, int w, int h, int radius, int color) {
 		if (w <= 0 || h <= 0) {
 			return;
@@ -35,34 +43,111 @@ public final class Ui {
 		c.fill(x + r, y, x + w - r, y + h, color);
 		c.fill(x, y + r, x + r, y + h - r, color);
 		c.fill(x + w - r, y + r, x + w, y + h - r, color);
+		boolean smooth = r >= 3;
 		for (int i = 0; i < r; i++) {
-			int inset = cornerInset(r, i);
-			c.fill(x + inset, y + i, x + w - inset, y + i + 1, color);
-			c.fill(x + inset, y + h - 1 - i, x + w - inset, y + h - i, color);
-		}
-	}
-
-	/** Filled circle. */
-	public static void circle(UiCanvas c, int cx, int cy, int radius, int color) {
-		if (radius <= 0) {
-			return;
-		}
-		for (int dy = -radius; dy <= radius; dy++) {
-			int dx = (int) Math.sqrt((double) radius * radius - (double) dy * dy);
-			c.fill(cx - dx, cy + dy, cx + dx + 1, cy + dy + 1, color);
+			if (smooth) {
+				float inset = insetAt(r, i);
+				span(c, x + inset, x + r, y + i, color);
+				span(c, x + w - r, x + (w - inset), y + i, color);
+				span(c, x + inset, x + r, y + h - 1 - i, color);
+				span(c, x + w - r, x + (w - inset), y + h - 1 - i, color);
+			} else {
+				int inset = cornerInset(r, i);
+				c.fill(x + inset, y + i, x + r, y + i + 1, color);
+				c.fill(x + w - r, y + i, x + w - inset, y + i + 1, color);
+				c.fill(x + inset, y + h - 1 - i, x + r, y + h - i, color);
+				c.fill(x + w - r, y + h - 1 - i, x + w - inset, y + h - i, color);
+			}
 		}
 	}
 
 	/**
-	 * A ring that can be drawn partially, used for the ring that draws itself
-	 * into place while the alert portrait appears.
+	 * Filled circle.
 	 *
-	 * @param progress 0 draws nothing, 1 draws the complete ring
+	 * Each row is cut at its real half width and the two edge pixels are
+	 * blended by their coverage, so the outline reads as a curve instead of a
+	 * staircase. Small circles keep the integer path: below a few pixels the
+	 * blend costs more than it shows.
 	 */
-		/**
+	public static void circle(UiCanvas c, int cx, int cy, int radius, int color) {
+		if (radius <= 0) {
+			return;
+		}
+		if (radius < 4) {
+			for (int dy = -radius; dy <= radius; dy++) {
+				int dx = (int) Math.sqrt((double) radius * radius - (double) dy * dy);
+				c.fill(cx - dx, cy + dy, cx + dx + 1, cy + dy + 1, color);
+			}
+			return;
+		}
+		for (int dy = -radius; dy < radius; dy++) {
+			double half = (double) radius * radius - ((double) dy + 0.5) * ((double) dy + 0.5);
+			if (half <= 0) {
+				continue;
+			}
+			float dx = (float) Math.sqrt(half);
+			span(c, cx - dx, cx + dx, cy + dy, color);
+		}
+	}
+
+	/**
+	 * Fills [left, right) on one row, blending the two end pixels by the part
+	 * of each one the span actually covers.
+	 *
+	 * Everything between the ends is a single fill, so a smooth edge costs at
+	 * most three draw calls per row instead of one per pixel.
+	 */
+	private static void span(UiCanvas c, float left, float right, int y, int color) {
+		if (right <= left) {
+			return;
+		}
+		int alpha = color >>> 24;
+		if (alpha <= 0) {
+			return;
+		}
+		int rgb = color & 0x00FFFFFF;
+		int start = (int) Math.ceil(left);
+		int end = (int) Math.floor(right);
+		if (end <= start) {
+			int blended = Math.round(alpha * Math.min(1f, right - left));
+			if (blended > 0) {
+				int px = (int) Math.floor(left);
+				c.fill(px, y, px + 1, y + 1, (blended << 24) | rgb);
+			}
+			return;
+		}
+		c.fill(start, y, end, y + 1, color);
+		int leftEdge = start - 1;
+		if (leftEdge >= (int) Math.floor(left)) {
+			int blended = Math.round(alpha * (start - left));
+			if (blended > 0) {
+				c.fill(leftEdge, y, leftEdge + 1, y + 1, (blended << 24) | rgb);
+			}
+		}
+		if (right > end) {
+			int blended = Math.round(alpha * (right - end));
+			if (blended > 0) {
+				c.fill(end, y, end + 1, y + 1, (blended << 24) | rgb);
+			}
+		}
+	}
+
+	/**
+	 * The horizontal inset of a rounded corner at the centre of {@code row},
+	 * with the fraction of a pixel kept. The rows in the middle of a shape are
+	 * not affected, so this returns zero outside the corner.
+	 */
+	private static float insetAt(int radius, int row) {
+		if (radius <= 0 || row >= radius) {
+			return 0f;
+		}
+		double dy = radius - (row + 0.5);
+		double squared = (double) radius * radius - dy * dy;
+		return (float) (radius - Math.sqrt(Math.max(0.0, squared)));
+	}	/**
 	 * The horizontal inset of a rounded corner at row {@code i} measured from
-	 * the top of the shape. Used to clip or mask a square image into a
-	 * rounded shape.
+	 * the top of the shape, rounded to a whole pixel. Used to clip or mask a
+	 * square image into a rounded shape.
 	 */
 	public static int cornerInset(int radius, int row) {
 		if (radius <= 0 || row >= radius) {
@@ -89,10 +174,19 @@ public final class Ui {
 		}
 		int r = clampRadius(radius, w, h);
 		boolean flat = topColor == bottomColor || h <= 1;
+		boolean smooth = r >= 3;
 		for (int i = 0; i < h; i++) {
 			int color = flat ? topColor : lerpColor(topColor, bottomColor, i / (float) (h - 1));
-			int inset = r <= 0 ? 0 : Math.max(cornerInset(r, i), cornerInset(r, h - 1 - i));
-			c.fill(x + inset, y + i, x + w - inset, y + i + 1, color);
+			float inset = r <= 0
+					? 0f
+					: (smooth
+							? Math.max(insetAt(r, i), insetAt(r, h - 1 - i))
+							: Math.max(cornerInset(r, i), cornerInset(r, h - 1 - i)));
+			if (inset <= 0.003f) {
+				c.fill(x, y + i, x + w, y + i + 1, color);
+			} else {
+				span(c, x + inset, x + w - inset, y + i, color);
+			}
 		}
 	}
 
@@ -124,17 +218,51 @@ public final class Ui {
 		drawColumn(c, x, y + edgeInset, h - edgeInset * 2, topColor, bottomColor);
 		drawColumn(c, x + w - 1, y + edgeInset, h - edgeInset * 2, topColor, bottomColor);
 
-		// The corner arcs, mirrored top and bottom.
+		// The corner arcs, mirrored top and bottom. From a radius of three the
+		// arc is drawn at its real position and blended over the two pixels it
+		// straddles, which is what turns a staircase into a curve.
+		boolean smooth = r >= 3;
 		for (int i = 0; i < r; i++) {
-			int inset = cornerInset(r, i);
 			int rowTop = y + i;
 			int rowBottom = y + h - 1 - i;
 			int colorTop = lerpColor(topColor, bottomColor, i / (float) Math.max(1, h - 1));
 			int colorBottom = lerpColor(topColor, bottomColor, (h - 1 - i) / (float) Math.max(1, h - 1));
-			c.fill(x + inset, rowTop, x + inset + 1, rowTop + 1, colorTop);
-			c.fill(x + w - 1 - inset, rowTop, x + w - inset, rowTop + 1, colorTop);
-			c.fill(x + inset, rowBottom, x + inset + 1, rowBottom + 1, colorBottom);
-			c.fill(x + w - 1 - inset, rowBottom, x + w - inset, rowBottom + 1, colorBottom);
+			if (smooth) {
+				float inset = insetAt(r, i);
+				edgePixel(c, x + inset, rowTop, colorTop);
+				edgePixel(c, x + w - inset - 1, rowTop, colorTop);
+				edgePixel(c, x + inset, rowBottom, colorBottom);
+				edgePixel(c, x + w - inset - 1, rowBottom, colorBottom);
+			} else {
+				int inset = cornerInset(r, i);
+				c.fill(x + inset, rowTop, x + inset + 1, rowTop + 1, colorTop);
+				c.fill(x + w - 1 - inset, rowTop, x + w - inset, rowTop + 1, colorTop);
+				c.fill(x + inset, rowBottom, x + inset + 1, rowBottom + 1, colorBottom);
+				c.fill(x + w - 1 - inset, rowBottom, x + w - inset, rowBottom + 1, colorBottom);
+			}
+		}
+	}
+
+	/**
+	 * One pixel of a one pixel wide vertical line that starts at a fractional
+	 * x. The line is split over the two pixels it actually covers, so an arc
+	 * made of these reads as a curve instead of a staircase.
+	 */
+	private static void edgePixel(UiCanvas c, float x, int y, int color) {
+		int alpha = color >>> 24;
+		if (alpha <= 0) {
+			return;
+		}
+		int rgb = color & 0x00FFFFFF;
+		int base = (int) Math.floor(x);
+		float fraction = x - base;
+		int left = Math.round(alpha * (1f - fraction));
+		int right = Math.round(alpha * fraction);
+		if (left > 0) {
+			c.fill(base, y, base + 1, y + 1, (left << 24) | rgb);
+		}
+		if (right > 0) {
+			c.fill(base + 1, y, base + 2, y + 1, (right << 24) | rgb);
 		}
 	}
 
@@ -177,11 +305,39 @@ public final class Ui {
 		c.fill(x + bInset, y + h - 2, x + w - bInset, y + h - 1, shade);
 	}
 
-	/** Layered drop shadow under a floating panel. */
+	/**
+	 * Layered drop shadow under a floating panel.
+	 *
+	 * The layers are almost transparent and deliberately soft, so they use the
+	 * plain corner path: blending their edge would cost draw calls that cannot
+	 * be seen through a shadow this faint.
+	 */
 	public static void shadow(UiCanvas c, int x, int y, int w, int h, int radius) {
-		roundRect(c, x + 4, y + 10, w, h, radius + 4, UiTheme.SHADOW_WIDE);
-		roundRect(c, x + 2, y + 5, w, h, radius + 2, UiTheme.SHADOW_MID);
-		roundRect(c, x + 1, y + 2, w, h, radius + 1, UiTheme.SHADOW_TIGHT);
+		roundRectSharp(c, x + 4, y + 10, w, h, radius + 4, UiTheme.SHADOW_WIDE);
+		roundRectSharp(c, x + 2, y + 5, w, h, radius + 2, UiTheme.SHADOW_MID);
+		roundRectSharp(c, x + 1, y + 2, w, h, radius + 1, UiTheme.SHADOW_TIGHT);
+	}
+
+	/** The same shape without edge blending, for fills that do not need it. */
+	private static void roundRectSharp(UiCanvas c, int x, int y, int w, int h, int radius, int color) {
+		if (w <= 0 || h <= 0) {
+			return;
+		}
+		int r = clampRadius(radius, w, h);
+		if (r <= 0) {
+			c.fill(x, y, x + w, y + h, color);
+			return;
+		}
+		c.fill(x + r, y, x + w - r, y + h, color);
+		c.fill(x, y + r, x + r, y + h - r, color);
+		c.fill(x + w - r, y + r, x + w, y + h - r, color);
+		for (int i = 0; i < r; i++) {
+			int inset = cornerInset(r, i);
+			c.fill(x + inset, y + i, x + r, y + i + 1, color);
+			c.fill(x + w - r, y + i, x + w - inset, y + i + 1, color);
+			c.fill(x + inset, y + h - 1 - i, x + r, y + h - i, color);
+			c.fill(x + w - r, y + h - 1 - i, x + w - inset, y + h - i, color);
+		}
 	}
 
 	/**
@@ -272,11 +428,7 @@ public final class Ui {
 		}
 	}
 
-	/**
-	 * A soft radial halo: a few concentric translucent discs, largest first,
-	 * which composite into a falloff that fades towards the edge.
-	 */
-		// ------------------------------------------------------------------ text
+	// ------------------------------------------------------------------ text
 
 	/** Draws text, appending an ellipsis if it does not fit maxWidth. */
 	public static void drawEllipsized(UiCanvas c, UiText font, String text, int x, int y, int maxWidth, int color) {

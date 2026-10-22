@@ -86,8 +86,11 @@ public final class UiIcons {
 	private static void blossom(UiCanvas c, int x, int y, int s, int col) {
 		int cx = x + s / 2;
 		int cy = y + s / 2;
-		float petal = Math.max(1.6f, s * 0.20f);
-		float reach = s * 0.20f;
+		// A blossom has to read as five lobes when it is a small mark and as one
+		// flower when it is a large watermark, so the petals sit relatively
+		// further out on small sizes and overlap into a single bloom on large.
+		float petal = Math.max(1.6f, s * 0.18f);
+		float reach = s * (s < 48 ? 0.30f : 0.19f);
 		for (int i = 0; i < 5; i++) {
 			double angle = -Math.PI / 2 + i * (2.0 * Math.PI / 5.0);
 			int px = cx + (int) Math.round(Math.cos(angle) * reach);
@@ -181,16 +184,12 @@ public final class UiIcons {
 		}
 	}
 
-	/** Filled circle centred on (cx, cy). */
+	/**
+	 * Filled circle centred on (cx, cy). It goes through {@link Ui#circle} so
+	 * the icon picks up the shared edge blending instead of its own staircase.
+	 */
 	private static void disc(UiCanvas c, int cx, int cy, float radius, int col) {
-		int r = Math.max(1, Math.round(radius));
-		for (int dy = -r; dy <= r; dy++) {
-			int dx = (int) Math.round(Math.sqrt(radius * radius - (float) (dy * dy)));
-			if (dx < 0) {
-				continue;
-			}
-			c.fill(cx - dx, cy + dy, cx + dx + 1, cy + dy + 1, col);
-		}
+		Ui.circle(c, cx, cy, Math.max(1, Math.round(radius)), col);
 	}
 
 	/**

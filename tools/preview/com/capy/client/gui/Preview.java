@@ -1,13 +1,13 @@
 package com.capy.client.gui;
 
 import com.capy.client.module.Category;
-import com.capy.client.module.modules.antiadmin.AdminAlert;
-import com.capy.client.module.modules.antiadmin.AdminDetector;
-import com.capy.client.module.modules.antiadmin.AlertRenderer;
-import com.capy.client.module.modules.antiadmin.Evidence;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.AntiAdminModule;
 import com.capy.client.module.modules.SwingSpeedModule;
+import com.capy.client.module.modules.antiadmin.AdminAlert;
+import com.capy.client.module.modules.antiadmin.AdminDetector;
+import com.capy.client.module.modules.antiadmin.AlertRenderer;
+import com.capy.client.module.modules.hud.HudElements;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.awt.Color;
@@ -31,12 +31,13 @@ import javax.imageio.ImageIO;
 /**
  * Offline renderer for the Capy interface.
  *
- * It runs the real {@link GuiFrame} and the real components against a
- * Java2D canvas and the bundled Inter files, so the result is what the client
- * draws - not a mock-up. The images are used to review proportions, spacing,
- * typography and contrast without a running game.
+ * It runs the real {@link GuiFrame}, the real components and the real alert
+ * renderer against a Java2D canvas and the bundled Inter files, so the images
+ * are what the client draws - not a mock-up. The images are used to review
+ * proportions, spacing, typography, contrast and the alert timeline without a
+ * running game.
  *
- * Usage: java com.capy.client.gui.Preview <outputDir> <projectRoot>
+ * Usage: java com.capy.client.gui.Preview [outputDir]
  */
 public final class Preview {
 	private static final Path ROOT = Path.of(System.getProperty("capy.root", "."));
@@ -44,7 +45,7 @@ public final class Preview {
 	private static final Path LANG = ROOT.resolve("src/main/resources/assets/capy/lang/en_us.json");
 
 	public static void main(String[] args) throws Exception {
-		Path out = Path.of(args.length > 0 ? args[0] : "/tmp/kilo/preview");
+		Path out = Path.of(args.length > 0 ? args[0] : "/tmp/capy-preview");
 		Files.createDirectories(out);
 
 		loadLanguage();
@@ -53,95 +54,65 @@ public final class Preview {
 		ModuleManager modules = ModuleManager.get();
 		modules.register(new SwingSpeedModule());
 		modules.register(new AntiAdminModule());
-		modules.register(new com.capy.client.module.modules.HudModule());
+		HudElements.register(modules);
 
 		SwingType type = new SwingType();
 
-		// 1. The default view at a desktop resolution.
-		GuiFrame frame = new GuiFrame();
-		frame.resize(1920, 1080);
-		settle(frame, type, 1920, 1080, 90);
-		save(out.resolve("01-overview-1920x1080.png"), frame, type, 1920, 1080);
+		save(out.resolve("01-overview-1920x1080.png"), type, 1920, 1080);
+		save(out.resolve("02-overview-1280x720.png"), type, 1280, 720);
+		save(out.resolve("03-overview-960x540.png"), type, 960, 540);
+		save(out.resolve("04-overview-2560x1440.png"), type, 2560, 1440);
+		save(out.resolve("05-category-visual.png"), type, 1600, 900, Category.VISUAL.ordinal());
 
-		// 2. The Anti Admin module with its settings open.
-		GuiFrame anti = new GuiFrame();
-		anti.resize(1920, 1080);
-		anti.setCategory(Category.MISC.ordinal());
-		anti.expandCard(Category.MISC, 0);
-		settle(anti, type, 1920, 1080, 90);
-		save(out.resolve("02-anti-admin-expanded.png"), anti, type, 1920, 1080);
-
-		// 3. A smaller window.
-		GuiFrame small = new GuiFrame();
-		small.resize(1280, 720);
-		settle(small, type, 1280, 720, 90);
-		save(out.resolve("03-overview-1280x720.png"), small, type, 1280, 720);
-
-		// 4. A very small window.
-		GuiFrame tiny = new GuiFrame();
-		tiny.resize(960, 540);
-		settle(tiny, type, 960, 540, 90);
-		save(out.resolve("04-overview-960x540.png"), tiny, type, 960, 540);
-
-		// 5. An empty category.
-		GuiFrame empty = new GuiFrame();
-		empty.resize(1600, 900);
-		empty.setCategory(Category.VISUAL.ordinal());
-		settle(empty, type, 1600, 900, 60);
-		save(out.resolve("05-empty-category.png"), empty, type, 1600, 900);
-
-		// 6. The search state.
-		GuiFrame search = new GuiFrame();
-		search.resize(1600, 900);
-		search.setSearch("swing");
-		settle(search, type, 1600, 900, 60);
-		save(out.resolve("06-search.png"), search, type, 1600, 900);
-
-		// 7. The opening transition, a few frames in.
-		GuiFrame opening = new GuiFrame();
-		opening.resize(1600, 900);
-		for (int i = 0; i < 8; i++) {
-			opening.render(new SwingCanvas(1600, 900), type, 800, 400, 1f, 0.12f + i * 0.05f);
+		// The alert at the points of its timeline that matter: the face in,
+		// the peak, the bottom of the travel, the hand over to the wording,
+		// the two text lines, and the last frames before it is gone.
+		for (long at : new long[] {60L, 300L, 700L, 1000L, 1200L, 1350L, 1450L, 1499L, 1600L, 2200L, 3800L, 4250L }) {
+			renderAlert(out.resolve(String.format("alert-%04dms.png", at)), type, 1920, 1080, at);
 		}
-		save(out.resolve("07-opening.png"), opening, type, 1600, 900);
-
-		// 8. The Anti Admin alert at the different stages of its sequence.
-		renderAlert(out.resolve("08-alert-stage1.png"), type, 1920, 1080, 120, Evidence.NEARBY);
-		renderAlert(out.resolve("09-alert-stage2.png"), type, 1920, 1080, 420, Evidence.NEARBY);
-		renderAlert(out.resolve("10-alert-hold.png"), type, 1920, 1080, 1600, Evidence.NEARBY);
-		renderAlert(out.resolve("11-alert-exit.png"), type, 1920, 1080, 3600, Evidence.NEARBY);
-		renderAlert(out.resolve("12-alert-online.png"), type, 1920, 1080, 1600, Evidence.ONLINE);
 
 		System.out.println("preview written to " + out.toAbsolutePath());
 	}
 
-	/** Renders the alert at a given point of its timeline. */
-	private static void renderAlert(Path file, SwingType type, int w, int h, long at, Evidence evidence)
-			throws Exception {
+	/** Renders the whole window once it has settled. */
+	private static void save(Path file, SwingType type, int w, int h) throws Exception {
+		save(file, type, w, h, 0);
+	}
+
+	private static void save(Path file, SwingType type, int w, int h, int category) throws Exception {
+		GuiFrame frame = new GuiFrame();
+		frame.resize(w, h);
+		frame.setCategory(category);
 		SwingCanvas canvas = new SwingCanvas(w, h);
-		// Stand in for the game behind the HUD, so the translucent parts of
-		// the alert can be judged.
-		canvas.fill(0, 0, w, h, 0xFF2E3A44);
-		canvas.fill(0, h / 2, w, h, 0xFF243026);
-		AdminDetector.Match match = new AdminDetector.Match(
-				java.util.UUID.nameUUIDFromBytes("preview".getBytes()),
-				evidence == Evidence.NEARBY ? "Notch" : "CookieAdmin",
-				evidence == Evidence.NEARBY ? "Notch" : "CookieAdmin",
-				evidence == Evidence.NEARBY ? 12.4 : -1.0,
-				null,
-				evidence);
-		long start = System.currentTimeMillis() - at;
-		AdminAlert alert = new AdminAlert(match, start);
-		float alpha = alert.alpha(System.currentTimeMillis());
-		// Only the burst is alive: the module never fills the alert pool.
-		com.capy.client.gui.UiPetals petals = new com.capy.client.gui.UiPetals();
-		petals.burst(AlertRenderer.portraitCenterX(w), AlertRenderer.portraitCenterY(h), 9, 1.2f);
-		for (int i = 0; i < Math.max(1, at / 20); i++) {
-			petals.update(1f, w, h);
+		for (int i = 0; i < 90; i++) {
+			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
 		}
-		AlertRenderer.renderFaceAlert(canvas, type.regular(), type.medium(), type.display(), null,
-				petals, w, h, alert, alpha);
-		AlertRenderer.renderNotification(canvas, type.regular(), type.medium(), w, h, alert, alpha);
+		SwingCanvas.fills = 0;
+		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
+		System.out.println(w + "x" + h + ": " + SwingCanvas.fills + " draw calls");
+		ImageIO.write(canvas.image(), "png", file.toFile());
+	}
+
+	/** Renders the alert at a given point of its timeline over a stand-in world. */
+	private static void renderAlert(Path file, SwingType type, int w, int h, long at) throws Exception {
+		SwingCanvas canvas = new SwingCanvas(w, h);
+		// A rough stand-in for the game behind the HUD, so the face can be
+		// judged against something with structure instead of flat grey.
+		canvas.fill(0, 0, w, h / 2, 0xFF6E8FA8);
+		canvas.fill(0, h / 2, w, h, 0xFF4E6B45);
+		for (int i = 0; i < 12; i++) {
+			int bx = (i * 173) % w;
+			int by = h / 2 + (i * 47) % (h / 2);
+			canvas.fill(bx, by, bx + 120, by + 90, 0xFF7A6A4E);
+		}
+		AdminDetector.Match match = new AdminDetector.Match(
+				java.util.UUID.nameUUIDFromBytes("preview".getBytes(StandardCharsets.UTF_8)),
+				"CookieAdmin", "CookieAdmin", 12.4, 0L, null);
+		AdminAlert alert = new AdminAlert(match, AdminAlert.Kind.NEARBY,
+				System.currentTimeMillis() - at);
+		AlertRenderer.renderFaceAlert(canvas, type.medium(), type.display(), null, w, h, alert);
+		AlertRenderer.renderNotification(canvas, type.regular(), type.medium(), w, h, alert,
+				alert.alpha(System.currentTimeMillis()));
 		ImageIO.write(canvas.image(), "png", file.toFile());
 	}
 
@@ -157,23 +128,6 @@ public final class Preview {
 				UiLabels.override(entry.getKey(), entry.getValue().getAsString());
 			}
 		}
-	}
-
-	/** Runs the frame for a while so the animations reach their resting state. */
-	private static void settle(GuiFrame frame, SwingType type, int w, int h, int frames) {
-		SwingCanvas canvas = new SwingCanvas(w, h);
-		for (int i = 0; i < frames; i++) {
-			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		}
-		SwingCanvas.fills = 0;
-		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		System.out.println("frame draw calls at " + w + "x" + h + ": " + SwingCanvas.fills);
-	}
-
-	private static void save(Path file, GuiFrame frame, SwingType type, int w, int h) throws Exception {
-		SwingCanvas canvas = new SwingCanvas(w, h);
-		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		ImageIO.write(canvas.image(), "png", file.toFile());
 	}
 
 	// ------------------------------------------------------------- Java2D
@@ -299,5 +253,4 @@ public final class Preview {
 			return display;
 		}
 	}
-
 }

@@ -19,10 +19,12 @@ import net.minecraft.world.entity.player.PlayerSkin;
  * </pre>
  *
  * The face phase is timed from vanilla: the elder guardian particle lives for
- * 30 ticks (1.5 s), and its opacity follows {@code 0.05 + 0.5 * sin(t * PI)} -
- * it swells in, peaks halfway through and falls away again. That curve is
- * reproduced here, only with the brightness raised so a flat portrait stays
- * readable over a bright sky (see {@link #FACE_ALPHA_PEAK}).
+ * 30 ticks (1.5 s), and its opacity swells in with a sine. Vanilla then fades
+ * it out over the second half because the particle is falling away from the
+ * camera. The portrait here travels all the way down the screen instead, so it
+ * holds its strength through the fall and only fades over the last fifth - it
+ * has to still be readable when it reaches the hotbar. The brightness is
+ * raised for the same reason (see {@link #FACE_ALPHA_PEAK}).
  */
 public final class AdminAlert {
 	/** Why the alert was raised. It only changes the wording. */
@@ -75,14 +77,14 @@ public final class AdminAlert {
 	 * unchanged. Set this to 0.55f for the literal vanilla value.
 	 */
 	public static final float FACE_ALPHA_PEAK = 0.85f;
+	/** Fraction of the face phase spent rising to full strength. */
+	public static final float FACE_RISE = 0.42f;
 	/**
-	 * The last stretch of the face phase, ramped to zero.
-	 *
-	 * Vanilla's sine bottoms out at 0.05 and then the particle is removed, so
-	 * the head disappears with a small step. A flat portrait would show that
-	 * step, so the tail is multiplied down to zero instead.
+	 * Fraction of the face phase where the fade out starts. The portrait is
+	 * fully transparent at the end of the phase, which is what makes it vanish
+	 * exactly as it reaches the hotbar instead of blinking out mid-air.
 	 */
-	public static final long FACE_TAIL_MS = 120L;
+	public static final float FACE_FALL = 0.90f;
 
 	private final String username;
 	private final String identity;
@@ -170,8 +172,9 @@ public final class AdminAlert {
 	}
 
 	/**
-	 * Opacity of the face, following vanilla's sine swell: it rises from
-	 * {@link #FACE_ALPHA_MIN}, peaks at the halfway point and falls back.
+	 * Opacity of the face: it swells in from {@link #FACE_ALPHA_MIN}, holds at
+	 * {@link #FACE_ALPHA_PEAK} for the fall, and reaches exactly zero at the
+	 * end of the phase.
 	 */
 	public float faceAlpha(long now) {
 		long elapsed = now - startMs;
@@ -179,10 +182,15 @@ public final class AdminAlert {
 			return 0f;
 		}
 		float t = elapsed / (float) FACE_MS;
-		float swell = (float) Math.sin(t * Math.PI);
-		float alpha = FACE_ALPHA_MIN + (FACE_ALPHA_PEAK - FACE_ALPHA_MIN) * swell;
-		float tail = Math.min(1f, (FACE_MS - elapsed) / (float) FACE_TAIL_MS);
-		return alpha * clamp(tail);
+		float rise = smoothstep(0f, FACE_RISE, t);
+		float fall = 1f - smoothstep(FACE_FALL, 1f, t);
+		return (FACE_ALPHA_MIN + (FACE_ALPHA_PEAK - FACE_ALPHA_MIN) * rise) * fall;
+	}
+
+	/** Hermite ramp between two edges, 0 before and 1 after. */
+	private static float smoothstep(float edge0, float edge1, float value) {
+		float t = clamp((value - edge0) / (edge1 - edge0));
+		return t * t * (3f - 2f * t);
 	}
 
 	/** Opacity of the "is watching you" line. */

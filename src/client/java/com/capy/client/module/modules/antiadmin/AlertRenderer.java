@@ -25,9 +25,12 @@ import net.minecraft.world.entity.player.PlayerSkin;
  *   pose.scale(0.4255, -0.4255, -0.4255)
  * </pre>
  *
- * The two ingredients that carry the animation are the sine opacity swell and
- * the downward pitch. Both are reproduced here; the pitch becomes a downward
- * drift plus a slight shrink, because a flat portrait cannot tilt in 3D.
+ * The two ingredients that carry the animation are the opacity swell and the
+ * downward pitch. The swell is reproduced; the pitch becomes the portrait
+ * falling from above the screen to just over the hotbar, because a flat
+ * portrait cannot rotate in 3D. It falls with an accelerating curve and is
+ * fully transparent by the time it lands, so it reaches the hotbar and then
+ * disappears instead of blinking out in the middle of the screen.
  *
  * There is deliberately no veil, no bloom, no ring and no pulse: vanilla's
  * curse only translucently overlays the face, and adding more would make it
@@ -88,20 +91,24 @@ public final class AlertRenderer {
 			return;
 		}
 		float t = alert.faceProgress(now);
+		// Falling accelerates, the way the guardian's downward pitch does.
+		float fall = (float) Math.pow(t, 1.6);
 
 		int base = Math.min(screenW, screenH);
 		int size = Math.max(96, Math.min(260, Math.round(base * 0.42f)));
 		// Vanilla's head shrinks a little as it pitches away.
-		int drawSize = Math.round(size * (1f - 0.12f * t));
+		int drawSize = Math.round(size * (1f - 0.10f * t));
 
-		// Vanilla pitches from +60 degrees to -90: the face travels downwards.
-		// A flat portrait cannot rotate in 3D, so the same motion is shown as a
-		// drift of a tenth of the screen height plus the shrink above.
-		int cx = screenW / 2;
-		int centerY = Math.round(screenH * 0.42f);
-		int drift = Math.round(screenH * 0.10f * t);
-		int x = cx - drawSize / 2;
-		int y = centerY - drawSize / 2 + drift;
+		// The portrait starts above the screen and lands just over the hotbar,
+		// which occupies the bottom 22 pixels. The last visible frame therefore
+		// sits right on the hotbar, and the phase ends with the face gone.
+		int hotbarTop = screenH - 22;
+		int startCenterY = Math.round(-size * 0.40f);
+		int endCenterY = hotbarTop - 18 - drawSize / 2;
+		int centerY = startCenterY + Math.round((endCenterY - startCenterY) * fall);
+
+		int x = screenW / 2 - drawSize / 2;
+		int y = centerY - drawSize / 2;
 
 		int tint = Ui.withAlpha(0xFFFFFF, Math.round(255f * faceAlpha));
 		drawPortrait(c, graphics, alert.skin(), x, y, drawSize, tint, faceAlpha);
