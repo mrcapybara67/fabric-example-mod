@@ -3,7 +3,8 @@
 	"package": "com.capy.client.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
-		"LivingEntityMixin"
+		"LivingEntityMixin",
+		"ClientPacketListenerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -42,6 +42,10 @@ public final class AlertRenderer {
 	private static final String LABEL_WATCHING = UiLabels.translate("capy.alert.watching", "%s is watching you");
 	private static final String LABEL_JOINED = UiLabels.translate("capy.alert.joined", "%s joined the server");
 	private static final String LABEL_VANISHED = UiLabels.translate("capy.alert.vanished", "%s has vanished");
+	private static final String LABEL_GHOST = UiLabels.translate("capy.alert.ghost", "%s vanished but is still here");
+	private static final String LABEL_PROBED = UiLabels.translate("capy.alert.probed", "%s is online and hidden");
+	private static final String LABEL_SPECTATOR = UiLabels.translate("capy.alert.spectator", "%s is in spectator");
+	private static final String LABEL_HIDDEN_TAG = UiLabels.translate("capy.alert.hidden_tag", "%s hid their nametag");
 	private static final String LABEL_SIGN_OFF =
 			UiLabels.translate("capy.alert.stay_safe", "stay safe capy client user");
 	private static final String LABEL_NEARBY = UiLabels.translate("capy.alert.nearby", "WATCHLIST PLAYER NEARBY");
@@ -49,6 +53,14 @@ public final class AlertRenderer {
 			UiLabels.translate("capy.alert.joined_title", "WATCHLIST PLAYER JOINED");
 	private static final String LABEL_VANISHED_TITLE =
 			UiLabels.translate("capy.alert.vanished_title", "WATCHLIST PLAYER VANISHED");
+	private static final String LABEL_GHOST_TITLE =
+			UiLabels.translate("capy.alert.ghost_title", "WATCHLIST PLAYER STILL HERE");
+	private static final String LABEL_PROBED_TITLE =
+			UiLabels.translate("capy.alert.probed_title", "WATCHLIST PLAYER ONLINE");
+	private static final String LABEL_SPECTATOR_TITLE =
+			UiLabels.translate("capy.alert.spectator_title", "WATCHLIST PLAYER IN SPECTATOR");
+	private static final String LABEL_HIDDEN_TAG_TITLE =
+			UiLabels.translate("capy.alert.hidden_tag_title", "WATCHLIST PLAYER NAMETAG HIDDEN");
 
 	/** Gap between the name line and the sign-off. */
 	private static final int LINE_GAP = 10;
@@ -115,6 +127,10 @@ public final class AlertRenderer {
 			String pattern = switch (alert.kind()) {
 				case JOINED -> LABEL_JOINED;
 				case VANISHED -> LABEL_VANISHED;
+				case GHOST -> LABEL_GHOST;
+				case PROBED -> LABEL_PROBED;
+				case SPECTATOR -> LABEL_SPECTATOR;
+				case HIDDEN_TAG -> LABEL_HIDDEN_TAG;
 				case NEARBY -> LABEL_WATCHING;
 			};
 			String line = pattern.replace("%s", alert.username());
@@ -179,15 +195,19 @@ public final class AlertRenderer {
 		}
 		int accent = UiTheme.ACCENT;
 
-		boolean nearby = alert.hasDistance();
 		String title = switch (alert.kind()) {
 			case NEARBY -> LABEL_NEARBY;
 			case JOINED -> LABEL_JOINED_TITLE;
 			case VANISHED -> LABEL_VANISHED_TITLE;
+			case GHOST -> LABEL_GHOST_TITLE;
+			case PROBED -> LABEL_PROBED_TITLE;
+			case SPECTATOR -> LABEL_SPECTATOR_TITLE;
+			case HIDDEN_TAG -> LABEL_HIDDEN_TAG_TITLE;
 		};
-		// The distance is only known for a nearby detection; a join and a
-		// vanish carry no position at all, so the name stands alone there.
-		String name = nearby ? alert.username() + "  ·  " + alert.distanceText() : alert.username();
+		// A join and the two tab tells carry no position at all; a vanish or a
+		// ghost does, because the position was remembered before they went.
+		String detail = alert.detailText();
+		String name = detail.isEmpty() ? alert.username() : alert.username() + "  ·  " + detail;
 		int w = Math.max(medium.width(title), regular.width(name)) + 52;
 		int h = 42;
 		int slide = Math.round((1f - alpha) * 14f);

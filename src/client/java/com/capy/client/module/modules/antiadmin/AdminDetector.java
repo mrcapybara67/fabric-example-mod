@@ -2,7 +2,6 @@ package com.capy.client.module.modules.antiadmin;
 
 import com.capy.client.module.WatchlistSetting;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -13,29 +12,31 @@ import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.PlayerSkin;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.scores.PlayerTeam;
+import net.minecraft.world.scores.Team;
 
 /**
- * Finds the watched players that are actually around the local player.
+ * Finds the watched players the client can still see, and how.
  *
- * A match is only reported when the server sent the player's <em>entity</em>
- * to the client and that entity is inside the detection radius. That is the
- * one case where the client genuinely knows the player is there and how far
- * away they are.
+ * Only an <em>entity</em> carries a position. When the server sent one, the
+ * distance is real and the radius means something; nothing else in this class
+ * ever claims to know how far away a player is.
  *
- * Why the tab list is deliberately not used
- * -----------------------------------------
- * An earlier build also reported a watched name that merely appeared in the
- * player list as "ONLINE" and raised an alert for it. That is not evidence of
- * anything: on a normal server every connected player is in that list, so the
- * alert fired for a staff member who was on the other side of the map, in
- * another world, or in a lobby - nowhere near the player. The only thing the
- * list proves is that an account is connected to the same server, and the
- * detection radius cannot be measured from it at all. Those false positives
- * are gone: the list is no longer consulted when deciding whether to alert.
+ * Why a player list entry is not evidence of proximity
+ * ---------------------------------------------------
+ * An earlier build reported a watched name that merely appeared in the player
+ * list as "ONLINE" and raised a proximity alert for it. That was wrong: on a
+ * normal server every connected player is in that list, so it fired for a
+ * staff member on the other side of the map, in another world, or in a lobby.
+ * The list is never used to measure distance.
  *
- * There is one case where a watched player is deliberately hidden but the
- * client still knows about them, and {@link #scanVanished} covers it: a vanish
- * plugin that unlists an account instead of removing it.
+ * What the list and the packets <em>can</em> prove is different, and is what
+ * the rest of the module uses: that an account is connected (a join), that it
+ * stopped being listed (a vanish), that its entity outlived its entry (a
+ * ghost), or that the tab itself reports a spectator or a nametag-hiding team
+ * ({@link #scanTells}). Those are states, not distances, and each is
+ * announced as such. The packet level signals live in {@code PacketSignals}.
  *
  * What this class deliberately does <em>not</em> do:
  * <ul>
@@ -50,20 +51,42 @@ import net.minecraft.world.entity.player.PlayerSkin;
  * </ul>
  */
 public final class AdminDetector {
-	/** An observed watched player, with the distance the client measured. */
-	public record Match(UUID uuid, String username, String identity, double distance, PlayerSkin skin) {
+	/**
+	 * An observed watched player.
+	 *
+	 * @param distance how far away the client last saw them, or -1 when it
+	 *                 never had a position
+	 * @param ageMs    how long ago that position was read, 0 for a live one
+	 */
+	public record Match(UUID uuid, String username, String identity, double distance, long ageMs,
+			PlayerSkin skin) {
+	}
+
+	/** What the tab list itself gives away about a listed player. */
+	public enum Tell {
+		/** In spectator mode: invisible to survival players, but still listed. */
+		SPECTATOR,
+		/** On a team that hides nametags: the older vanish style. */
+		HIDDEN_TAG
+	}
+
+	/** A tell, attached to the player it belongs to. */
+	public record TabTell(Match match, Tell tell) {
 	}
 
 	private AdminDetector() {
 	}
 
 	/**
-	 * Scans the client for watched players that are in the world and in range.
+	 * Scans the client for watched players that are in the world.
 	 *
-	 * @param range detection radius in blocks
-	 * @return every watched player inside the radius, closest first
+	 * The radius is applied by the caller rather than here, because the
+	 * positions are useful beyond it: a vanish that removes the entity can
+	 * still be reported with where the player was standing when it happened.
+	 *
+	 * @return every watched player the server sent, closest first
 	 */
-	public static List<Match> scan(Minecraft mc, WatchlistSetting watchlist, double range) {
+	public static List<Match> scan(Minecraft mc, WatchlistSetting watchlist) {
 		List<Match> out = new ArrayList<>();
 		if (mc == null || watchlist == null) {
 			return out;
@@ -73,8 +96,6 @@ public final class AdminDetector {
 		if (level == null || local == null) {
 			return out;
 		}
-
-		double rangeSq = range * range;
 
 		// Players the server actually sent to us: their position is known, so
 		// the distance is real and the radius means something.
@@ -87,14 +108,11 @@ public final class AdminDetector {
 			if (identity == null) {
 				continue;
 			}
-			double distanceSq = player.distanceToSqr(local);
-			if (distanceSq > rangeSq) {
-				continue;
-			}
 			out.add(new Match(player.getUUID(),
 					profileName == null || profileName.isEmpty() ? identity : profileName,
 					identity,
-					Math.sqrt(distanceSq),
+					Math.sqrt(player.distanceToSqr(local)),
+					0L,
 					player.getSkin()));
 		}
 
@@ -134,12 +152,40 @@ public final class AdminDetector {
 			if (identity == null) {
 				continue;
 			}
-			String name = info.getProfile().name();
-			out.add(new Match(id,
-					name == null || name.isEmpty() ? identity : name,
-					identity,
-					-1.0,
-					info.getSkin()));
+			out.add(toMatch(info, identity));
+		}
+		return out;
+	}
+
+	/**
+	 * Reads the two tells that a listed tab entry carries.
+	 *
+	 * A spectator is not sent to survival clients at all, so no scan of the
+	 * world can find one - but the tab list still reports the game mode. A team
+	 * with a restricted nametag visibility is how the older vanish plugins hide
+	 * a player while leaving them listed.
+	 *
+	 * Only listed entries are considered: an unlisted one is already reported
+	 * as a vanish, and reporting it twice would tell the player nothing new.
+	 */
+	public static List<TabTell> scanTells(Minecraft mc, WatchlistSetting watchlist) {
+		List<TabTell> out = new ArrayList<>();
+		if (mc == null || watchlist == null || mc.getConnection() == null || mc.level == null) {
+			return out;
+		}
+		for (PlayerInfo info : mc.getConnection().getListedOnlinePlayers()) {
+			String identity = matchIdentity(info, watchlist);
+			if (identity == null) {
+				continue;
+			}
+			if (info.getGameMode() == GameType.SPECTATOR) {
+				out.add(new TabTell(toMatch(info, identity), Tell.SPECTATOR));
+				continue;
+			}
+			PlayerTeam team = info.getTeam();
+			if (team != null && team.getNameTagVisibility() != Team.Visibility.ALWAYS) {
+				out.add(new TabTell(toMatch(info, identity), Tell.HIDDEN_TAG));
+			}
 		}
 		return out;
 	}
@@ -188,68 +234,15 @@ public final class AdminDetector {
 		return null;
 	}
 
-	/**
-	 * Collects watched players that the server has just hidden from the tab
-	 * list while keeping their account connected.
-	 *
-	 * A vanish plugin does not have to remove the account. The modern way is
-	 * {@code UPDATE_LISTED} with {@code listed = false}: the client drops the
-	 * entry from its listed set but leaves it in the player info map, and the
-	 * tab overlay only draws the listed set. The player disappears from the
-	 * screen while the client still knows the name, the skin and the ping.
-	 * That difference is the whole detection.
-	 *
-	 * Only the transition counts. An account that is already unlisted when the
-	 * client connects is not reported, because some lobbies unlist players for
-	 * reasons that have nothing to do with a vanish, and the very first scan
-	 * therefore only records the baseline. An account that was listed on the
-	 * previous scan and is not listed now was hidden while the player was
-	 * watching, which is the event worth announcing.
-	 *
-	 * A server that removes the account outright leaves nothing behind, so that
-	 * case stays invisible - see the class comment.
-	 *
-	 * @param listedLast UUIDs listed on the previous scan; refreshed in place
-	 * @return the watched players hidden since the previous scan
-	 */
-	public static List<Match> scanVanished(Minecraft mc, WatchlistSetting watchlist, Set<UUID> listedLast) {
-		List<Match> out = new ArrayList<>();
-		if (mc == null || watchlist == null || listedLast == null || mc.getConnection() == null) {
-			return out;
-		}
-		Set<UUID> listedNow = new HashSet<>();
-		for (PlayerInfo info : mc.getConnection().getListedOnlinePlayers()) {
-			if (info != null && info.getProfile() != null && info.getProfile().id() != null) {
-				listedNow.add(info.getProfile().id());
-			}
-		}
-
-		for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
-			if (info == null || info.getProfile() == null || info.getProfile().id() == null) {
-				continue;
-			}
-			UUID id = info.getProfile().id();
-			// Still listed, or never listed in the first place: not a vanish.
-			if (listedNow.contains(id) || !listedLast.contains(id)) {
-				continue;
-			}
-			String identity = matchIdentity(info, watchlist);
-			if (identity == null) {
-				continue;
-			}
-			String name = info.getProfile().name();
-			out.add(new Match(id,
-					name == null || name.isEmpty() ? identity : name,
-					identity,
-					-1.0,
-					info.getSkin()));
-		}
-
-		// The next scan compares against this one. Replacing the whole set
-		// also drops everyone who has disconnected.
-		listedLast.clear();
-		listedLast.addAll(listedNow);
-		return out;
+	/** Builds a match from a tab entry, so the same fallbacks are used everywhere. */
+	private static Match toMatch(PlayerInfo info, String identity) {
+		String name = info.getProfile().name();
+		return new Match(info.getProfile().id(),
+				name == null || name.isEmpty() ? identity : name,
+				identity,
+				-1.0,
+				0L,
+				info.getSkin());
 	}
 
 	private static PlayerInfo playerInfo(Minecraft mc, AbstractClientPlayer player) {

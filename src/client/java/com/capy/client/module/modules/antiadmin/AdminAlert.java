@@ -31,11 +31,16 @@ public final class AdminAlert {
 		JOINED,
 		/** The player is in the world, inside the detection radius. */
 		NEARBY,
-		/**
-		 * The player was hidden from the tab list while staying connected: a
-		 * server side vanish. Announced once per session, like a join.
-		 */
-		VANISHED
+		/** Unlisted while still connected: a server side vanish. */
+		VANISHED,
+		/** The tab entry was removed, but their entity is still in the world. */
+		GHOST,
+		/** Removed completely, yet the server still lists them as online. */
+		PROBED,
+		/** Listed, but in spectator mode: invisible, and the tab list says so. */
+		SPECTATOR,
+		/** Listed, but their team hides nametags: the older vanish style. */
+		HIDDEN_TAG
 	}
 
 	/** Vanilla's elder guardian particle lives for 30 ticks. */
@@ -82,6 +87,7 @@ public final class AdminAlert {
 	private final String username;
 	private final String identity;
 	private final double distance;
+	private final long ageMs;
 	private final PlayerSkin skin;
 	private final Kind kind;
 	private final long startMs;
@@ -90,6 +96,7 @@ public final class AdminAlert {
 		this.username = match.username();
 		this.identity = match.identity();
 		this.distance = match.distance();
+		this.ageMs = match.ageMs();
 		this.skin = match.skin();
 		this.kind = kind == null ? Kind.NEARBY : kind;
 		this.startMs = startMs;
@@ -98,11 +105,6 @@ public final class AdminAlert {
 	/** Why this alert was raised. */
 	public Kind kind() {
 		return kind;
-	}
-
-	/** True when the client measured where the player is. */
-	public boolean hasDistance() {
-		return kind == Kind.NEARBY;
 	}
 
 	public String username() {
@@ -127,12 +129,23 @@ public final class AdminAlert {
 		return startMs;
 	}
 
-	/** The distance, ready to be drawn; empty when it cannot be measured. */
-	public String distanceText() {
-		if (!hasDistance()) {
+	/**
+	 * The second line of the notification: how far away they are right now,
+	 * or - when the entity is already gone - where they were last seen.
+	 *
+	 * Empty when the client never had a position for this player.
+	 */
+	public String detailText() {
+		if (distance < 0) {
 			return "";
 		}
-		return String.format(Locale.ROOT, "%.1f blocks away", distance);
+		if (kind == Kind.NEARBY) {
+			return String.format(Locale.ROOT, "%.1f blocks away", distance);
+		}
+		String when = ageMs < 1000L
+				? "just now"
+				: String.format(Locale.ROOT, "%ds ago", Math.max(1L, ageMs / 1000L));
+		return String.format(Locale.ROOT, "last seen %.1f blocks away · %s", distance, when);
 	}
 
 	/** Overall visibility, used for the corner notification and the outro. */

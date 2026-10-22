@@ -21,9 +21,11 @@ import java.util.UUID;
  *         the screen;</li>
  *     <li>a different player takes over immediately, because that is the more
  *         urgent situation;</li>
- *     <li>a join announcement is raised directly through {@link #raise}: it
- *         happens once per session by construction, so it needs no cooldown
- *         and it must not consume the nearby cooldown of the same player.</li>
+ *     <li>a one-shot announcement - a join, a vanish, a ghost, a probe hit,
+ *         a spectator or a hidden nametag - is raised directly through
+ *         {@link #raise}: it happens once per session by construction, so it
+ *         needs no cooldown and it must not consume the nearby cooldown of
+ *         the same player.</li>
  *   </ul>
  */
 public final class AlertManager {
