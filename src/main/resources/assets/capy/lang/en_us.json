@@ -65,11 +65,7 @@
 	"capy.module.hud_day.anchor": "Screen cell",
 	"capy.module.hud_day.offset_x": "Nudge X",
 	"capy.module.hud_day.offset_y": "Nudge Y",
-	"capy.alert.match": "WATCHLIST MATCH",
-	"capy.alert.match_online": "WATCHLIST MATCH  \u00b7  ONLINE",
 	"capy.alert.nearby": "WATCHLIST PLAYER NEARBY",
-	"capy.alert.online": "WATCHLIST PLAYER ONLINE",
-	"capy.alert.position_unknown": "online \u00b7 position unknown",
 	"capy.alert.watching": "%s is watching you",
-	"capy.alert.good_luck": "good luck, capy user"
+	"capy.alert.stay_safe": "stay safe capy client user"
 }

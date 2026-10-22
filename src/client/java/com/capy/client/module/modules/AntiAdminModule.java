@@ -32,8 +32,9 @@ import net.minecraft.client.gui.GuiGraphics;
  *         radius raises an alert. A name that merely shows up in the player
  *         list does not: being connected to the same server is not being near
  *         the player, and the radius cannot be measured from it;</li>
- *     <li>the alert is the guardian style face that drifts down the screen and
- *         disappears, the corner notification and (optionally) a sound;</li>
+ *     <li>the alert is the elder guardian effect with the watched player's own
+ *         face, then "&lt;name&gt; is watching you" and the sign-off, plus the
+ *         corner notification and (optionally) a sound;</li>
  *     <li>the same player does not alert again until the cooldown has passed,
  *         so one player walking around cannot spam the screen.</li>
  *   </ul>
@@ -134,7 +135,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		UiCanvas canvas = McCanvas.of(g);
 		UiType type = TYPE;
 		if (faceAlert.value()) {
-			AlertRenderer.renderFaceAlert(canvas, type.regular(), type.display(), g,
+			AlertRenderer.renderFaceAlert(canvas, type.medium(), type.display(), g,
 					screenW, screenH, alert);
 		}
 		if (notification.value()) {

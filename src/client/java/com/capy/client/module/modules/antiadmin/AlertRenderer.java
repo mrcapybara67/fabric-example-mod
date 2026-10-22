@@ -13,83 +13,146 @@ import net.minecraft.world.entity.player.PlayerSkin;
 /**
  * Draws the Anti Admin alert.
  *
- * The face effect is the elder guardian's curse, reduced to exactly what it
- * needs to be: the screen darkens and the watched player's face drifts down
- * past the view and is gone. No bloom, no ring, no pulse, no petals - the
- * movement is the entire effect.
+ * The face phase copies the elder guardian curse as closely as a flat overlay
+ * can. Vanilla spawns a particle that lives for 30 ticks and, on every frame,
+ * does this (from {@code ElderGuardianParticleGroup}):
  *
- * Two details make it read like vanilla rather than like a sliding sticker:
- * <ul>
- *   <li>the travel is eased at both ends, so it enters above the screen,
- *       accelerates gently through the middle and leaves through the bottom
- *       instead of appearing or vanishing mid-screen;</li>
- *   <li>the face grows very slightly as it descends, which is what sells the
- *       "passing close to the camera" feeling.</li>
- * </ul>
+ * <pre>
+ *   t     = age / lifetime                       // 0..1 over 1.5 s
+ *   alpha = 0.05 + 0.5 * sin(t * PI)             // swell in, peak, fall away
+ *   pose.rotate(camera)                          // always faces the player
+ *   pose.rotateX(60 - 150 * t)                   // pitches DOWN as it goes
+ *   pose.scale(0.4255, -0.4255, -0.4255)
+ * </pre>
  *
- * The identity line travels with the face so the name is always attached to
- * whoever it belongs to. Nothing here takes input away or covers the
- * crosshair for longer than the read takes.
+ * The two ingredients that carry the animation are the sine opacity swell and
+ * the downward pitch. Both are reproduced here; the pitch becomes a downward
+ * drift plus a slight shrink, because a flat portrait cannot tilt in 3D.
+ *
+ * There is deliberately no veil, no bloom, no ring and no pulse: vanilla's
+ * curse only translucently overlays the face, and adding more would make it
+ * something else. Text legibility is handled with a one pixel drop shadow
+ * rather than a full screen tint.
+ *
+ * After the face is gone the wording takes over, in two steps: the watched
+ * player's name and then the sign-off.
  */
 public final class AlertRenderer {
-	/** The translated labels, resolved once instead of every frame. */
+	/** Resolved once, not every frame. */
 	private static final String LABEL_WATCHING = UiLabels.translate("capy.alert.watching", "%s is watching you");
+	private static final String LABEL_SIGN_OFF =
+			UiLabels.translate("capy.alert.stay_safe", "stay safe capy client user");
 	private static final String LABEL_NEARBY = UiLabels.translate("capy.alert.nearby", "WATCHLIST PLAYER NEARBY");
+
+	/** Gap between the name line and the sign-off. */
+	private static final int LINE_GAP = 10;
 
 	private AlertRenderer() {
 	}
 
-	/**
-	 * Draws the guardian style face effect.
-	 *
-	 * @param graphics the Minecraft graphics handle used for the skin texture;
-	 *                 may be null, in which case a neutral silhouette is drawn
-	 *                 instead
-	 */
-	public static void renderFaceAlert(UiCanvas c, UiText regular, UiText display,
+	/** Draws the guardian style face effect and then the wording. */
+	public static void renderFaceAlert(UiCanvas c, UiText medium, UiText display,
 			GuiGraphics graphics, int screenW, int screenH, AdminAlert alert) {
 		long now = System.currentTimeMillis();
-		float alpha = alert.alpha(now);
-		if (alpha <= 0.01f) {
+		if (alert.alpha(now) <= 0.01f) {
 			return;
 		}
-		float travel = alert.travel(now);
+		renderFace(c, graphics, screenW, screenH, alert, now);
+		renderWording(c, medium, display, screenW, screenH, alert, now);
+	}
 
-		// The screen darkens, the way the guardian effect does.
-		int veil = Math.round(150 * alpha);
-		if (veil > 0) {
-			c.fill(0, 0, screenW, screenH, (veil << 24) | 0x0A0510);
+	// ------------------------------------------------------------------ face
+
+	private static void renderFace(UiCanvas c, GuiGraphics graphics, int screenW, int screenH,
+			AdminAlert alert, long now) {
+		float faceAlpha = alert.faceAlpha(now);
+		if (faceAlpha <= 0.01f) {
+			return;
 		}
+		float t = alert.faceProgress(now);
 
 		int base = Math.min(screenW, screenH);
-		int faceSize = Math.max(96, Math.min(200, (int) (base * 0.24f)));
-		int size = Math.round(faceSize * (1f + 0.06f * travel));
+		int size = Math.max(96, Math.min(260, Math.round(base * 0.42f)));
+		// Vanilla's head shrinks a little as it pitches away.
+		int drawSize = Math.round(size * (1f - 0.12f * t));
 
-		// Travel from just above the top edge to just below the bottom edge,
-		// so the face both appears and disappears off screen instead of
-		// popping in and out in the middle of the view.
+		// Vanilla pitches from +60 degrees to -90: the face travels downwards.
+		// A flat portrait cannot rotate in 3D, so the same motion is shown as a
+		// drift of a tenth of the screen height plus the shrink above.
 		int cx = screenW / 2;
-		float startY = -size * 0.75f;
-		float endY = screenH + size * 0.75f;
-		int cy = Math.round(startY + (endY - startY) * travel);
+		int centerY = Math.round(screenH * 0.42f);
+		int drift = Math.round(screenH * 0.10f * t);
+		int x = cx - drawSize / 2;
+		int y = centerY - drawSize / 2 + drift;
 
-		// Only the identity is faded; the face leaves by moving, which is what
-		// makes it look like an animation rather than a fading texture.
-		c.pushClip(0, 0, screenW, screenH);
-		drawPortrait(c, graphics, alert.skin(), cx - size / 2, cy - size / 2, size);
-		c.popClip();
+		int tint = Ui.withAlpha(0xFFFFFF, Math.round(255f * faceAlpha));
+		drawPortrait(c, graphics, alert.skin(), x, y, drawSize, tint, faceAlpha);
+	}
 
-		int revealAlpha = Math.round(255 * alpha * alert.reveal(now));
-		if (revealAlpha > 0) {
-			// The name sits under the face and travels with it, so it is always
-			// attached to the right person.
-			String message = LABEL_WATCHING.replace("%s", alert.username());
-			int titleY = cy + size / 2 + 10;
-			Ui.drawCentered(c, display, message, cx, titleY, Ui.withAlpha(UiTheme.TEXT, revealAlpha));
-			Ui.drawCentered(c, regular, alert.distanceText(), cx,
-					titleY + display.lineHeight() + 4, Ui.withAlpha(UiTheme.TEXT_2, revealAlpha));
+	// --------------------------------------------------------------- wording
+
+	private static void renderWording(UiCanvas c, UiText medium, UiText display,
+			int screenW, int screenH, AdminAlert alert, long now) {
+		float nameAlpha = alert.nameAlpha(now);
+		float signOffAlpha = alert.signOffAlpha(now);
+		if (nameAlpha <= 0.01f && signOffAlpha <= 0.01f) {
+			return;
+		}
+
+		// The block is centred where the face was, so the eye stays in one
+		// place through the whole sequence.
+		int blockH = display.lineHeight() + LINE_GAP + medium.lineHeight();
+		int top = Math.round(screenH * 0.44f) - blockH / 2;
+		int maxWidth = Math.max(40, screenW - 48);
+
+		if (nameAlpha > 0.01f) {
+			String line = LABEL_WATCHING.replace("%s", alert.username());
+			drawShadowedCentered(c, display, line, screenW / 2, top, maxWidth,
+					Ui.withAlpha(UiTheme.TEXT, Math.round(255f * nameAlpha)));
+		}
+		if (signOffAlpha > 0.01f) {
+			drawShadowedCentered(c, medium, LABEL_SIGN_OFF, screenW / 2, top + display.lineHeight() + LINE_GAP,
+					maxWidth, Ui.withAlpha(UiTheme.ACCENT, Math.round(255f * signOffAlpha)));
 		}
 	}
+
+	/**
+	 * Centres a line, shortening it with an ellipsis when it does not fit, and
+	 * draws a one pixel shadow so it stays readable over any world.
+	 *
+	 * The shadow inherits the text's alpha, so it never keeps a hard edge on
+	 * screen after the line has faded.
+	 */
+	private static void drawShadowedCentered(UiCanvas c, UiText font, String text, int centerX, int y,
+			int maxWidth, int color) {
+		if (text == null || text.isEmpty()) {
+			return;
+		}
+		String fitted = fit(font, text, maxWidth);
+		int x = centerX - font.width(fitted) / 2;
+		int alpha = (color >>> 24) & 0xFF;
+		if (alpha <= 0) {
+			return;
+		}
+		int shadow = Ui.withAlpha(0x000000, Math.round(alpha * 0.55f));
+		font.draw(c, fitted, x + 1, y + 1, shadow);
+		font.draw(c, fitted, x, y, color);
+	}
+
+	/** Trims a line to fit, adding an ellipsis. */
+	private static String fit(UiText font, String text, int maxWidth) {
+		if (maxWidth <= 0 || font.width(text) <= maxWidth) {
+			return text;
+		}
+		String ellipsis = "…";
+		String out = text;
+		while (out.length() > 1 && font.width(out + ellipsis) > maxWidth) {
+			out = out.substring(0, out.length() - 1);
+		}
+		return out + ellipsis;
+	}
+
+	// ---------------------------------------------------------- notification
 
 	/**
 	 * Draws the compact notification in the top right corner.
@@ -106,7 +169,8 @@ public final class AlertRenderer {
 		int accent = UiTheme.ACCENT;
 
 		String title = LABEL_NEARBY;
-		String name = alert.username();
+		// The name and the distance the client actually measured.
+		String name = alert.username() + "  ·  " + alert.distanceText();
 		int w = Math.max(medium.width(title), regular.width(name)) + 52;
 		int h = 42;
 		int slide = Math.round((1f - alpha) * 14f);
@@ -123,7 +187,6 @@ public final class AlertRenderer {
 		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, x + 11, y + (h - iconSize) / 2, iconSize,
 				Ui.withAlpha(accent, Math.round(240 * alpha)));
 
-		// Two stacked rows inside the panel: the title above, the name below.
 		int textX = x + 34;
 		int rowH = h / 2;
 		Ui.drawEllipsized(c, medium, title, textX, Ui.centerTextY(y, rowH, medium), w - 44,
@@ -132,24 +195,29 @@ public final class AlertRenderer {
 				Ui.withAlpha(UiTheme.TEXT, Math.round(240 * alpha)));
 	}
 
+	// --------------------------------------------------------------- portrait
+
 	/**
 	 * Draws the player's face.
 	 *
-	 * The face is drawn with Minecraft's own player face renderer, so the UVs
-	 * and the texture are exactly the ones the game uses - no stretching and
-	 * no second upload. When the client has no usable skin, a neutral
-	 * silhouette is drawn instead.
+	 * Minecraft's own player face renderer is used, so the UVs and the texture
+	 * are exactly the ones the game uses. Its colour argument is an ARGB tint,
+	 * which is how the face fades - a plain blit would pop in and out.
+	 *
+	 * When the client has no usable skin, a neutral silhouette is drawn in the
+	 * same place and fades the same way.
 	 */
-	private static void drawPortrait(UiCanvas c, GuiGraphics graphics, PlayerSkin skin, int x, int y, int size) {
+	private static void drawPortrait(UiCanvas c, GuiGraphics graphics, PlayerSkin skin, int x, int y, int size,
+			int tint, float alpha) {
 		if (skin != null && skin.body() != null && skin.body().texturePath() != null && graphics != null) {
 			try {
-				PlayerFaceRenderer.draw(graphics, skin, x, y, size);
+				PlayerFaceRenderer.draw(graphics, skin, x, y, size, tint);
 				return;
 			} catch (RuntimeException e) {
 				// A broken skin must not stop the alert from being shown.
 			}
 		}
-		drawSilhouette(c, x + size / 2, y + size / 2, size / 2, 1f);
+		drawSilhouette(c, x + size / 2, y + size / 2, size / 2, alpha);
 	}
 
 	/** A neutral head and shoulders silhouette used when no skin is available. */
