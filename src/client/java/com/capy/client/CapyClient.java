@@ -35,7 +35,8 @@ public class CapyClient implements ClientModInitializer {
 		ModuleManager modules = ModuleManager.get();
 		modules.register(new SwingSpeedModule());
 		modules.register(new CustomKnifeModule());
-		modules.register(new WeatherNotifierModule());
+		WeatherNotifierModule weather = new WeatherNotifierModule();
+		modules.register(weather);
 		AntiAdminModule antiAdmin = new AntiAdminModule();
 		modules.register(antiAdmin);
 		// The HUD is a set of independent elements, not one panel.
@@ -63,6 +64,15 @@ public class CapyClient implements ClientModInitializer {
 			if (clicked && client.screen == null) {
 				client.setScreen(new ClickGuiScreen());
 			}
+			// The inspect key is drained every tick for the same reason, and
+			// only acted on while the player is actually in the world.
+			boolean inspect = ClientKeybinds.consumeInspectClick();
+			if (inspect && client.screen == null) {
+				CustomKnifeModule knife = modules.get(CustomKnifeModule.class);
+				if (knife != null) {
+					knife.triggerInspect();
+				}
+			}
 			for (Module module : modules.modules()) {
 				if (module instanceof Tickable tickable) {
 					tickable.onTick(client);
@@ -73,6 +83,10 @@ public class CapyClient implements ClientModInitializer {
 		// The HUD chips go first, so an alert is never hidden behind them.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "hud"),
 				(graphics, deltaTracker) -> HudRenderer.render(graphics, graphics.guiWidth(), graphics.guiHeight()));
+
+		// The weather card is drawn over the HUD chips and under the alerts.
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "weather_toast"),
+				(graphics, deltaTracker) -> weather.onHudRender(graphics, graphics.guiWidth()));
 
 		// The Anti Admin alerts are drawn over the HUD.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anti_admin"),

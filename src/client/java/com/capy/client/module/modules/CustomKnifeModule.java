@@ -1,10 +1,12 @@
 package com.capy.client.module.modules;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
 import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
+import com.capy.client.module.modules.knife.KnifeInspect;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.component.DataComponents;
@@ -26,11 +28,15 @@ import net.minecraft.world.item.Items;
  * they were. The alternative - swapping the held item for another item - would
  * have to be undone every tick and would be visible to the server.
  *
- * The models themselves are ordinary handheld item models with a 16x16 sprite,
- * the same pipeline every vanilla sword uses, so the knife sits in the hand at
- * the same angle and scale as the sword it replaces. One sprite per style and
- * sword material means a wooden sword keeps looking wooden and a netherite one
- * keeps looking like netherite.
+ * The models themselves are real 3D geometry: cuboids with thickness, bevelled
+ * tips, separate cutting edges and their own hardware, baked with the same
+ * display transforms a vanilla handheld item uses so the knife sits in the
+ * hand at the sword's angle and scale. One model per style and sword material
+ * means a wooden sword keeps a wooden handle and a netherite one keeps looking
+ * like netherite.
+ *
+ * Holding the inspect key (C by default, rebindable in Controls) plays a short
+ * flourish in first person; each style has its own. See {@link KnifeInspect}.
  *
  * Scope: only the local player's own items are changed. {@code owner} is the
  * entity the item is being rendered for, so another player's sword is left
@@ -39,7 +45,9 @@ import net.minecraft.world.item.Items;
  */
 public class CustomKnifeModule extends Module implements Configurable {
 	/** The knife styles that ship with the client, in menu order. */
-	public static final String[] STYLES = {"butterfly", "karambit", "cleaver", "dagger"};
+	public static final String[] STYLES = {
+			"butterfly", "karambit", "cleaver", "dagger", "tanto", "kukri", "machete", "stiletto"
+	};
 
 	/** Sword materials, in the order of {@link #MODELS}' second dimension. */
 	private static final String[] MATERIALS = {"wooden", "stone", "iron", "golden", "diamond", "netherite"};
@@ -58,7 +66,19 @@ public class CustomKnifeModule extends Module implements Configurable {
 	/** Prebuilt ids, indexed [style][material], so rendering never allocates one. */
 	private static final Identifier[][] MODELS = buildModels();
 
+	/**
+	 * Which models actually baked, one flag per [style][material].
+	 *
+	 * Resolved on first use instead of on every item draw: the check is two
+	 * map lookups, and the item model resolver runs it for every visible item
+	 * in the inventory on every frame. A model that did load always loads
+	 * again after a resource reload - it ships in our own jar - so a positive
+	 * answer is safe to keep; a negative one is retried until it flips.
+	 */
+	private static final boolean[] MODEL_READY = new boolean[STYLES.length * MATERIALS.length];
+
 	private final ChoiceSetting style = setting(new ChoiceSetting("style", 0, STYLES));
+	private final BooleanSetting inspect = setting(new BooleanSetting("inspect", true));
 
 	public CustomKnifeModule() {
 		super(Category.VISUAL, "custom_knife");
@@ -77,6 +97,34 @@ public class CustomKnifeModule extends Module implements Configurable {
 
 	public ChoiceSetting styleSetting() {
 		return style;
+	}
+
+	public boolean inspectEnabled() {
+		return inspect.value();
+	}
+
+	/** True when the given stack is one this module would draw as a knife. */
+	public boolean inspectReady(ItemStack stack) {
+		return isEnabled() && inspect.value()
+				&& stack != null && !stack.isEmpty() && stack.is(ItemTags.SWORDS);
+	}
+
+	/**
+	 * Plays the inspect flourish if the player is holding something we draw.
+	 *
+	 * The check happens here, not in the renderer, so pressing the key with an
+	 * empty hand or a pickaxe does nothing at all rather than starting an
+	 * animation that the renderer then has to suppress.
+	 */
+	public void triggerInspect() {
+		if (!isEnabled() || !inspect.value()) {
+			return;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null || mc.player == null || !inspectReady(mc.player.getMainHandItem())) {
+			return;
+		}
+		KnifeInspect.start(styleId());
 	}
 
 	/** The selected style id, for the model path and the config file. */
@@ -110,19 +158,32 @@ public class CustomKnifeModule extends Module implements Configurable {
 			// is left alone the second time.
 			return stack;
 		}
-		Identifier model = MODELS[style.index()][materialIndex(stack)];
-		if (!isLoaded(mc, model)) {
+		int styleIndex = style.index();
+		int material = materialIndex(stack);
+		if (!isLoaded(mc, styleIndex, material)) {
 			return stack;
 		}
 		ItemStack copy = stack.copy();
-		copy.set(DataComponents.ITEM_MODEL, model);
+		copy.set(DataComponents.ITEM_MODEL, MODELS[styleIndex][material]);
 		return copy;
 	}
 
 	/** True when the model was baked; a missing one would render as a magenta cube. */
-	private static boolean isLoaded(Minecraft mc, Identifier model) {
-		return mc.getModelManager() != null
-				&& mc.getModelManager().getItemModel(model) != mc.getModelManager().getItemModel(MISSING_PROBE);
+	private static boolean isLoaded(Minecraft mc, int styleIndex, int material) {
+		int slot = styleIndex * MATERIALS.length + material;
+		if (MODEL_READY[slot]) {
+			return true;
+		}
+		if (mc.getModelManager() == null) {
+			// Too early (no resource reload finished yet): draw the vanilla
+			// item and ask again on the next frame.
+			return false;
+		}
+		Identifier model = MODELS[styleIndex][material];
+		boolean ready = mc.getModelManager().getItemModel(model)
+				!= mc.getModelManager().getItemModel(MISSING_PROBE);
+		MODEL_READY[slot] = ready;
+		return ready;
 	}
 
 	/** Which sprite palette this sword uses. Unknown swords fall back to steel. */
@@ -157,10 +218,12 @@ public class CustomKnifeModule extends Module implements Configurable {
 		if (!style.select(ConfigValues.stringValue(json, "style", STYLES[0]))) {
 			style.reset();
 		}
+		inspect.set(ConfigValues.boolValue(json, "inspect", true));
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		json.addProperty("style", styleId());
+		json.addProperty("inspect", inspect.value());
 	}
 }

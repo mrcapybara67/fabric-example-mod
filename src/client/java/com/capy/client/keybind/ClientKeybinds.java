@@ -21,8 +21,10 @@ public final class ClientKeybinds {
 
 	/** Translation key of the binding. */
 	private static final String OPEN_GUI_KEY = "key.capy.open_gui";
+	private static final String INSPECT_KEY = "key.capy.inspect_knife";
 
 	private static KeyMapping openClickGui;
+	private static KeyMapping inspectKnife;
 
 	private ClientKeybinds() {
 	}
@@ -33,6 +35,12 @@ public final class ClientKeybinds {
 				OPEN_GUI_KEY,
 				InputConstants.Type.KEYSYM,
 				GLFW.GLFW_KEY_RIGHT_SHIFT,
+				category
+		));
+		inspectKnife = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+				INSPECT_KEY,
+				InputConstants.Type.KEYSYM,
+				GLFW.GLFW_KEY_C,
 				category
 		));
 	}
@@ -50,7 +58,25 @@ public final class ClientKeybinds {
 		return clicked;
 	}
 
+	/**
+	 * True on the tick after the inspect key was pressed. Drained even when it
+	 * is ignored, so a press made with a menu open is dropped rather than
+	 * replayed the next time the player is in the world.
+	 */
+	public static boolean consumeInspectClick() {
+		boolean clicked = false;
+		while (inspectKnife != null && inspectKnife.consumeClick()) {
+			clicked = true;
+		}
+		return clicked;
+	}
+
 	public static KeyMapping openClickGui() {
 		return openClickGui;
+	}
+
+	/** The inspect binding, so the GUI can show the current key. */
+	public static KeyMapping inspectKnife() {
+		return inspectKnife;
 	}
 }

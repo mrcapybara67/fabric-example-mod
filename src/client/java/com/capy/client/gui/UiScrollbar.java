@@ -45,9 +45,12 @@ public class UiScrollbar {
 		}
 
 		float ratio = trackH / (float) contentHeight;
-		thumbH = Math.max(24, (int) (trackH * ratio));
-		int thumbMax = trackH - thumbH;
-		thumbY = trackY + (int) Math.round((scroll / maxScroll) * thumbMax);
+		// The thumb can never be taller than the track it rides: a short
+		// viewport used to leave it hanging past the rail at the bottom.
+		thumbH = Math.min(trackH, Math.max(24, (int) (trackH * ratio)));
+		int thumbMax = Math.max(0, trackH - thumbH);
+		thumbY = trackY + (maxScroll <= 0 ? 0
+				: (int) Math.round((scroll / maxScroll) * thumbMax));
 	}
 
 	/** Current content offset in pixels (already smoothed). */
@@ -69,7 +72,7 @@ public class UiScrollbar {
 		return true;
 	}
 
-	/** Called on press over the rail strip; starts a thumb drac. */
+	/** Called on press over the rail strip; starts a thumb drag. */
 	public boolean pressed(double my) {
 		if (!usable) {
 			return false;
@@ -90,7 +93,7 @@ public class UiScrollbar {
 		clampTarget();
 	}
 
-	/** Ends any drac. Returns true if a drag was in progress. */
+	/** Ends any drag. Returns true if a drag was in progress. */
 	public boolean released() {
 		boolean was = dragging;
 		dragging = false;

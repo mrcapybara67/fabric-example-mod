@@ -42,8 +42,17 @@ public class SliderSetting extends Setting<Integer> {
 		set((int) Math.round(min + f * (max - min)));
 	}
 
-	/** Current value as a 0..1 fraction (used to draw the slider fill). */
+	/**
+	 * Current value as a 0..1 fraction (used to draw the slider fill).
+	 *
+	 * A slider with no range is answered as "empty" instead of dividing by
+	 * zero: NaN would reach the drawing layer and the knob would disappear.
+	 */
 	public double fraction() {
-		return (value - min) / (double) (max - min);
+		int span = max - min;
+		if (span <= 0) {
+			return 0.0;
+		}
+		return Math.max(0.0, Math.min(1.0, (value - min) / (double) span));
 	}
 }

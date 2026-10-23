@@ -65,6 +65,12 @@ public class ClickGuiScreen extends Screen {
 	/** True once the screen is really closed; keeps the close idempotent. */
 	private boolean finished;
 
+	/** When the previous frame was drawn, in {@link System#nanoTime()} units. */
+	private long lastFrameAt;
+
+	/** One tick of animation time, in nanoseconds (twenty ticks a second). */
+	private static final float NANOS_PER_TICK = 50_000_000f;
+
 	public ClickGuiScreen() {
 		super(Component.translatable("capy.gui.title"));
 	}
@@ -121,7 +127,24 @@ public class ClickGuiScreen extends Screen {
 		if (progress <= 0f) {
 			return;
 		}
-		frame.render(McCanvas.of(g), UI_TYPE, mouseX, mouseY, partialTick, progress);
+		// The frame's own elapsed time, in ticks. partialTick is not a delta:
+		// it cycles 0..1 between ticks, so passing it to the animation code made
+		// every transition stall on the frames where it happened to be zero and
+		// run at a different speed on every refresh rate. The wall clock is the
+		// only value that makes the easing frame rate independent, which is what
+		// {@link Anim} and {@link Motion} already assume.
+		frame.render(McCanvas.of(g), UI_TYPE, mouseX, mouseY, frameDeltaTicks(), progress);
+	}
+
+	/**
+	 * Time since the last frame in ticks, clamped so a long pause (a world load,
+	 * a minimised window) cannot make the whole interface jump in one frame.
+	 */
+	private float frameDeltaTicks() {
+		long now = System.nanoTime();
+		float ticks = lastFrameAt == 0L ? 1.0f : (now - lastFrameAt) / NANOS_PER_TICK;
+		lastFrameAt = now;
+		return Math.max(0.05f, Math.min(4.0f, ticks));
 	}
 
 	@Override

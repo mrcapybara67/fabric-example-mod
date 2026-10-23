@@ -27,6 +27,9 @@ public final class UiIcons {
 			case PLUS -> plus(c, x, y, size, color);
 			case CHECK -> check(c, x, y, size, color);
 			case CHEVRON -> chevron(c, x, y, size, color, 0f);
+			case SUN -> sun(c, x, y, size, color);
+			case RAIN -> rain(c, x, y, size, color);
+			case THUNDER -> thunder(c, x, y, size, color);
 		}
 	}
 
@@ -54,7 +57,10 @@ public final class UiIcons {
 		ALERT,
 		PLUS,
 		CHECK,
-		CHEVRON
+		CHEVRON,
+		SUN,
+		RAIN,
+		THUNDER
 	}
 
 
@@ -120,6 +126,73 @@ public final class UiIcons {
 	}
 
 
+
+	// ---- sun: disc with eight rays -----------------------------------------
+	private static void sun(UiCanvas c, int x, int y, int s, int col) {
+		int cx = x + s / 2;
+		int cy = y + s / 2;
+		int r = Math.max(2, Math.round(s * 0.20f));
+		disc(c, cx, cy, r, col);
+		int inner = r + Math.max(1, Math.round(s * 0.10f));
+		int outer = Math.max(inner + 1, Math.round(s * 0.46f));
+		for (int i = 0; i < 8; i++) {
+			double a = i * (Math.PI / 4.0);
+			int x0 = cx + (int) Math.round(Math.cos(a) * inner);
+			int y0 = cy + (int) Math.round(Math.sin(a) * inner);
+			int x1 = cx + (int) Math.round(Math.cos(a) * outer);
+			int y1 = cy + (int) Math.round(Math.sin(a) * outer);
+			stroke(c, x0, y0, x1, y1, col);
+		}
+	}
+
+	// ---- rain: cloud with three falling drops --------------------------------
+	private static void rain(UiCanvas c, int x, int y, int s, int col) {
+		int bottom = Math.round(s * 0.62f);
+		cloud(c, x, y, s, bottom, col);
+		int cx = x + s / 2;
+		int top = y + bottom + Math.max(1, s / 12);
+		int len = Math.max(3, s / 4);
+		int step = Math.max(3, Math.round(s * 0.24f));
+		for (int i = -1; i <= 1; i++) {
+			int px = cx + i * step;
+			// The middle drop hangs lower, which is what makes the three marks
+			// read as falling rain rather than as a dotted underline.
+			int start = top + (i == 0 ? Math.max(1, s / 10) : 0);
+			stroke(c, px, start, px - 1, start + len, col);
+		}
+	}
+
+	// ---- thunder: a bolt, heavy enough to read at chip size ------------------
+	private static void thunder(UiCanvas c, int x, int y, int s, int col) {
+		// A cloud plus a bolt does not survive an eighteen pixel box: both end
+		// up as lint. The bolt alone is unmistakable, and the rain icon already
+		// owns the cloud.
+		int cx = x + s / 2;
+		int top = y + 1;
+		int h = Math.max(6, s - 2);
+		int mid = top + Math.round(h * 0.58f);
+		int reach = Math.max(2, Math.round(s * 0.20f));
+		thickStroke(c, cx + reach, top, cx - reach, mid, col);
+		thickStroke(c, cx - reach, mid, cx + reach, mid, col);
+		thickStroke(c, cx + reach, mid, cx - reach, top + h, col);
+	}
+
+	/** A two pixel line, for marks that must survive a small icon box. */
+	private static void thickStroke(UiCanvas c, int x0, int y0, int x1, int y1, int col) {
+		stroke(c, x0, y0, x1, y1, col);
+		stroke(c, x0 + 1, y0, x1 + 1, y1, col);
+	}
+
+	/** Three overlapping lobes and a flat base: a cloud at any size. */
+	private static void cloud(UiCanvas c, int x, int y, int s, int bottom, int col) {
+		int cx = x + s / 2;
+		int r = Math.max(2, Math.round(s * 0.15f));
+		int baseY = y + bottom;
+		disc(c, cx - r, baseY - r, r, col);
+		disc(c, cx + r, baseY - r, r, col);
+		disc(c, cx, baseY - r - Math.max(1, r / 2), r + 1, col);
+		c.fill(cx - r * 2, baseY - r, cx + r * 2, baseY, col);
+	}
 
 	// ---- plus ----------------------------------------------------------------
 	private static void plus(UiCanvas c, int x, int y, int s, int col) {

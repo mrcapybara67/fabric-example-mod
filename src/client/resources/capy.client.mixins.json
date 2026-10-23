@@ -5,7 +5,8 @@
 	"client": [
 		"LivingEntityMixin",
 		"ClientPacketListenerMixin",
-		"ItemModelResolverMixin"
+		"ItemModelResolverMixin",
+		"ItemInHandRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
