@@ -3,7 +3,9 @@ package com.capy.client.gui;
 import com.capy.client.module.Category;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.AntiAdminModule;
+import com.capy.client.module.modules.CustomKnifeModule;
 import com.capy.client.module.modules.SwingSpeedModule;
+import com.capy.client.module.modules.WeatherNotifierModule;
 import com.capy.client.module.modules.antiadmin.AdminAlert;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
 import com.capy.client.module.modules.antiadmin.AlertRenderer;
@@ -53,6 +55,8 @@ public final class Preview {
 
 		ModuleManager modules = ModuleManager.get();
 		modules.register(new SwingSpeedModule());
+		modules.register(new CustomKnifeModule());
+		modules.register(new WeatherNotifierModule());
 		modules.register(new AntiAdminModule());
 		HudElements.register(modules);
 
@@ -63,6 +67,12 @@ public final class Preview {
 		save(out.resolve("03-overview-960x540.png"), type, 960, 540);
 		save(out.resolve("04-overview-2560x1440.png"), type, 2560, 1440);
 		save(out.resolve("05-category-visual.png"), type, 1600, 900, Category.VISUAL.ordinal());
+		// The Custom Knife card with its settings open: the choice row is the
+		// only control in the interface that is neither a slider nor a switch.
+		saveExpanded(out.resolve("06-visual-custom-knife.png"), type, 1600, 900,
+				Category.VISUAL.ordinal(), 1);
+		saveExpanded(out.resolve("07-world-weather.png"), type, 1600, 900,
+				Category.WORLD.ordinal(), 0);
 
 		// The alert at the points of its timeline that matter: the face in,
 		// the peak, the bottom of the travel, the hand over to the wording,
@@ -90,6 +100,20 @@ public final class Preview {
 		SwingCanvas.fills = 0;
 		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
 		System.out.println(w + "x" + h + ": " + SwingCanvas.fills + " draw calls");
+		ImageIO.write(canvas.image(), "png", file.toFile());
+	}
+
+	/** Renders one category with one card's settings open. */
+	private static void saveExpanded(Path file, SwingType type, int w, int h, int category, int card)
+			throws Exception {
+		GuiFrame frame = new GuiFrame();
+		frame.resize(w, h);
+		frame.setCategory(category);
+		frame.expandCard(Category.values()[category], card);
+		SwingCanvas canvas = new SwingCanvas(w, h);
+		for (int i = 0; i < 90; i++) {
+			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
+		}
 		ImageIO.write(canvas.image(), "png", file.toFile());
 	}
 

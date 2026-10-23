@@ -8,7 +8,9 @@ import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.AntiAdminModule;
+import com.capy.client.module.modules.CustomKnifeModule;
 import com.capy.client.module.modules.SwingSpeedModule;
+import com.capy.client.module.modules.WeatherNotifierModule;
 import com.capy.client.module.modules.hud.HudElements;
 import com.capy.client.module.modules.hud.HudRenderer;
 import net.fabricmc.api.ClientModInitializer;
@@ -32,6 +34,8 @@ public class CapyClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		ModuleManager modules = ModuleManager.get();
 		modules.register(new SwingSpeedModule());
+		modules.register(new CustomKnifeModule());
+		modules.register(new WeatherNotifierModule());
 		AntiAdminModule antiAdmin = new AntiAdminModule();
 		modules.register(antiAdmin);
 		// The HUD is a set of independent elements, not one panel.

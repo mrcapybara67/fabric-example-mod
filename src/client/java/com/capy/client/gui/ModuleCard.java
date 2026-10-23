@@ -1,6 +1,7 @@
 package com.capy.client.gui;
 
 import com.capy.client.module.BooleanSetting;
+import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.Module;
 import com.capy.client.module.Setting;
 import com.capy.client.module.SliderSetting;
@@ -34,6 +35,10 @@ public class ModuleCard {
 
 	private static final int ROW_SLIDER = 40;
 	private static final int ROW_TOGGLE = 30;
+	private static final int ROW_CHOICE = 30;
+	/** Stepper geometry, shared by the renderer and the hit test. */
+	private static final int STEPPER_H = 22;
+	private static final int STEPPER_ARROW_BOX = 18;
 
 	private final Module module;
 	private final UiToggle toggle = new UiToggle();
@@ -41,6 +46,9 @@ public class ModuleCard {
 	private final Map<SliderSetting, int[]> sliderBounds = new IdentityHashMap<>();
 	private final Map<BooleanSetting, UiToggle> switches = new IdentityHashMap<>();
 	private final Map<BooleanSetting, int[]> switchBounds = new IdentityHashMap<>();
+	private final Map<ChoiceSetting, String[]> choiceLabels = new IdentityHashMap<>();
+	private final Map<ChoiceSetting, String> choiceRowLabels = new IdentityHashMap<>();
+	private final Map<ChoiceSetting, int[]> choiceBounds = new IdentityHashMap<>();
 	/** Resolved once: a translation lookup per row per frame is not free. */
 	private final Map<BooleanSetting, String> switchLabels = new IdentityHashMap<>();
 	private final Map<SliderSetting, String> sliderUnits = new IdentityHashMap<>();
@@ -83,6 +91,9 @@ public class ModuleCard {
 			} else if (s instanceof BooleanSetting bool) {
 				switches.put(bool, new UiToggle());
 				switchLabels.put(bool, settingLabel(bool.key()));
+			} else if (s instanceof ChoiceSetting choice) {
+				choiceLabels.put(choice, choiceLabels(choice));
+				choiceRowLabels.put(choice, settingLabel(choice.key()));
 			} else if (s instanceof WatchlistSetting watch) {
 				watchlists.put(watch, new UiWatchlist(new WatchlistModel(watch), settingLabel(watch.key())));
 			}
@@ -123,6 +134,16 @@ public class ModuleCard {
 		String key = "capy.module." + module.id() + "." + settingKey;
 		String s = UiLabels.translate(key, null);
 		return s == null ? UiLabels.humanize(settingKey) : s;
+	}
+
+	/** Resolves every option label once: {@code capy.module.<id>.<key>.<option>}. */
+	private String[] choiceLabels(ChoiceSetting choice) {
+		String[] ids = choice.options();
+		String[] labels = new String[ids.length];
+		for (int i = 0; i < ids.length; i++) {
+			labels[i] = settingLabel(choice.key() + "." + ids[i]);
+		}
+		return labels;
 	}
 
 	/** Static per-slider model, created once (never per frame). */
@@ -188,6 +209,9 @@ public class ModuleCard {
 		}
 		if (s instanceof BooleanSetting) {
 			return ROW_TOGGLE;
+		}
+		if (s instanceof ChoiceSetting) {
+			return ROW_CHOICE;
 		}
 		if (s instanceof WatchlistSetting watch) {
 			UiWatchlist ui = watchlists.get(watch);
@@ -352,6 +376,52 @@ public class ModuleCard {
 			return ROW_TOGGLE;
 		}
 
+		if (s instanceof ChoiceSetting choice) {
+			// A stepper, not a dropdown: the list would be clipped by the
+			// settings well, and a stepper never grows past one row.
+			String[] labels = choiceLabels.get(choice);
+			int index = choice.index();
+			String value = labels == null || labels.length == 0
+					? choice.option()
+					: labels[Math.max(0, Math.min(labels.length - 1, index))];
+			int pillW = Math.min(contentW,
+					STEPPER_ARROW_BOX * 2 + regular.width(value) + UiTheme.SP_4 * 2);
+			int px = x + w - UiTheme.SP_6 - pillW;
+			int py = rowY + (ROW_CHOICE - STEPPER_H) / 2;
+			boolean pillHovered = mouseX >= px && mouseX < px + pillW
+					&& mouseY >= py && mouseY < py + STEPPER_H;
+
+			Ui.surface(c, px, py, pillW, STEPPER_H, STEPPER_H / 2,
+					Ui.lerpColor(UiTheme.PANEL_ALT, UiTheme.PANEL_TOP, pillHovered ? 0.5f : 0f),
+					UiTheme.PANEL_TOP);
+			Ui.surfaceEdge(c, px, py, pillW, STEPPER_H, STEPPER_H / 2,
+					Ui.withAlpha(UiTheme.BORDER, pillHovered ? 0xC8 : 0x9C),
+					Ui.withAlpha(UiTheme.BORDER, 0x50));
+
+			int arrow = pillHovered ? UiTheme.ACCENT : UiTheme.TEXT_3;
+			drawStepperArrow(c, px + STEPPER_ARROW_BOX / 2, py + STEPPER_H / 2, false, arrow);
+			drawStepperArrow(c, px + pillW - STEPPER_ARROW_BOX / 2, py + STEPPER_H / 2, true, arrow);
+			int textX = px + STEPPER_ARROW_BOX;
+			int textRoom = pillW - STEPPER_ARROW_BOX * 2;
+			int textY = Ui.centerTextY(py, STEPPER_H, regular);
+			int textColour = pillHovered ? UiTheme.TEXT : UiTheme.TEXT_2;
+			if (regular.width(value) <= textRoom) {
+				Ui.drawCentered(c, regular, value, px + pillW / 2, textY, textColour);
+			} else {
+				// An option id that is longer than its pill gets an ellipsis
+				// instead of drawing over the arrows.
+				Ui.drawEllipsized(c, regular, value, textX, textY, textRoom, textColour);
+			}
+
+			String rowLabel = choiceRowLabels.get(choice);
+			Ui.drawEllipsized(c, regular, rowLabel == null ? choice.key() : rowLabel, contentX,
+					Ui.centerTextY(rowY, ROW_CHOICE, regular),
+					Math.max(0, px - contentX - UiTheme.SP_3), UiTheme.TEXT_2);
+			choiceBounds.put(choice, new int[]{px, px + pillW, py, py + STEPPER_H,
+					px + STEPPER_ARROW_BOX});
+			return ROW_CHOICE;
+		}
+
 		if (s instanceof WatchlistSetting watch) {
 			UiWatchlist ui = watchlists.get(watch);
 			ui.bind(contentX, rowY, contentW);
@@ -360,6 +430,22 @@ public class ModuleCard {
 		}
 
 		return 0;
+	}
+
+	/**
+	 * One small chevron, built from single pixels.
+	 *
+	 * The canvas can only fill rectangles and the typefaces are reserved for
+	 * text, so a stepper arrow is drawn as one pixel per step. That also keeps
+	 * it sharp at every GUI scale.
+	 */
+	private static void drawStepperArrow(UiCanvas c, int tipX, int cy, boolean right, int color) {
+		int dir = right ? 1 : -1;
+		for (int step = 0; step <= 3; step++) {
+			int px = tipX - dir * step;
+			c.fill(px, cy - step, px + 1, cy - step + 1, color);
+			c.fill(px, cy + step, px + 1, cy + step + 1, color);
+		}
 	}
 
 	private String sliderValueText(SliderSetting slider) {
@@ -440,6 +526,15 @@ public class ModuleCard {
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
 				entry.getKey().toggle();
+				return true;
+			}
+		}
+		for (Map.Entry<ChoiceSetting, int[]> entry : choiceBounds.entrySet()) {
+			int[] b = entry.getValue();
+			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
+				// The leading arrow steps back, the value and the trailing arrow
+				// step forward.
+				entry.getKey().cycle(mx < b[4] ? -1 : 1);
 				return true;
 			}
 		}

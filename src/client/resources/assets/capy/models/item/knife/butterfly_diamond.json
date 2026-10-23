@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/handheld",
+  "textures": {
+    "layer0": "capy:item/knife/butterfly_diamond"
+  }
+}
