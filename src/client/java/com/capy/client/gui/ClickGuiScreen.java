@@ -1,6 +1,8 @@
 package com.capy.client.gui;
 
 import com.capy.client.config.ClientConfig;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
@@ -16,13 +18,30 @@ import net.minecraft.network.chat.Component;
  * with the window. All layout and drawing lives in the frame, which is what
  * makes the interface reviewable outside the game.
  *
- * The transition is driven by a plain timeline here, not by an easing curve:
- * the frame owns the easing, so the timing stays predictable and the opening
- * and the closing can have different durations. Closing is shorter than
- * opening on purpose - leaving an interface should never feel like waiting.
+ * The transition is clock driven: {@code progress} is computed from wall time,
+ * so the timing never depends on the frame rate, and the outro finishes even if
+ * a frame is late. Closing is shorter than opening on purpose - leaving an
+ * interface should never feel like waiting.
+ *
+ * The close is committed from {@link #tick()}, never from {@code render()}.
+ * Two things follow from that, and both matter:
+ *
+ *  - {@code Minecraft.setScreen(null)} replaces the screen, releases every key
+ *    mapping and grabs the mouse again. Doing that from the middle of a frame
+ *    means the rest of that frame still runs against a screen the game has
+ *    already detached. Vanilla itself only ever closes a screen from input
+ *    handling or from a tick; committing from the tick puts this screen on the
+ *    same path as pressing Escape in a vanilla menu.
+ *  - A close that only advances while frames are drawn can stall: a screen
+ *    that is set but no longer advances its outro keeps the world frozen
+ *    behind an invisible window - the camera does not turn and clicks are
+ *    swallowed - until another screen is opened and closed. Driving the
+ *    timeline from wall time and committing it from the tick removes that
+ *    failure mode, because ticks always run while the screen is set.
  *
  * The screen must never get stuck in a state where it cannot be closed again,
- * so the progress is clamped at both ends and the close always completes.
+ * so the progress is clamped at both ends, the close is idempotent and the
+ * game's input state is restored explicitly afterwards.
  */
 public class ClickGuiScreen extends Screen {
 	/** The typefaces are created once and reused for every frame. */
@@ -33,10 +52,18 @@ public class ClickGuiScreen extends Screen {
 	/** Seconds the window takes to close. Shorter: leaving should feel instant. */
 	private static final float CLOSE_SECONDS = 0.17f;
 
+	private static final float NANOS_PER_SECOND = 1.0e9f;
+
 	private final GuiFrame frame = new GuiFrame();
-	/** 0 closed .. 1 open. Advanced by wall time, eased by the frame. */
-	private float progress;
-	private boolean closing;
+
+	/** When the intro started, in {@link System#nanoTime()} units. */
+	private long shownAt;
+	/** When the outro started, or 0 while the window is open. */
+	private long closingAt;
+	/** The progress the outro starts from, so closing early does not jump. */
+	private float closingFrom = 1f;
+	/** True once the screen is really closed; keeps the close idempotent. */
+	private boolean finished;
 
 	public ClickGuiScreen() {
 		super(Component.translatable("capy.gui.title"));
@@ -46,28 +73,51 @@ public class ClickGuiScreen extends Screen {
 	protected void init() {
 		frame.rebuild();
 		frame.resize(this.width, this.height);
-		closing = false;
-		progress = 0f;
+		// Deliberately not resetting the transition here: a resize re-enters the
+		// layout, and it must not restart the intro or cancel an outro that is
+		// already playing - a cancelled outro is a screen that stays open while
+		// it draws nothing.
+		if (shownAt == 0L) {
+			shownAt = System.nanoTime();
+		}
 	}
 
 	@Override
 	public void resize(int width, int height) {
 		super.resize(width, height);
-		this.width = width;
-		this.height = height;
 		frame.resize(width, height);
+	}
+
+	/** 0 closed .. 1 open, from wall time, so the timing is frame rate free. */
+	private float progress() {
+		long now = System.nanoTime();
+		if (closingAt == 0L) {
+			return clamp((now - shownAt) / (OPEN_SECONDS * NANOS_PER_SECOND));
+		}
+		float elapsed = (now - closingAt) / (CLOSE_SECONDS * NANOS_PER_SECOND);
+		return clamp(closingFrom * (1f - elapsed));
+	}
+
+	private static float clamp(float value) {
+		return Math.max(0f, Math.min(1f, value));
+	}
+
+	@Override
+	public void tick() {
+		// The clock, not an animation counter, decides when the outro is over,
+		// so a missed or late frame cannot leave the screen open forever.
+		if (!finished && closingAt != 0L
+				&& (System.nanoTime() - closingAt) >= CLOSE_SECONDS * NANOS_PER_SECOND) {
+			finishClose();
+		}
 	}
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-		float step = Math.max(0f, partialTick) / 20f;
-		float duration = closing ? CLOSE_SECONDS : OPEN_SECONDS;
-		progress += (closing ? -step : step) / duration;
-		progress = Math.max(0f, Math.min(1f, progress));
-		if (closing && progress <= 0f) {
-			finishClose();
+		if (finished) {
 			return;
 		}
+		float progress = progress();
 		if (progress <= 0f) {
 			return;
 		}
@@ -117,15 +167,45 @@ public class ClickGuiScreen extends Screen {
 	@Override
 	public void onClose() {
 		// The frame asks for the close, the screen plays the outro.
-		if (!closing) {
-			closing = true;
+		if (finished || closingAt != 0L) {
+			return;
 		}
+		closingFrom = progress();
+		closingAt = System.nanoTime();
 	}
 
-	/** Called after the outro finished. */
+	/** Called once, from the tick, after the outro finished. */
 	private void finishClose() {
+		if (finished) {
+			return;
+		}
+		finished = true;
 		ClientConfig.saveNow();
 		super.onClose();
+		restoreGameInput();
+	}
+
+	/**
+	 * Hands the keyboard and the mouse back to the game.
+	 *
+	 * Vanilla does most of this in {@code setScreen(null)}: it grabs the mouse
+	 * again and, while doing so, re-reads the physical keyboard into the key
+	 * mappings, because opening a screen released every one of them. Both steps
+	 * are skipped when the window happens to be unfocused at that instant, and
+	 * the result is indistinguishable from a frozen player - the movement keys
+	 * stay released even while they are held. Retrying here is a no-op when
+	 * vanilla already did it and keeps the player from being stuck when it did
+	 * not.
+	 */
+	private void restoreGameInput() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null || mc.level == null || mc.player == null || mc.screen != null) {
+			return;
+		}
+		if (!mc.mouseHandler.isMouseGrabbed()) {
+			mc.mouseHandler.grabMouse();
+		}
+		KeyMapping.setAll();
 	}
 
 	@Override
