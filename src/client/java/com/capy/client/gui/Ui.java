@@ -83,7 +83,9 @@ public final class Ui {
 		// Two rows per submission, cut at the narrower of the two so the disc
 		// stays inside its radius. At this size the difference between one row
 		// and two is not visible, and every badge and switch knob on screen
-		// costs half the fills.
+		// costs half the fills. Four rows were tried on the large radial disc
+		// and produced a scalloped edge at its poles, where the width changes
+		// fastest, so the disc keeps the two row path too.
 		for (int dy = -radius; dy < radius; dy += 2) {
 			int rows = Math.min(2, radius - dy);
 			float dx = -1f;
@@ -100,6 +102,204 @@ public final class Ui {
 				continue;
 			}
 			spanBand(c, cx - dx, cx + dx, cy + dy, rows, color);
+		}
+	}
+
+	/**
+	 * Filled circle with a vertical gradient.
+	 *
+	 * The radial hub is the one large shape in the interface where a flat fill
+	 * looked like a sticker. The disc is cut row by row exactly like
+	 * {@link #circle}, but each band carries the colour of its own height, so
+	 * the light appears to fall on the top of the sphere.
+	 */
+	public static void circleGradient(UiCanvas c, int cx, int cy, int radius, int top, int bottom) {
+		if (radius <= 0) {
+			return;
+		}
+		if (top == bottom) {
+			circle(c, cx, cy, radius, top);
+			return;
+		}
+		int last = Math.max(1, radius * 2 - 1);
+		for (int dy = -radius; dy < radius; dy += 2) {
+			int rows = Math.min(2, radius - dy);
+			float dx = -1f;
+			for (int k = 0; k < rows; k++) {
+				double half = (double) radius * radius
+						- ((double) dy + k + 0.5) * ((double) dy + k + 0.5);
+				if (half <= 0) {
+					continue;
+				}
+				float rowDx = (float) Math.sqrt(half);
+				dx = dx < 0f ? rowDx : Math.min(dx, rowDx);
+			}
+			if (dx < 0f) {
+				continue;
+			}
+			float t = (dy + radius) / (float) last;
+			spanBand(c, cx - dx, cx + dx, cy + dy, rows, lerpColor(top, bottom, t));
+		}
+	}
+
+	/**
+	 * A hollow circle (an annulus) of the given wall thickness.
+	 *
+	 * Drawn as two spans per row instead of a filled disc with a hole punched
+	 * out: the canvas has no destructive operation, and over a translucent
+	 * backdrop a punch-out would be visible as a different shade.
+	 */
+	public static void ring(UiCanvas c, int cx, int cy, int outerRadius, int thickness, int color) {
+		if (outerRadius <= 0 || thickness <= 0 || (color >>> 24) == 0) {
+			return;
+		}
+		int innerRadius = Math.max(0, outerRadius - thickness);
+		boolean innerVisible = innerRadius > 0;
+		// A thin ring must be drawn row by row. Sharing rows between two
+		// samples makes the band only as wide as the *intersection* of the two
+		// rows, and on the diagonal runs of a circle that intersection is a
+		// fraction of the wall: consecutive bands then met corner to corner and
+		// the ring read as a dashed line - visible on the category ring and on
+		// every node border. A four pixel wall is thick enough to survive the
+		// two row shortcut, and only the very thick glow bands take four rows.
+		int step = thickness >= 5 ? (outerRadius >= 120 && thickness >= 8 ? 4 : 2) : 1;
+		for (int dy = -outerRadius; dy < outerRadius; dy += step) {
+			int rows = Math.min(step, outerRadius - dy);
+			float outerDx = -1f;
+			float innerDx = 0f;
+			for (int k = 0; k < rows; k++) {
+				double row = (double) dy + k + 0.5;
+				double outer = (double) outerRadius * outerRadius - row * row;
+				if (outer > 0) {
+					float value = (float) Math.sqrt(outer);
+					outerDx = outerDx < 0f ? value : Math.min(outerDx, value);
+				}
+				if (innerVisible) {
+					double inner = (double) innerRadius * innerRadius - row * row;
+					if (inner > 0) {
+						innerDx = Math.max(innerDx, (float) Math.sqrt(inner));
+					}
+				}
+			}
+			if (outerDx < 0f) {
+				continue;
+			}
+			int y = cy + dy;
+			if (innerDx <= 0.01f) {
+				spanBand(c, cx - outerDx, cx + outerDx, y, rows, color);
+			} else {
+				spanBand(c, cx - outerDx, cx - innerDx, y, rows, color);
+				spanBand(c, cx + innerDx, cx + outerDx, y, rows, color);
+			}
+		}
+	}
+
+	/**
+	 * A large decorative ring, drawn without per-pixel edge blending.
+	 *
+	 * {@link #ring} spends up to three fills per row and side to antialias an
+	 * edge. That is the right trade for a toggle knob or a 2 pixel icon, but a
+	 * 300 pixel category ring pays for it thousands of times a frame. This
+	 * version snaps each 2 row band to whole pixels: at that radius the stair
+	 * is below what the eye picks out, and a decorative ring costs half as
+	 * much. Small rings keep the smooth path.
+	 */
+	public static void ringFast(UiCanvas c, int cx, int cy, int outerRadius, int thickness, int color) {
+		if (outerRadius <= 0 || thickness <= 0 || (color >>> 24) == 0) {
+			return;
+		}
+		int innerRadius = Math.max(0, outerRadius - thickness);
+		boolean innerVisible = innerRadius > 0;
+		// Two rows share one submission. The band uses the *widest* outer and
+		// the *narrowest* inner edge over those rows (the union of the annulus),
+		// not the intersection: at the top and bottom of a thin ring the arc
+		// moves further sideways than the wall is thick, and the intersection
+		// is empty there - which is what made the first version dashed.
+		for (int dy = -outerRadius; dy < outerRadius; dy += 2) {
+			int rows = Math.min(2, outerRadius - dy);
+			float outerDx = 0f;
+			float innerDx = innerVisible ? Float.MAX_VALUE : 0f;
+			for (int k = 0; k < rows; k++) {
+				double row = (double) dy + k + 0.5;
+				double outer = (double) outerRadius * outerRadius - row * row;
+				if (outer > 0) {
+					outerDx = Math.max(outerDx, (float) Math.sqrt(outer));
+				}
+				if (innerVisible) {
+					double inner = (double) innerRadius * innerRadius - row * row;
+					innerDx = inner > 0
+							? Math.min(innerDx, (float) Math.sqrt(inner))
+							: 0f;
+				}
+			}
+			if (outerDx <= 0f) {
+				continue;
+			}
+			if (innerDx == Float.MAX_VALUE) {
+				innerDx = 0f;
+			}
+			int y = cy + dy;
+			int left = Math.round(cx - outerDx);
+			int right = Math.round(cx + outerDx);
+			if (innerDx <= 0.01f) {
+				c.fill(left, y, right, y + rows, color);
+			} else {
+				int innerLeft = Math.round(cx - innerDx);
+				int innerRight = Math.round(cx + innerDx);
+				c.fill(left, y, innerLeft, y + rows, color);
+				c.fill(innerRight, y, right, y + rows, color);
+			}
+		}
+	}
+
+	/**
+	 * A soft halo around a disc, built from a handful of low-alpha rings.
+	 * Used behind the radial hub so the pink circle looks lit from inside.
+	 */
+	public static void discGlow(UiCanvas c, int cx, int cy, int radius, int color, float strength) {
+		if (radius <= 0 || strength <= 0f) {
+			return;
+		}
+		int baseAlpha = (color >>> 24) & 0xFF;
+		if (baseAlpha <= 0) {
+			return;
+		}
+		int spread = Math.max(10, Math.round(radius * 0.38f));
+		// Three wide bands are indistinguishable from seven narrow ones at
+		// this softness, and cost less than half the fills.
+		int steps = 3;
+		int band = Math.max(1, spread / steps);
+		for (int i = steps - 1; i >= 0; i--) {
+			float t = i / (float) Math.max(1, steps - 1);
+			int alpha = Math.round(baseAlpha * strength * (1f - t) * (1f - t) / steps * 2.4f);
+			if (alpha <= 0) {
+				continue;
+			}
+			int outer = radius + (i + 1) * band;
+			// The halo is three wide bands of very low alpha: the per-pixel
+			// edge blending of ring() costs three fills per row and side for a
+			// difference nobody can see on a glow, and a single palette button
+			// was spending hundreds of fills on it.
+			ringFast(c, cx, cy, outer, band, (alpha << 24) | (color & 0x00FFFFFF));
+		}
+	}
+
+	/**
+	 * A straight line of the given thickness, one pixel step at a time.
+	 * Only used for the radial ring spokes: it keeps the hub tied to its nodes
+	 * without adding a second row of decoration.
+	 */
+	public static void line(UiCanvas c, int x0, int y0, int x1, int y1, int thickness, int color) {
+		if ((color >>> 24) == 0) {
+			return;
+		}
+		int steps = Math.max(1, Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)));
+		int t = Math.max(1, thickness);
+		for (int i = 0; i <= steps; i++) {
+			float f = i / (float) steps;
+			int px = Math.round(x0 + (x1 - x0) * f);
+			int py = Math.round(y0 + (y1 - y0) * f);
+			c.fill(px, py, px + t, py + t, color);
 		}
 	}
 
@@ -593,6 +793,26 @@ public final class Ui {
 		int cG = (int) (aG + (bG - aG) * t);
 		int cB = (int) (aB + (bB - aB) * t);
 		return (cA << 24) | (cR << 16) | (cG << 8) | cB;
+	}
+
+	/** Blends a colour towards white; {@code t} is clamped to 0..1. */
+	public static int lighten(int color, float t) {
+		return lerpColor(color, 0xFFFFFFFF, t);
+	}
+
+	/** Blends a colour towards black, keeping its alpha. */
+	public static int darken(int color, float t) {
+		int alpha = color >>> 24;
+		int mixed = lerpColor(color | 0xFF000000, 0xFF000000, t);
+		return (alpha << 24) | (mixed & 0x00FFFFFF);
+	}
+
+	/** Relative luminance of the RGB channels, 0..1. */
+	public static float luminance(int color) {
+		float r = ((color >>> 16) & 0xFF) / 255f;
+		float g = ((color >>> 8) & 0xFF) / 255f;
+		float b = (color & 0xFF) / 255f;
+		return 0.2126f * r + 0.7152f * g + 0.0722f * b;
 	}
 
 	/** Scales a colour's alpha channel (0..255), keeping RGB. */

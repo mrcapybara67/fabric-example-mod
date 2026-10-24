@@ -171,6 +171,16 @@ public final class UiTheme {
 	}
 
 	private static Palette active = SAKURA;
+	/**
+	 * User chosen accent (0 when the palette's own accent is used).
+	 *
+	 * The accent is the one colour that defines the client's identity, so it is
+	 * the one colour the user is allowed to override without changing the rest
+	 * of the sheet. Every derived accent token is recomputed from it, which
+	 * keeps hover states, glows and text-on-accent in step instead of leaving a
+	 * single recoloured button in a pink interface.
+	 */
+	private static int customAccent;
 
 	/** The palette currently in use. */
 	public static Palette palette() {
@@ -288,17 +298,30 @@ public final class UiTheme {
 		TRACK_TOP = active.trackTop();
 		TRACK_BOTTOM = active.trackBottom();
 		BORDER = active.border();
-		ACCENT = active.accent();
-		ACCENT_2 = active.accentSoft();
-		ACCENT_DEEP = active.accentDeep();
-		ACCENT_GLOW = active.accentGlow();
-		BLOSSOM = active.blossom();
-		PALE_CHERRY = active.paleCherry();
+		if (customAccent == 0) {
+			ACCENT = active.accent();
+			ACCENT_2 = active.accentSoft();
+			ACCENT_DEEP = active.accentDeep();
+			ACCENT_GLOW = active.accentGlow();
+			BLOSSOM = active.blossom();
+			PALE_CHERRY = active.paleCherry();
+			ON_ACCENT = active.onAccent();
+		} else {
+			// One source colour, five derived tokens. Keeping the derivation
+			// here (rather than in the picker) means every widget sees a
+			// consistent set no matter where the accent was changed from.
+			ACCENT = customAccent;
+			ACCENT_2 = Ui.lighten(customAccent, 0.34f);
+			ACCENT_DEEP = Ui.darken(customAccent, 0.24f);
+			ACCENT_GLOW = Ui.withAlpha(customAccent, 0x33);
+			BLOSSOM = Ui.lighten(customAccent, 0.54f);
+			PALE_CHERRY = Ui.lighten(customAccent, 0.80f);
+			ON_ACCENT = Ui.luminance(customAccent) > 0.62f ? 0xFF3A0F22 : 0xFFFFFFFF;
+		}
 		TEXT = active.text();
 		TEXT_2 = active.textSecondary();
 		TEXT_3 = active.textMuted();
 		PLACEHOLDER = active.placeholder();
-		ON_ACCENT = active.onAccent();
 	}
 
 	static {
@@ -316,5 +339,25 @@ public final class UiTheme {
 			active = palette;
 			refresh();
 		}
+	}
+
+	/**
+	 * Overrides the palette accent. A fully transparent value is treated as
+	 * "use the palette", so a broken config cannot make the whole interface
+	 * invisible.
+	 */
+	public static void setAccent(int argb) {
+		customAccent = (argb >>> 24) == 0 ? 0 : argb;
+		refresh();
+	}
+
+	/** True when the user has overridden the palette accent. */
+	public static boolean hasCustomAccent() {
+		return customAccent != 0;
+	}
+
+	/** The current custom accent, or 0 when the palette is in use. */
+	public static int customAccent() {
+		return customAccent;
 	}
 }

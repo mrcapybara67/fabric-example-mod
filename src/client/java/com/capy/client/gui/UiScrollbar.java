@@ -72,6 +72,14 @@ public class UiScrollbar {
 		return true;
 	}
 
+	/** Jumps back to the top, used when the visible list is replaced. */
+	public void reset() {
+		scroll = 0;
+		target = 0;
+		maxScroll = 0;
+		dragging = false;
+	}
+
 	/** Called on press over the rail strip; starts a thumb drag. */
 	public boolean pressed(double my) {
 		if (!usable) {

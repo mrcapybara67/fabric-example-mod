@@ -2,6 +2,7 @@ package com.capy.client;
 
 import com.capy.client.config.ClientConfig;
 import com.capy.client.gui.ClickGuiScreen;
+import com.capy.client.gui.GuiColors;
 import com.capy.client.gui.UiFonts;
 import com.capy.client.gui.UiTheme;
 import com.capy.client.keybind.ClientKeybinds;
@@ -65,6 +66,7 @@ public class CapyClient implements ClientModInitializer {
 		// of every module that keeps state.
 		ClientConfig config = ClientConfig.load(FabricLoader.getInstance().getConfigDir());
 		UiTheme.setPalette(config.theme());
+		GuiColors.load(config.guiAccent(), config.radialAccent());
 
 		ClientKeybinds.register();
 
@@ -106,17 +108,21 @@ public class CapyClient implements ClientModInitializer {
 			}
 		});
 
-		// The world overlays are drawn with the debug pass: after the entities
-		// they wrap and before translucent terrain, so water and glass tint a
-		// highlight instead of hiding it.
+		// The world overlays are drawn after entities, inside the main world
+		// pass, and before translucent terrain. This point is load bearing in
+		// 1.21.11: the debug-render event is fired while the frame graph is
+		// still being built, so immediate geometry submitted there is discarded
+		// and the ESP appears to do nothing. AFTER_ENTITIES runs inside the
+		// pass, where vanilla is already submitting entity geometry through the
+		// same buffer source mechanism.
 		//
 		// Each overlay then decides for itself whether a wall may hide it: the
 		// see-through pair of render types has no depth test, so a box behind
-		// terrain is still drawn. The debug pass is safe for that because it
-		// runs after the terrain depth buffer is complete - the boxes simply
-		// ignore it, and they write no depth either, so nothing drawn later is
-		// clipped by an occluder that is not on screen.
-		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(EspRenderer::render);
+		// terrain is still drawn. Drawing here is safe for that: the terrain
+		// depth buffer is complete by this point, the boxes ignore it, and they
+		// write no depth either, so nothing drawn later is clipped by an
+		// occluder that is not on screen.
+		WorldRenderEvents.AFTER_ENTITIES.register(EspRenderer::render);
 
 		// The HUD chips go first, so an alert is never hidden behind them.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "hud"),

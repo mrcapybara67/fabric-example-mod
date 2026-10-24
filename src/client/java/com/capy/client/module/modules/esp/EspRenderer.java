@@ -19,7 +19,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Draws every enabled {@link EspModule} into the world.
  *
- * Two layers per box, both from vanilla render types:
+ * Three layers per box, all from vanilla render types:
  *
  *   <ul>
  *   <li>a translucent fill ({@code debugQuads}) whose top edge is a little
@@ -30,13 +30,24 @@ import org.slf4j.LoggerFactory;
  *       second pass is the whole trick behind the "drawn with a pen" look: a
  *       single line at this distance is a hairline, while a faint bloom under
  *       the bright core reads as thickness without a second geometry
- *       pass.</li>
+ *       pass;</li>
+ *   <li>optional tracers: a line from just in front of the camera to the
+ *       centre of every box, in the same hue and under the same depth rule.
+ *       They are the fastest way to answer "which direction is that" while
+ *       keeping the boxes as the precise overlay.</li>
  *   </ul>
  *
  * Boxes are sorted far to near before anything is submitted. The fills are
  * translucent and do not write depth, so submitting them in world order would
  * let a near box be blended under a far one and produce a patchwork; sorting is
  * the only thing that makes overlapping highlights look correct.
+ *
+ * The event this is registered on runs <em>inside</em> the world frame pass.
+ * That matters: in 1.21.11 the debug-render event is fired while the frame is
+ * still being extracted, so an immediate draw submitted there has no pass to
+ * land in and is silently discarded. The hook therefore lives on
+ * {@code AFTER_ENTITIES}, where vanilla is already drawing entities with the
+ * same buffer source mechanism.
  *
  * Vertex coordinates are camera relative, which is what a world render
  * consumer expects. The matrix stack handed to the event is already the
@@ -65,6 +76,10 @@ public final class EspRenderer {
 	private static double camX;
 	private static double camY;
 	private static double camZ;
+	/** Camera-relative origin shared by every tracer this frame. */
+	private static double anchorX;
+	private static double anchorY;
+	private static double anchorZ;
 	private static final Comparator<AABB> FAR_TO_NEAR = (a, b) -> Double.compare(distanceSqr(b), distanceSqr(a));
 
 	private EspRenderer() {
@@ -77,7 +92,10 @@ public final class EspRenderer {
 		return x * x + y * y + z * z;
 	}
 
-	/** World render hook: called once per frame, in the debug pass. */
+	/**
+	 * World render hook: called once per frame from {@code AFTER_ENTITIES},
+	 * while the main world pass is active.
+	 */
 	public static void render(WorldRenderContext context) {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.level == null || mc.player == null) {
@@ -85,56 +103,84 @@ public final class EspRenderer {
 		}
 		ACTIVE.clear();
 		boolean anyFill = false;
-		boolean anyOutline = false;
+		boolean anyLine = false;
 		for (Module module : ModuleManager.get().modules()) {
 			if (module instanceof EspModule esp && esp.isEnabled()) {
 				ACTIVE.add(esp);
 				anyFill |= esp.fills();
-				anyOutline |= esp.outlines();
+				anyLine |= esp.outlines() || esp.tracers();
 			}
 		}
 		if (ACTIVE.isEmpty()) {
 			return;
 		}
 
-		Vec3 camera = mc.gameRenderer.getMainCamera().position();
-		camX = camera.x;
-		camY = camera.y;
-		camZ = camera.z;
-
-		PoseStack stack = context.matrices();
-		if (stack == null) {
-			return;
-		}
-		PoseStack.Pose pose = stack.last();
-		MultiBufferSource.BufferSource batches = batch();
-		// Line width is measured in framebuffer pixels by the shader, so it has
-		// to follow the GUI scale to look the same on every screen.
-		float crisp = Math.max(1.4f, mc.getWindow().getGuiScale() * 1.25f);
-		float glow = crisp * GLOW_SCALE;
-
-		// One layer at a time. A buffer source hands out a shared buffer for
-		// custom render types and flushes the previous one as soon as another
-		// type is requested, so two of them can never be held at once. Doing
-		// the fills first also means the outlines are always drawn over them.
 		try {
-			drawLayers(batches, pose, crisp, glow, anyFill, anyOutline);
+			Vec3 camera = mc.gameRenderer.getMainCamera().position();
+			camX = camera.x;
+			camY = camera.y;
+			camZ = camera.z;
+
+			// A tracer starts a little in front of and below the eye: exactly at
+			// the camera it would begin inside the near plane and be invisible
+			// for the first few blocks, which reads as a late tracer.
+			var forward = mc.gameRenderer.getMainCamera().forwardVector();
+			var up = mc.gameRenderer.getMainCamera().upVector();
+			anchorX = forward.x() * 0.45 - up.x() * 0.10;
+			anchorY = forward.y() * 0.45 - up.y() * 0.10;
+			anchorZ = forward.z() * 0.45 - up.z() * 0.10;
+
+			// AFTER_ENTITIES is called after the frame pass has created its
+			// matrix stack, so this is normally non-null. A null would silently
+			// remove every overlay, which is exactly the failure this hook was
+			// moved to fix, so an identity stack is used instead. The vertices
+			// are camera relative, which is what an identity pose expects.
+			PoseStack stack = context.matrices();
+			if (stack == null) {
+				stack = new PoseStack();
+			}
+			PoseStack.Pose pose = stack.last();
+			MultiBufferSource.BufferSource batches = batch();
+			// Line width is measured in framebuffer pixels by the shader, so it
+			// has to follow the GUI scale to look the same on every screen.
+			float crisp = Math.max(1.4f, mc.getWindow().getGuiScale() * 1.25f);
+			float glow = crisp * GLOW_SCALE;
+
+			// One layer at a time. A buffer source hands out a shared buffer for
+			// custom render types and flushes the previous one as soon as another
+			// type is requested, so two of them can never be held at once. Doing
+			// the fills first also means the outlines are always drawn over them.
+			drawLayers(batches, pose, crisp, glow, anyFill, anyLine);
 		} catch (RuntimeException e) {
 			// The see-through pipelines are copies of vanilla's, built at
 			// runtime. If one of them cannot be compiled on this machine, the
 			// overlay must still be drawn - with occlusion - instead of taking
-			// the frame down with it.
+			// the frame down with it. The catch also covers a malformed module
+			// list: an ESP error must never stop the world from rendering.
+			//
+			// A throw can leave the shared builder half filled. Flush it (or
+			// drop it if even the flush fails) so the next frame starts from a
+			// clean source instead of inheriting a broken buffer.
+			if (batch != null) {
+				try {
+					batch.endBatch();
+				} catch (RuntimeException ignored) {
+					// The buffer is already unusable; the reference is dropped
+					// below and a fresh one is created next frame.
+				}
+				batch = null;
+			}
 			if (!throughFailed) {
 				throughFailed = true;
 				EspRenderTypes.disable();
-				LOGGER.warn("Capy: see-through ESP failed ({}); using the depth tested render types.",
+				LOGGER.warn("Capy: ESP draw failed ({}); falling back to the depth tested render types.",
 						e.toString());
 			}
 		}
 	}
 
 	private static void drawLayers(MultiBufferSource.BufferSource batches, PoseStack.Pose pose,
-			float crisp, float glow, boolean anyFill, boolean anyOutline) {
+			float crisp, float glow, boolean anyFill, boolean anyLine) {
 		if (anyFill) {
 			for (EspModule module : ACTIVE) {
 				if (!module.fills()) {
@@ -156,9 +202,9 @@ public final class EspRenderer {
 				batches.endBatch();
 			}
 		}
-		if (anyOutline) {
+		if (anyLine) {
 			for (EspModule module : ACTIVE) {
-				if (!module.outlines()) {
+				if (!module.outlines() && !module.tracers()) {
 					continue;
 				}
 				gather(module);
@@ -168,9 +214,19 @@ public final class EspRenderer {
 				VertexConsumer lines = batches.getBuffer(EspRenderTypes.lines(module.throughWalls()));
 				int color = module.color();
 				int glowColor = halo(color);
-				for (AABB box : BOXES) {
-					outline(lines, pose, box, glowColor, glow);
-					outline(lines, pose, box, color, crisp);
+				if (module.tracers()) {
+					// Tracers go under the outlines: the box edge is the precise
+					// information, the line is the pointer to it.
+					for (AABB box : BOXES) {
+						tracer(lines, pose, box, glowColor, glow);
+						tracer(lines, pose, box, color, crisp);
+					}
+				}
+				if (module.outlines()) {
+					for (AABB box : BOXES) {
+						outline(lines, pose, box, glowColor, glow);
+						outline(lines, pose, box, color, crisp);
+					}
 				}
 				batches.endBatch();
 			}
@@ -269,6 +325,19 @@ public final class EspRenderer {
 		line(vc, pose, x2, y1, z1, x2, y2, z1, argb, width);
 		line(vc, pose, x2, y1, z2, x2, y2, z2, argb, width);
 		line(vc, pose, x1, y1, z2, x1, y2, z2, argb, width);
+	}
+
+	/**
+	 * One tracer: the shared camera anchor to the centre of a box. The anchor
+	 * is already camera relative; only the box needs its offset removed.
+	 */
+	private static void tracer(VertexConsumer vc, PoseStack.Pose pose, AABB box, int argb, float width) {
+		// The centre is computed inline: getCenter() allocates a Vec3, and a
+		// block overlay can ask for a tracer on every one of its boxes.
+		line(vc, pose, anchorX, anchorY, anchorZ,
+				(box.minX + box.maxX) * 0.5 - camX,
+				(box.minY + box.maxY) * 0.5 - camY,
+				(box.minZ + box.maxZ) * 0.5 - camZ, argb, width);
 	}
 
 	private static void vertex(VertexConsumer vc, PoseStack.Pose pose,

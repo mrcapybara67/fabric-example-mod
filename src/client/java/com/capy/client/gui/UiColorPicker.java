@@ -33,6 +33,12 @@ public class UiColorPicker {
 	private static final int ALPHA = 3;
 
 	private final ColorSetting setting;
+	/**
+	 * False for the client's own accents. A translucent GUI accent makes the
+	 * text on it unreadable and can erase the radial disc, so the alpha track
+	 * is left out rather than offered and then overridden.
+	 */
+	private final boolean showAlpha;
 	private final Anim hover = new Anim(0f, 14f);
 	private String label = "Colour";
 	private boolean open;
@@ -46,7 +52,16 @@ public class UiColorPicker {
 	private final int[] trackY = new int[4];
 
 	public UiColorPicker(ColorSetting setting) {
+		this(setting, true);
+	}
+
+	public UiColorPicker(ColorSetting setting, boolean showAlpha) {
 		this.setting = setting;
+		this.showAlpha = showAlpha;
+	}
+
+	private int tracks() {
+		return showAlpha ? 4 : 3;
 	}
 
 	public boolean isOpen() {
@@ -57,9 +72,14 @@ public class UiColorPicker {
 		this.open = open;
 	}
 
+	/** Height the open tracks need (without the collapsed row). */
+	public int openHeight() {
+		return tracks() * (TRACK_H + TRACK_GAP) + 2;
+	}
+
 	/** Height this control needs in the current state. */
 	public int height() {
-		return open ? ROW_H + OPEN_H : ROW_H;
+		return open ? ROW_H + openHeight() : ROW_H;
 	}
 
 	public void bind(int x, int y, int w, String label) {
@@ -98,7 +118,7 @@ public class UiColorPicker {
 		int trackX = x + LABEL_W;
 		int trackW = w - LABEL_W;
 		int ty = y + ROW_H + 2;
-		for (int track = 0; track < 4; track++) {
+		for (int track = 0; track < tracks(); track++) {
 			trackY[track] = ty;
 			renderTrack(c, font, track, hsv, trackX, ty, trackW);
 			ty += TRACK_H + TRACK_GAP;
@@ -172,7 +192,7 @@ public class UiColorPicker {
 		if (!open) {
 			return false;
 		}
-		for (int track = 0; track < 4; track++) {
+		for (int track = 0; track < tracks(); track++) {
 			if (my >= trackY[track] - 2 && my < trackY[track] + TRACK_H + 2) {
 				dragTrack = track;
 				apply(track, mx);

@@ -26,7 +26,7 @@ public final class PlayerEspModule extends EspModule {
 	private final List<AABB> boxes = new ArrayList<>();
 
 	public PlayerEspModule() {
-		super("player_esp", 0xFFF25C86, 96);
+		super("player_esp", 0xFFF25C86, 96, true);
 	}
 
 	@Override

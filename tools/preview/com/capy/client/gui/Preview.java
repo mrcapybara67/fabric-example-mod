@@ -81,8 +81,47 @@ public final class Preview {
 				Category.WORLD.ordinal(), 0);
 		// A world overlay with its settings open: colour, range, the two layers
 		// and the through-walls switch all belong to the shared ESP base.
-		saveExpanded(out.resolve("08-visual-player-esp.png"), type, 1600, 900,
-				Category.VISUAL.ordinal(), 2);
+		saveExpanded(out.resolve("08-donutsmp-player-esp.png"), type, 1600, 900,
+				Category.DONUT_SMP.ordinal(), 0);
+
+		// The radial style: the hub, a category sheet, and the colour studio.
+		saveRadial(out.resolve("09-radial-hub-1920x1080.png"), type, 1920, 1080, -1);
+		saveRadial(out.resolve("10-radial-donutsmp-1920x1080.png"), type, 1920, 1080,
+				Category.DONUT_SMP.ordinal());
+		saveRadial(out.resolve("11-radial-hub-960x540.png"), type, 960, 540, -1);
+		saveColours(out.resolve("12-colour-studio-1920x1080.png"), type, 1920, 1080);
+		saveRadial(out.resolve("13-radial-donutsmp-960x540.png"), type, 960, 540,
+				Category.DONUT_SMP.ordinal());
+		saveRadialExpanded(out.resolve("14-radial-expanded-960x540.png"), type, 960, 540,
+				Category.DONUT_SMP.ordinal());
+		saveColours(out.resolve("15-colour-studio-normal-960x540.png"), type, 960, 540, false);
+		// The smallest canvas a 1080p screen produces at GUI scale 3. The ring
+		// has to stay inside it, and the studio has to fit without clipping.
+		save(out.resolve("16-normal-640x360.png"), type, 640, 360);
+		saveRadial(out.resolve("17-radial-hub-640x360.png"), type, 640, 360, -1);
+		saveRadial(out.resolve("18-radial-donutsmp-640x360.png"), type, 640, 360,
+				Category.DONUT_SMP.ordinal());
+		saveRadialExpanded(out.resolve("19-radial-expanded-640x360.png"), type, 640, 360,
+				Category.DONUT_SMP.ordinal());
+		saveColours(out.resolve("20-colour-studio-640x360.png"), type, 640, 360);
+		saveExpanded(out.resolve("21-donutsmp-player-esp-1080p.png"), type, 1920, 1080,
+				Category.DONUT_SMP.ordinal(), 0);
+		// The auto GUI scale on a 1080p screen: 480x270. This is the canvas that
+		// catches panels which are taller than the screen.
+		save(out.resolve("22-normal-480x270.png"), type, 480, 270);
+		saveRadial(out.resolve("23-radial-hub-480x270.png"), type, 480, 270, -1);
+		saveColours(out.resolve("24-colour-studio-480x270.png"), type, 480, 270);
+		saveRadial(out.resolve("25-radial-donutsmp-480x270.png"), type, 480, 270,
+				Category.DONUT_SMP.ordinal());
+		// The shortest canvas the game produces: 1280x720 at GUI scale 3 is
+		// 427x240, and that is the size where a stacked panel overflows.
+		save(out.resolve("26-normal-427x240.png"), type, 427, 240);
+		saveRadial(out.resolve("27-radial-hub-427x240.png"), type, 427, 240, -1);
+		saveColours(out.resolve("28-colour-studio-427x240.png"), type, 427, 240);
+		// The only category with a full sheet of cards. The sheet sizes itself
+		// to its content and scrolls, so this is the shot that shows whether
+		// the list and its rail behave when there is more than one card.
+		saveRadial(out.resolve("29-radial-hud-960x540.png"), type, 960, 540, Category.HUD.ordinal());
 
 		// The alert at the points of its timeline that matter: the face in,
 		// the peak, the bottom of the travel, the hand over to the wording,
@@ -122,6 +161,61 @@ public final class Preview {
 		frame.expandCard(Category.values()[category], card);
 		SwingCanvas canvas = new SwingCanvas(w, h);
 		for (int i = 0; i < 90; i++) {
+			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
+		}
+		ImageIO.write(canvas.image(), "png", file.toFile());
+	}
+
+	/** Renders the radial style, optionally with one category open. */
+	private static void saveRadial(Path file, SwingType type, int w, int h, int category) throws Exception {
+		GuiFrame frame = new GuiFrame();
+		frame.resize(w, h);
+		frame.setStyle(GuiStyle.RADIAL);
+		if (category >= 0) {
+			frame.setRadialCategory(category);
+		}
+		SwingCanvas canvas = new SwingCanvas(w, h);
+		for (int i = 0; i < 120; i++) {
+			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
+		}
+		SwingCanvas.fills = 0;
+		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
+		System.out.println(w + "x" + h + " radial: " + SwingCanvas.fills + " draw calls");
+		ImageIO.write(canvas.image(), "png", file.toFile());
+	}
+
+	/** Renders the radial sheet with its first card expanded. */
+	private static void saveRadialExpanded(Path file, SwingType type, int w, int h, int category) throws Exception {
+		GuiFrame frame = new GuiFrame();
+		frame.resize(w, h);
+		frame.setStyle(GuiStyle.RADIAL);
+		frame.setRadialCategory(category);
+		frame.setRadialExpanded(0);
+		SwingCanvas canvas = new SwingCanvas(w, h);
+		for (int i = 0; i < 120; i++) {
+			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
+		}
+		SwingCanvas.fills = 0;
+		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
+		System.out.println(w + "x" + h + " radial expanded: " + SwingCanvas.fills + " draw calls");
+		ImageIO.write(canvas.image(), "png", file.toFile());
+	}
+
+	/** Renders the colour studio over the radial hub. */
+	private static void saveColours(Path file, SwingType type, int w, int h) throws Exception {
+		saveColours(file, type, w, h, true);
+	}
+
+	/** Renders the colour studio over either style. */
+	private static void saveColours(Path file, SwingType type, int w, int h, boolean radial) throws Exception {
+		GuiFrame frame = new GuiFrame();
+		frame.resize(w, h);
+		if (radial) {
+			frame.setStyle(GuiStyle.RADIAL);
+		}
+		frame.toggleAccentPanel();
+		SwingCanvas canvas = new SwingCanvas(w, h);
+		for (int i = 0; i < 120; i++) {
 			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
 		}
 		ImageIO.write(canvas.image(), "png", file.toFile());

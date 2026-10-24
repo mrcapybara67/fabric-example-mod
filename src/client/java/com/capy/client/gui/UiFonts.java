@@ -66,7 +66,12 @@ public final class UiFonts {
 	 * the middle of the screen, without stopping to look at it.
 	 */
 	private static final float HEADLINE_SIZE = 17.0f;
-	private static final float OVERSAMPLE = 2.0f;
+	/**
+	 * Glyph supersampling. Three times instead of two is what keeps the small
+	 * Inter cuts crisp at 1080p and above, where the GUI scale magnifies each
+	 * glyph: at two the stems of 9 px text soften into grey.
+	 */
+	private static final float OVERSAMPLE = 3.0f;
 
 	/** Bundle-relative path of each static weight. */
 	private static final String REGULAR_TTF = "/assets/capy/font/inter-500.ttf";

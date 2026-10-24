@@ -73,6 +73,12 @@ public final class GuiFrame {
 	private final UiDropdown themePicker = new UiDropdown();
 	private final UiPetals petals = new UiPetals();
 	private final UiTooltip tooltip = new UiTooltip();
+	/** Shared colour studio; both the window and the ring open this instance. */
+	private final UiAccentPanel accentPanel = new UiAccentPanel();
+	/** The radial style, delegated to wholesale while it is active. */
+	private final RadialView radial = new RadialView(
+			category -> cards.get(category), accentPanel,
+			() -> closeRequested = true, this::cycleStyle);
 
 	private final Anim windowHeight = new Anim(0f, 12f);
 	private final float[] select = new float[CATEGORIES.length];
@@ -88,6 +94,9 @@ public final class GuiFrame {
 	private boolean styleHovered;
 	private int styleBtnX;
 	private int styleBtnY;
+	private boolean accentHovered;
+	private int accentBtnX;
+	private int accentBtnY;
 	private int width;
 	private int height;
 	private boolean closeRequested;
@@ -124,7 +133,31 @@ public final class GuiFrame {
 		this.width = width;
 		this.height = height;
 		petals.reset(width, height);
+		radial.resize(width, height);
 		windowHeight.snap(targetWindowHeight());
+	}
+
+	/** Switches the style without touching the config (used by the preview). */
+	void setStyle(GuiStyle style) {
+		this.style = style;
+		if (style == GuiStyle.RADIAL) {
+			radial.onShown();
+		}
+	}
+
+	/** Opens a radial category (used by the offline preview). */
+	void setRadialCategory(int index) {
+		radial.select(index);
+	}
+
+	/** Expands a radial card (used by the offline preview). */
+	void setRadialExpanded(int cardIndex) {
+		radial.expand(cardIndex);
+	}
+
+	/** Toggles the colour studio (used by the offline preview). */
+	void toggleAccentPanel() {
+		accentPanel.toggle();
 	}
 
 	/** Selects a category by index (used by the offline preview). */
@@ -160,7 +193,29 @@ public final class GuiFrame {
 	}
 
 	private int windowWidth() {
-		return Math.max(520, Math.min(760, (int) (width * 0.62f)));
+		// 62% of the screen, but never wider than the screen. The old floor of
+		// 520 was wider than a 480x270 GUI (the auto scale on a 1080p display),
+		// so the whole window hung off both sides of it.
+		int preferred = (int) (width * 0.62f);
+		int fits = Math.min(760, width - 16);
+		return Math.max(Math.min(520, fits), Math.min(760, preferred));
+	}
+
+	/** True when the header has to shed its labels to fit the window. */
+	private boolean compactHeader() {
+		// A 520 pixel window still fits the full chip and the 190 pixel search
+		// field; only below that does the header need to shed the style name.
+		return windowWidth() < 540;
+	}
+
+	/** Search field width for the current window size. */
+	private int searchWidth() {
+		return compactHeader() ? 110 : UiTheme.SEARCH_W;
+	}
+
+	/** Style chip width: icon only when the header is compact. */
+	private int styleButtonWidth() {
+		return compactHeader() ? UiTheme.SEARCH_H : STYLE_BTN_W;
 	}
 
 	/**
@@ -299,6 +354,11 @@ public final class GuiFrame {
 		if (fade <= 0.02f) {
 			return;
 		}
+		GuiColors.sync();
+		if (style == GuiStyle.RADIAL) {
+			radial.render(c, type, mouseX, mouseY, delta, open);
+			return;
+		}
 		// The backdrop: a plum veil that is darkest at the edges, so the
 		// window reads as the lit object in the middle.
 		c.fill(0, 0, width, height, Ui.lerpColor(0x00000000, UiTheme.SCRIM, fade));
@@ -393,6 +453,27 @@ public final class GuiFrame {
 			themePicker.renderOverlay(c, type.regular(), mouseX, mouseY, delta);
 		}
 		tooltip.render(c, type.regular());
+		// The colour studio floats over both styles, so it is always drawn last.
+		accentPanel.render(c, type, width, height, mouseX, mouseY, delta);
+	}
+
+	/** Moves to the next GUI style and remembers it. */
+	private void cycleStyle() {
+		style = style.next();
+		ClientConfig config = ClientConfig.get();
+		config.setGuiStyle(style.id());
+		ClientConfig.saveNow();
+		clearAllTextFocus();
+		radial.clearTextInput();
+		// Switching styles while the studio is open closes it, and that close
+		// has to be written out: without it an accent picked in the same
+		// breath as the style lived only in memory until the screen closed.
+		if (accentPanel.closeIfOpen()) {
+			ClientConfig.saveNow();
+		}
+		if (style == GuiStyle.RADIAL) {
+			radial.onShown();
+		}
 	}
 
 	/** Slow drift of the specular band, so the window never looks static. */
@@ -409,7 +490,7 @@ public final class GuiFrame {
 		int markX = wx + UiTheme.SP_6;
 		Ui.surface(c, markX, cy, mark, mark, 12, UiTheme.PANEL_ALT, UiTheme.PANEL_TOP);
 		Ui.outline(c, markX, cy, mark, mark, 12, UiTheme.BORDER);
-		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, markX + 7, cy + 7, 20, UiTheme.ACCENT);
+		UiIcons.draw(c, UiIcons.Icon.CREST, markX + 6, cy + 6, 22, UiTheme.ACCENT);
 		Ui.glow(c, markX - 6, cy - 6, mark + 12, mark + 12, UiTheme.ACCENT, 0.16f);
 
 		// Wordmark. Every line in the header is centred inside the header band,
@@ -424,8 +505,11 @@ public final class GuiFrame {
 		// The current page, separated from the wordmark by a hairline.
 		int pageX = nameX + display.width("Capy Client") + UiTheme.SP_4;
 		int fieldX = searchX(wx, ww);
-		int styleRoom = styleX(wx, ww);
-		if (styleRoom - pageX > UiTheme.SP_6 * 2) {
+		int styleRoom = accentX(wx, ww);
+		// The page title is worth showing only when it is a word, not an
+		// ellipsis. On a narrow window the sidebar already names the page, so
+		// the space goes to the search field and the two chips instead.
+		if (styleRoom - pageX > 118) {
 			int ruleH = display.lineHeight() - 4;
 			int ruleY = wy + (UiTheme.HEADER_H - ruleH) / 2;
 			Ui.surface(c, pageX - UiTheme.SP_3, ruleY, 1, ruleH, 0, UiTheme.BORDER);
@@ -435,11 +519,13 @@ public final class GuiFrame {
 					styleRoom - pageX - UiTheme.SP_6, UiTheme.TEXT_2);
 		}
 
-		// The style switch sits between the page title and the search field.
+		// The palette and the style switch sit between the page title and the
+		// search field.
+		renderAccentButton(c, type, wx, wy, ww, mouseX, mouseY);
 		renderStyleButton(c, type, wx, wy, ww, mouseX, mouseY);
 
 		// Search.
-		search.bind(fieldX, wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2, UiTheme.SEARCH_W, UiTheme.SEARCH_H);
+		search.bind(fieldX, wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2, searchWidth(), UiTheme.SEARCH_H);
 		search.render(c, type.regular(), mouseX, mouseY, delta);
 
 		// Close.
@@ -465,11 +551,43 @@ public final class GuiFrame {
 	}
 
 	private int searchX(int wx, int ww) {
-		return wx + ww - UiTheme.SP_6 - UiTheme.CLOSE_BTN - UiTheme.SP_3 - UiTheme.SEARCH_W;
+		return wx + ww - UiTheme.SP_6 - UiTheme.CLOSE_BTN - UiTheme.SP_3 - searchWidth();
 	}
 
 	private int styleX(int wx, int ww) {
-		return searchX(wx, ww) - UiTheme.SP_3 - STYLE_BTN_W;
+		return searchX(wx, ww) - UiTheme.SP_3 - styleButtonWidth();
+	}
+
+	/** The palette chip is one spacing step left of the style chip. */
+	private int accentX(int wx, int ww) {
+		return styleX(wx, ww) - UiTheme.SP_3 - UiTheme.SEARCH_H;
+	}
+
+	/**
+	 * The accent swatch in the header: a disc in the current window accent,
+	 * inside the same chip the style and close buttons use. It is the one
+	 * control that makes the "the GUI colour is mine" idea discoverable in the
+	 * window styles.
+	 */
+	private void renderAccentButton(UiCanvas c, UiType type, int wx, int wy, int ww,
+			int mouseX, int mouseY) {
+		int x = accentX(wx, ww);
+		int y = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
+		int s = UiTheme.SEARCH_H;
+		boolean hovered = mouseX >= x && mouseX < x + s && mouseY >= y && mouseY < y + s;
+		// The tooltip is owned by the sidebar pass, which runs after this one.
+		// Showing it here would be undone by that pass's hide() in the same
+		// frame.
+		accentHovered = hovered;
+		accentBtnX = x;
+		accentBtnY = y;
+		Ui.surface(c, x, y, s, s, UiTheme.RADIUS,
+				hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
+				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, x, y, s, s, UiTheme.RADIUS, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
+		int r = 7;
+		Ui.circle(c, x + s / 2, y + s / 2, r, GuiColors.windowArgb());
+		Ui.ring(c, x + s / 2, y + s / 2, r, 1, 0x88FFFFFF);
 	}
 
 	/**
@@ -484,7 +602,7 @@ public final class GuiFrame {
 			int mouseX, int mouseY) {
 		int x = styleX(wx, ww);
 		int y = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
-		int w = STYLE_BTN_W;
+		int w = styleButtonWidth();
 		int h = UiTheme.SEARCH_H;
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
 		styleHovered = hovered;
@@ -496,6 +614,16 @@ public final class GuiFrame {
 				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
 		Ui.outline(c, x, y, w, h, UiTheme.RADIUS, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
 
+		if (compactHeader()) {
+			// The initial of the style name says more in 28 pixels than the
+			// layout glyph did: the chip still cycles, but "N", "M" and "R"
+			// tell the user which of the three they are looking at.
+			UiText small = type.medium();
+			String initial = style.label().substring(0, 1);
+			Ui.drawCentered(c, small, initial, x + w / 2,
+					Ui.centerTextY(y, h, small), hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+			return;
+		}
 		UiText font = type.regular();
 		Ui.drawEllipsized(c, font, style.label(), x + UiTheme.SP_3,
 				Ui.centerTextY(y, h, font), w - UiTheme.SP_5 - 10,
@@ -571,13 +699,6 @@ public final class GuiFrame {
 			y += rowPitch;
 		}
 
-		// A large, very faint blossom fills the space between the categories
-		// and the footer, so the panel never looks unfinished.
-		// The blossom sits behind the category list like a watermark on the
-		// panel, so the sidebar never reads as an empty box.
-		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, px + pw / 2 - 48, py + ph / 2 - 48, 96,
-				Ui.withAlpha(UiTheme.ACCENT, 0x0D));
-
 		if (!footerFitted()) {
 			return;
 		}
@@ -604,6 +725,8 @@ public final class GuiFrame {
 				&& mouseY >= hintY - 2 && mouseY < hintY + type.regular().lineHeight() + 2;
 		if (hintHovered) {
 			tooltip.show("Esc closes the GUI. Rebind the key in Options - Controls.", hintX, hintY);
+		} else if (accentHovered) {
+			tooltip.show("GUI colours", accentBtnX - 4, accentBtnY + UiTheme.SEARCH_H + 4);
 		} else if (styleHovered) {
 			tooltip.show("GUI style: " + style.label() + " — click to switch.",
 					styleBtnX, styleBtnY + UiTheme.SEARCH_H);
@@ -729,7 +852,7 @@ public final class GuiFrame {
 		int oy = centerY - 40;
 		Ui.surface(c, centerX - orb / 2, oy, orb, orb, orb / 2, UiTheme.PANEL_ALT, UiTheme.PANEL_TOP);
 		Ui.outline(c, centerX - orb / 2, oy, orb, orb, orb / 2, UiTheme.BORDER);
-		UiIcons.draw(c, searchEmpty ? UiIcons.Icon.SEARCH : UiIcons.Icon.BLOSSOM,
+		UiIcons.draw(c, searchEmpty ? UiIcons.Icon.SEARCH : UiIcons.Icon.CREST,
 				centerX - 10, oy + 10, 20, UiTheme.TEXT_3);
 
 		Ui.drawCentered(c, medium, title, centerX, oy + orb + 14, UiTheme.TEXT_2);
@@ -744,18 +867,33 @@ public final class GuiFrame {
 		double my = event.y();
 		int button = event.button();
 
+		// The colour studio is the topmost layer, even outside the window.
+		// Dismissing it with a click is a finished edit, so it is written out
+		// here just like a released slider.
+		boolean accentWasOpen = accentPanel.isOpen();
+		if (accentPanel.mouseClicked(mx, my)) {
+			if (accentWasOpen && !accentPanel.isOpen()) {
+				ClientConfig.saveNow();
+			}
+			return true;
+		}
+
+		// A mouse button bound to the GUI closes it, in every style.
+		if (ClientKeybinds.openClickGui() != null && ClientKeybinds.openClickGui().matchesMouse(event)) {
+			closeRequested = true;
+			return true;
+		}
+
+		if (style == GuiStyle.RADIAL) {
+			return radial.mouseClicked(mx, my, button);
+		}
+
 		int wx = windowX();
 		int wy = windowY();
 		int ww = windowWidth();
 		int wh = windowHeight();
 		if (mx < wx || mx >= wx + ww || my < wy || my >= wy + wh) {
 			return true; // swallow clicks outside the window
-		}
-
-		// A mouse button bound to the GUI closes it.
-		if (ClientKeybinds.openClickGui() != null && ClientKeybinds.openClickGui().matchesMouse(event)) {
-			closeRequested = true;
-			return true;
 		}
 
 		// The theme list floats above everything, so it gets the first refusal.
@@ -772,11 +910,13 @@ public final class GuiFrame {
 		if (button == 0) {
 			int sx = styleX(windowX(), windowWidth());
 			int sy = windowY() + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
-			if (mx >= sx && mx < sx + STYLE_BTN_W && my >= sy && my < sy + UiTheme.SEARCH_H) {
-				style = style.next();
-				ClientConfig config = ClientConfig.get();
-				config.setGuiStyle(style.id());
-				ClientConfig.saveNow();
+			if (mx >= sx && mx < sx + styleButtonWidth() && my >= sy && my < sy + UiTheme.SEARCH_H) {
+				cycleStyle();
+				return true;
+			}
+			int ax = accentX(windowX(), windowWidth());
+			if (mx >= ax && mx < ax + UiTheme.SEARCH_H && my >= sy && my < sy + UiTheme.SEARCH_H) {
+				accentPanel.toggle();
 				return true;
 			}
 		}
@@ -854,6 +994,12 @@ public final class GuiFrame {
 	}
 
 	public boolean mouseDragged(double mx, double my) {
+		if (style == GuiStyle.RADIAL) {
+			return radial.mouseDragged(mx, my);
+		}
+		if (accentPanel.mouseDragged(mx, my)) {
+			return true;
+		}
 		if (scrollbar.isDragging()) {
 			scrollbar.dragged(my);
 			return true;
@@ -867,6 +1013,17 @@ public final class GuiFrame {
 	}
 
 	public boolean mouseReleased(double mx, double my) {
+		if (style == GuiStyle.RADIAL) {
+			boolean result = radial.mouseReleased(mx, my);
+			if (accentPanel.isOpen()) {
+				ClientConfig.saveNow();
+			}
+			return result;
+		}
+		boolean accent = accentPanel.mouseReleased();
+		if (accent) {
+			ClientConfig.saveNow();
+		}
 		scrollbar.released();
 		for (Category category : CATEGORIES) {
 			for (ModuleCard card : cards.get(category)) {
@@ -877,6 +1034,12 @@ public final class GuiFrame {
 	}
 
 	public boolean mouseScrolled(double mx, double my, double amount) {
+		if (style == GuiStyle.RADIAL) {
+			return radial.mouseScrolled(mx, my, amount);
+		}
+		if (accentPanel.isOpen()) {
+			return true;
+		}
 		// Only the workspace scrolls. A wheel turn over the sidebar used to move
 		// the module list, which made the category panel feel like it was
 		// dragging the content with it.
@@ -889,6 +1052,9 @@ public final class GuiFrame {
 	}
 
 	public boolean charTyped(CharacterEvent event) {
+		if (style == GuiStyle.RADIAL) {
+			return radial.charTyped(event);
+		}
 		if (search.charTyped(event)) {
 			return true;
 		}
@@ -912,9 +1078,24 @@ public final class GuiFrame {
 		// blurred the field and the window stayed open over a frozen world -
 		// which reads as "the GUI will not close".
 		if (event.isEscape()) {
+			// First Escape closes the colour studio, the second closes the GUI.
+			// Closing the whole interface while a picker is open used to feel
+			// like the picker's own dismiss was being ignored.
+			if (accentPanel.closeIfOpen()) {
+				ClientConfig.saveNow();
+				return true;
+			}
 			clearAllTextFocus();
 			closeRequested = true;
 			return true;
+		}
+		if (style == GuiStyle.RADIAL) {
+			if (!radial.hasTextInput() && ClientKeybinds.openClickGui() != null
+					&& ClientKeybinds.openClickGui().matches(event)) {
+				closeRequested = true;
+				return true;
+			}
+			return radial.keyPressed(event);
 		}
 		if (!hasTextInput() && ClientKeybinds.openClickGui() != null
 				&& ClientKeybinds.openClickGui().matches(event)) {
@@ -936,6 +1117,9 @@ public final class GuiFrame {
 
 	/** True while a text field owns the keyboard. */
 	public boolean hasTextInput() {
+		if (style == GuiStyle.RADIAL) {
+			return radial.hasTextInput();
+		}
 		if (search.isFocused()) {
 			return true;
 		}
@@ -993,9 +1177,19 @@ public final class GuiFrame {
 		if (index < 0 || index >= palettes.size()) {
 			return;
 		}
-		UiTheme.setPalette(palettes.get(index).id());
+		// A theme carries its own accent. Follow it while the accent is still
+		// the previous palette's (that is, not customised): otherwise choosing
+		// Deep Sakura would repaint the surfaces but leave the old pink accent,
+		// which makes the theme picker look broken. A custom accent is kept.
+		UiTheme.Palette next = palettes.get(index);
+		boolean followAccent = GuiColors.windowArgb() == UiTheme.palette().accent();
+		UiTheme.setPalette(next.id());
+		if (followAccent) {
+			GuiColors.window().set(next.accent());
+			GuiColors.sync();
+		}
 		ClientConfig config = ClientConfig.get();
-		config.setTheme(palettes.get(index).id());
+		config.setTheme(next.id());
 		ClientConfig.saveNow();
 	}
 }

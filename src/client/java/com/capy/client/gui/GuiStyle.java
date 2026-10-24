@@ -8,21 +8,25 @@ package com.capy.client.gui;
  * testing are the same in every style, so a new entry only has to answer
  * "what does the shell look like" and costs no changes anywhere else.
  *
- * Two entries exist today:
+ * Three entries exist today:
  *
  *   <ul>
  *     <li>{@link #NORMAL} - the decorated window: petals behind the frame, a
  *         drifting specular band, a lit top edge;</li>
  *     <li>{@link #MINIMAL} - the same layout with every moving decoration
  *         removed. It is both calmer to look at and cheaper to draw, which is
- *         what makes it useful on a low end machine.</li>
+ *         what makes it useful on a low end machine;</li>
+ *     <li>{@link #RADIAL} - the Sakura ring: a large accent disc carrying the
+ *         wordmark, a category ring around it and a module sheet beside the
+ *         ring. It has its own accent colour, separate from the window.</li>
  *   </ul>
  *
  * Further styles can be added here without touching the layout code.
  */
 public enum GuiStyle {
 	NORMAL("normal", "Normal", true),
-	MINIMAL("minimal", "Minimal", false);
+	MINIMAL("minimal", "Minimal", false),
+	RADIAL("radial", "Radial", true);
 
 	private final String id;
 	private final String label;

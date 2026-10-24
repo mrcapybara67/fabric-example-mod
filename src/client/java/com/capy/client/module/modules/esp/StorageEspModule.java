@@ -39,7 +39,7 @@ public final class StorageEspModule extends EspModule {
 	private int lastRange = -1;
 
 	public StorageEspModule() {
-		super("storage_esp", 0xFFF7A93B, 64);
+		super("storage_esp", 0xFFF7A93B, 64, false);
 	}
 
 	@Override

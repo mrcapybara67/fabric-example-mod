@@ -28,7 +28,11 @@ import net.minecraft.world.phys.AABB;
  *       use to decide how far to look, so pulling it in genuinely reduces the
  *       work instead of just hiding the result;</li>
  *   <li><b>fill / outline</b>: either layer can be turned off. Outlines alone
- *       are the cheapest and the most readable over terrain.</li>
+ *       are the cheapest and the most readable over terrain;</li>
+ *   <li><b>tracers</b>: a line from the camera to the centre of every box,
+ *       drawn with the same colour and the same wall rule as the box. It
+ *       answers "which way is it" in a crowded scene where the box itself may
+ *       be behind another box.</li>
  * </ul>
  *
  * A module only keeps a list of boxes that it refreshes on its own schedule.
@@ -46,13 +50,19 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 	protected final BooleanSetting fill;
 	protected final BooleanSetting outline;
 	protected final BooleanSetting throughWalls;
+	protected final BooleanSetting tracers;
 	private final int defaultColor;
 	private final int defaultRange;
+	private final boolean defaultTracers;
 
-	protected EspModule(String id, int defaultColor, int defaultRange) {
-		super(Category.VISUAL, id);
+	protected EspModule(String id, int defaultColor, int defaultRange, boolean defaultTracers) {
+		// Every ESP overlay lives in DonutSMP: it is the category players open
+		// on that server, and grouping the three overlays together makes their
+		// shared colour/range/tracer controls easy to compare.
+		super(Category.DONUT_SMP, id);
 		this.defaultColor = defaultColor;
 		this.defaultRange = defaultRange;
+		this.defaultTracers = defaultTracers;
 		// The colour is the first row: it is the setting people open the card
 		// for, and it is the only one whose effect is visible immediately.
 		this.color = setting(new ColorSetting("color", defaultColor));
@@ -63,6 +73,7 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		// overlay. Turning it off restores normal occlusion for players who
 		// prefer the boxes to sit in the scene instead of on top of it.
 		this.throughWalls = setting(new BooleanSetting("through_walls", true));
+		this.tracers = setting(new BooleanSetting("tracers", defaultTracers));
 	}
 
 	/** The boxes to draw this frame. Never allocates a new list per call. */
@@ -109,6 +120,11 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		return throughWalls.value();
 	}
 
+	/** True when a tracer line runs from the camera to every box centre. */
+	public boolean tracers() {
+		return tracers.value();
+	}
+
 	/**
 	 * Modules that highlight the world refresh their cache on this hook. The
 	 * player overlay answers every frame instead and simply inherits an empty
@@ -138,6 +154,7 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		fill.set(ConfigValues.boolValue(json, "fill", true));
 		outline.set(ConfigValues.boolValue(json, "outline", true));
 		throughWalls.set(ConfigValues.boolValue(json, "through_walls", true));
+		tracers.set(ConfigValues.boolValue(json, "tracers", defaultTracers));
 	}
 
 	@Override
@@ -147,5 +164,6 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		json.addProperty("fill", fills());
 		json.addProperty("outline", outlines());
 		json.addProperty("through_walls", throughWalls());
+		json.addProperty("tracers", tracers());
 	}
 }

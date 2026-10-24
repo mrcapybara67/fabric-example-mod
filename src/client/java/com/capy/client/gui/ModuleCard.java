@@ -9,6 +9,7 @@ import com.capy.client.module.Module;
 import com.capy.client.module.Setting;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.WatchlistSetting;
+import com.capy.client.module.modules.esp.EspModule;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
@@ -322,13 +323,21 @@ public class ModuleCard {
 				Ui.withAlpha(UiTheme.BORDER, 0x60));
 		Ui.innerBevel(c, x, y, w, h, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 
-		// The leading accent bar marks the enabled state.
+		// The leading accent bar marks the enabled state. An ESP card uses that
+		// overlay's own colour, so the list shows which colour maps to which
+		// box without opening the card.
 		if (onv > 0.02f) {
+			int barColor = UiTheme.ACCENT;
+			int barDeep = UiTheme.ACCENT_DEEP;
+			if (module instanceof EspModule esp) {
+				barColor = esp.color();
+				barDeep = Ui.darken(barColor, 0.26f);
+			}
 			int barH = Math.round((h - 22) * onv);
 			int barY = y + (h - barH) / 2;
 			Ui.surface(c, x + 1, barY, 3, barH, 2,
-					Ui.withAlpha(UiTheme.ACCENT, Math.round(255 * onv)),
-					Ui.withAlpha(UiTheme.ACCENT_DEEP, Math.round(255 * onv)));
+					Ui.withAlpha(barColor, Math.round(255 * onv)),
+					Ui.withAlpha(barDeep, Math.round(255 * onv)));
 		}
 
 		// Name and description, aligned on one left edge. The two lines are

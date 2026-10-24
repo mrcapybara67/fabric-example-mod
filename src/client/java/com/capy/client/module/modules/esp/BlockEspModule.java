@@ -53,7 +53,7 @@ public final class BlockEspModule extends EspModule {
 	private int lastRange = -1;
 
 	public BlockEspModule() {
-		super("block_esp", 0xFF5CE1E6, 64);
+		super("block_esp", 0xFF5CE1E6, 64, false);
 		// A useful starting filter: the block ESP does something the first time
 		// it is switched on, and the list editor shows how to change it.
 		blocks.set(List.of("minecraft:diamond_ore", "minecraft:deepslate_diamond_ore",

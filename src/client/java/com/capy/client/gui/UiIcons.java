@@ -7,7 +7,7 @@ package com.capy.client.gui;
  *
  * Nothing here paints an opaque "knock-out" colour: every icon is a set of
  * strokes or small filled shapes, so icons stay legible on top of the plum
- * surfaces where the colour behind them may be anythinc.
+ * surfaces where the colour behind them may be anything.
  *
  * The cherry blossom motif is the client's signature: it appears in the header
  * mark, in the empty states and as the drifting petal particles that play
@@ -23,6 +23,7 @@ public final class UiIcons {
 			case SEARCH -> search(c, x, y, size, color);
 			case CLOSE -> close(c, x, y, size, color);
 			case BLOSSOM -> blossom(c, x, y, size, color);
+			case CREST -> crest(c, x, y, size, color);
 			case ALERT -> alert(c, x, y, size, color);
 			case PLUS -> plus(c, x, y, size, color);
 			case CHECK -> check(c, x, y, size, color);
@@ -30,6 +31,14 @@ public final class UiIcons {
 			case SUN -> sun(c, x, y, size, color);
 			case RAIN -> rain(c, x, y, size, color);
 			case THUNDER -> thunder(c, x, y, size, color);
+			case COMPASS -> compass(c, x, y, size, color);
+			case GLOBE -> globe(c, x, y, size, color);
+			case EYE -> eye(c, x, y, size, color);
+			case DONUT -> donut(c, x, y, size, color);
+			case SLIDERS -> sliders(c, x, y, size, color);
+			case LAYOUT -> layout(c, x, y, size, color);
+			case PALETTE -> palette(c, x, y, size, color);
+			case BACK -> back(c, x, y, size, color);
 		}
 	}
 
@@ -76,13 +85,23 @@ public final class UiIcons {
 		SEARCH,
 		CLOSE,
 		BLOSSOM,
+		/** The client seal: a blossom inside a double ring. */
+		CREST,
 		ALERT,
 		PLUS,
 		CHECK,
 		CHEVRON,
 		SUN,
 		RAIN,
-		THUNDER
+		THUNDER,
+		COMPASS,
+		GLOBE,
+		EYE,
+		DONUT,
+		SLIDERS,
+		LAYOUT,
+		PALETTE,
+		BACK
 	}
 
 
@@ -128,6 +147,23 @@ public final class UiIcons {
 		disc(c, cx, cy, Math.max(1.2f, s * 0.09f), col);
 	}
 
+
+	/**
+	 * The client seal: the blossom inside a double ring. Used where the mark has
+	 * to read as a badge (the radial hub, the window header) rather than as a
+	 * load-bearing decorative flower. At a small size the outer ring is what
+	 * makes the shape unique: a plain blossom is a common icon, a sealed one is
+	 * not.
+	 */
+	private static void crest(UiCanvas c, int x, int y, int s, int col) {
+		int cx = x + s / 2;
+		int cy = y + s / 2;
+		int outer = Math.max(3, s / 2 - 1);
+		Ui.ring(c, cx, cy, outer, Math.max(1, Math.round(s * 0.055f)), col);
+		Ui.ring(c, cx, cy, Math.round(outer * 0.80f), 1, withAlpha(col, 0x70));
+		int inset = Math.max(2, Math.round(s * 0.20f));
+		blossom(c, x + inset, y + inset, s - inset * 2, col);
+	}
 
 	// ---- alert: warning triangle with an exclamation mark ------------------
 	private static void alert(UiCanvas c, int x, int y, int s, int col) {
@@ -197,6 +233,125 @@ public final class UiIcons {
 		thickStroke(c, cx + reach, top, cx - reach, mid, col);
 		thickStroke(c, cx - reach, mid, cx + reach, mid, col);
 		thickStroke(c, cx + reach, mid, cx - reach, top + h, col);
+	}
+
+	// ---- category marks -----------------------------------------------------
+
+	/** Compass: a ring with a two-tone needle. */
+	private static void compass(UiCanvas c, int x, int y, int s, int col) {
+		int cx = x + s / 2;
+		int cy = y + s / 2;
+		int r = Math.max(3, s / 2 - 1);
+		Ui.ring(c, cx, cy, r, Math.max(1, s / 12), col);
+		// Needle: two triangles that share a centre.
+		for (int i = 0; i <= s / 2 - 2; i++) {
+			int w = Math.max(0, 1 - i / Math.max(1, s / 6));
+			c.fill(cx - 1 - w, cy - i, cx + 2 + w, cy - i + 1, col);
+			c.fill(cx - 1, cy + i, cx + 2, cy + i + 1, withAlpha(col, 0x99));
+		}
+	}
+
+	/** Globe: ring, equator and one meridian. */
+	private static void globe(UiCanvas c, int x, int y, int s, int col) {
+		int cx = x + s / 2;
+		int cy = y + s / 2;
+		int r = Math.max(3, s / 2 - 1);
+		Ui.ring(c, cx, cy, r, Math.max(1, s / 12), col);
+		c.fill(cx - r, cy, cx + r + 1, cy + 1, withAlpha(col, 0xCC));
+		int meridian = Math.max(2, Math.round(s * 0.18f));
+		Ui.ring(c, cx, cy, meridian, 1, col);
+	}
+
+	/** Eye: two arcs meeting at the corners, with a pupil. */
+	private static void eye(UiCanvas c, int x, int y, int s, int col) {
+		int left = x + 1;
+		int right = x + s - 2;
+		int cy = y + s / 2;
+		int steps = Math.max(6, s * 2);
+		for (int i = 0; i <= steps; i++) {
+			float t = i / (float) steps;
+			int px = Math.round(left + (right - left) * t);
+			int arc = Math.round((float) Math.sin(t * Math.PI) * (s * 0.30f));
+			c.fill(px, cy - arc, px + 1, cy - arc + 1, col);
+			c.fill(px, cy + arc, px + 1, cy + arc + 1, col);
+		}
+		disc(c, cxOf(x, s), cy, Math.max(1.5f, s * 0.13f), col);
+	}
+
+	/** Donut: the client's ring in miniature. */
+	private static void donut(UiCanvas c, int x, int y, int s, int col) {
+		int r = Math.max(3, s / 2 - 1);
+		Ui.ring(c, cxOf(x, s), y + s / 2, r, Math.max(2, s / 4), col);
+	}
+
+	/** Sliders: three rails with their knobs. */
+	private static void sliders(UiCanvas c, int x, int y, int s, int col) {
+		int left = x + 1;
+		int right = x + s - 2;
+		int mid = cxOf(x, s);
+		int row0 = y + Math.max(2, s / 4);
+		int row1 = y + s / 2;
+		int row2 = y + s - Math.max(2, s / 4) - 1;
+		c.fill(left, row0, right, row0 + 1, withAlpha(col, 0xAA));
+		c.fill(left, row1, right, row1 + 1, col);
+		c.fill(left, row2, right, row2 + 1, withAlpha(col, 0xAA));
+		int knob = Math.max(2, s / 7);
+		c.fill(left + knob + 2, row0 - knob, left + knob + 2 + knob, row0 + knob, col);
+		c.fill(right - knob * 2 - 2, row1 - knob, right - knob * 2 - 2 + knob, row1 + knob, col);
+		c.fill(mid, row2 - knob, mid + knob, row2 + knob, col);
+	}
+
+	/** Layout: a panel with a header band and two content blocks. */
+	private static void layout(UiCanvas c, int x, int y, int s, int col) {
+		int left = x + 1;
+		int top = y + 1;
+		int right = x + s - 2;
+		int bottom = y + s - 2;
+		int mid = cxOf(x, s);
+		Ui.ring(c, mid, y + s / 2, Math.max(3, s / 2 - 1), 1, col);
+		c.fill(left + 2, top + 2, right - 2, top + 4, col);
+		// The two content blocks need two rows even at twelve pixels, where
+		// bottom - 3 lands exactly on top + 6 and the shapes are degenerate:
+		// the chip then draws as a bare circle with a line through it. The
+		// bottom row is therefore never above the top row, and neither block
+		// is ever narrower than one pixel for the same reason.
+		int blockTop = top + Math.max(5, s / 3);
+		int blockBottom = Math.max(blockTop + 2, bottom - 2);
+		int leftBlockLeft = left + 3;
+		int leftBlockRight = Math.max(leftBlockLeft + 1, mid - 1);
+		int rightBlockLeft = mid + 1;
+		int rightBlockRight = Math.max(rightBlockLeft + 1, right - 3);
+		c.fill(leftBlockLeft, blockTop, leftBlockRight, blockBottom, withAlpha(col, 0xB0));
+		c.fill(rightBlockLeft, blockTop, rightBlockRight, blockBottom, withAlpha(col, 0xB0));
+	}
+
+	/** Palette: a paint disc with three wells. */
+	private static void palette(UiCanvas c, int x, int y, int s, int col) {
+		int cx = cxOf(x, s);
+		int cy = y + s / 2;
+		Ui.ring(c, cx, cy, Math.max(3, s / 2 - 1), Math.max(1, s / 10), col);
+		int r = Math.max(1, s / 9);
+		c.fill(cx - s / 4, cy - s / 5, cx - s / 4 + r, cy - s / 5 + r, col);
+		c.fill(cx + s / 8, cy - s / 5, cx + s / 8 + r, cy - s / 5 + r, col);
+		c.fill(cx - s / 4, cy + s / 7, cx - s / 4 + r, cy + s / 7 + r, col);
+	}
+
+	/** Back arrow: a left-pointing chevron with a short shaft. */
+	private static void back(UiCanvas c, int x, int y, int s, int col) {
+		int cx = x + s / 2;
+		int cy = y + s / 2;
+		int arm = Math.max(2, s / 3);
+		stroke(c, cx + arm / 2, cy - arm, cx - arm / 2, cy, col);
+		stroke(c, cx - arm / 2, cy, cx + arm / 2, cy + arm, col);
+		c.fill(x + 1, cy, cx, cy + 1, col);
+	}
+
+	private static int cxOf(int x, int s) {
+		return x + s / 2;
+	}
+
+	private static int withAlpha(int color, int alpha) {
+		return Ui.withAlpha(color, alpha);
 	}
 
 	/** A two pixel line, for marks that must survive a small icon box. */
