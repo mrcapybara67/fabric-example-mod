@@ -17,14 +17,6 @@ public class WatchlistSetting extends Setting<List<String>> {
 	/** Maximum number of watched names kept in the list. */
 	public static final int MAX_ENTRIES = 64;
 
-	/** Result of an attempted add. */
-	public enum AddResult {
-		ADDED,
-		INVALID,
-		DUPLICATE,
-		FULL
-	}
-
 	public WatchlistSetting(String key) {
 		super(key, new ArrayList<>());
 	}
@@ -75,23 +67,23 @@ public class WatchlistSetting extends Setting<List<String>> {
 	/**
 	 * Adds a name to the watchlist.
 	 *
-	 * @return {@link AddResult#ADDED} on success, otherwise the reason the
+	 * @return {@link ListResult#ADDED} on success, otherwise the reason the
 	 *         name was rejected
 	 */
-	public AddResult add(String name) {
+	public ListResult add(String name) {
 		if (!isValidName(name)) {
-			return AddResult.INVALID;
+			return ListResult.INVALID;
 		}
 		if (contains(name)) {
-			return AddResult.DUPLICATE;
+			return ListResult.DUPLICATE;
 		}
 		List<String> current = entries();
 		if (current.size() >= MAX_ENTRIES) {
-			return AddResult.FULL;
+			return ListResult.FULL;
 		}
 		current.add(name);
 		set(current);
-		return AddResult.ADDED;
+		return ListResult.ADDED;
 	}
 
 	/** Removes a name (case-insensitive). Returns true when something was removed. */

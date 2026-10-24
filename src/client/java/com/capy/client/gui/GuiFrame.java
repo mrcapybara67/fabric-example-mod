@@ -45,6 +45,8 @@ public final class GuiFrame {
 
 	/** The smallest a category row may get before it stops being usable. */
 	private static final int CATEGORY_H_MIN = 15;
+	/** Width of the header button that switches the window style. */
+	private static final int STYLE_BTN_W = 68;
 
 	/**
 	 * The page the window was last showing.
@@ -81,6 +83,11 @@ public final class GuiFrame {
 	private float switchProgress = 1f;
 	private String cachedQuery;
 	private int themeIndex;
+	private GuiStyle style = GuiStyle.NORMAL;
+	/** Set by the header while the style button is under the pointer. */
+	private boolean styleHovered;
+	private int styleBtnX;
+	private int styleBtnY;
 	private int width;
 	private int height;
 	private boolean closeRequested;
@@ -90,6 +97,7 @@ public final class GuiFrame {
 		rebuild();
 		themeIndex = indexOfTheme(ClientConfig.get().theme());
 		themePicker.setOptions(themeLabels(), themeIndex);
+		style = GuiStyle.byId(ClientConfig.get().guiStyle());
 	}
 
 	/** Rebuilds the card list from the registered modules. */
@@ -316,8 +324,13 @@ public final class GuiFrame {
 			windowHeight.snap(targetWindowHeight());
 		}
 
-		petals.update(delta, width, height);
-		petals.render(c, UiPetals.Layer.BACK, fade);
+		// The decorations are the only part of the frame a style is allowed to
+		// drop. Skipping them here (rather than inside UiPetals) is what makes
+		// the plain style cheaper: nothing is updated and nothing is submitted.
+		if (style.decorated()) {
+			petals.update(delta, width, height);
+			petals.render(c, UiPetals.Layer.BACK, fade);
+		}
 
 		// The window pops into place: it grows out of 88% with a small
 		// overshoot, drops in from above and fades up. The overshoot is what
@@ -332,9 +345,11 @@ public final class GuiFrame {
 
 		Ui.shadow(c, wx, wy, ww, wh, r);
 		Ui.surface(c, wx, wy, ww, wh, r, UiTheme.SHELL_TOP, UiTheme.SHELL_BOTTOM);
-		// A soft light from above: the top of the window catches the light.
-		Ui.glow(c, wx + 2, wy + 2, ww - 4, Math.min(wh, 90), UiTheme.PALE_CHERRY, 0.05f);
-		Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());
+		if (style.decorated()) {
+			// A soft light from above: the top of the window catches the light.
+			Ui.glow(c, wx + 2, wy + 2, ww - 4, Math.min(wh, 90), UiTheme.PALE_CHERRY, 0.05f);
+			Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());
+		}
 		Ui.outline(c, wx, wy, ww, wh, r, UiTheme.BORDER);
 		Ui.innerBevel(c, wx, wy, ww, wh, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 		// One accent hairline along the top edge. It is the only place the shell
@@ -344,7 +359,7 @@ public final class GuiFrame {
 
 		// The accent reveal: a soft pink light sweeps down over the window
 		// while it opens.
-		if (fade < 1f) {
+		if (fade < 1f && style.decorated()) {
 			int sweepH = Math.round(wh * 0.55f);
 			int sweepY = wy + Math.round((1f - ease) * (wh - sweepH));
 			Ui.glow(c, wx, wy, ww, sweepH, UiTheme.ACCENT_2, (1f - fade) * 0.16f);
@@ -370,7 +385,9 @@ public final class GuiFrame {
 
 		// A few petals pass in front of the window for depth. They are very
 		// faint so they never compete with the content.
-		petals.render(c, UiPetals.Layer.FRONT, fade * 0.7f);
+		if (style.decorated()) {
+			petals.render(c, UiPetals.Layer.FRONT, fade * 0.7f);
+		}
 
 		if (footerFitted()) {
 			themePicker.renderOverlay(c, type.regular(), mouseX, mouseY, delta);
@@ -407,15 +424,19 @@ public final class GuiFrame {
 		// The current page, separated from the wordmark by a hairline.
 		int pageX = nameX + display.width("Capy Client") + UiTheme.SP_4;
 		int fieldX = searchX(wx, ww);
-		if (fieldX - pageX > UiTheme.SP_6 * 2) {
+		int styleRoom = styleX(wx, ww);
+		if (styleRoom - pageX > UiTheme.SP_6 * 2) {
 			int ruleH = display.lineHeight() - 4;
 			int ruleY = wy + (UiTheme.HEADER_H - ruleH) / 2;
 			Ui.surface(c, pageX - UiTheme.SP_3, ruleY, 1, ruleH, 0, UiTheme.BORDER);
 			String page = search.query().isEmpty() ? CATEGORIES[selected].title : "Search results";
 			Ui.drawEllipsized(c, pageFont, page, pageX + UiTheme.SP_3,
 					Ui.centerTextY(wy, UiTheme.HEADER_H, pageFont),
-					fieldX - pageX - UiTheme.SP_6, UiTheme.TEXT_2);
+					styleRoom - pageX - UiTheme.SP_6, UiTheme.TEXT_2);
 		}
+
+		// The style switch sits between the page title and the search field.
+		renderStyleButton(c, type, wx, wy, ww, mouseX, mouseY);
 
 		// Search.
 		search.bind(fieldX, wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2, UiTheme.SEARCH_W, UiTheme.SEARCH_H);
@@ -445,6 +466,42 @@ public final class GuiFrame {
 
 	private int searchX(int wx, int ww) {
 		return wx + ww - UiTheme.SP_6 - UiTheme.CLOSE_BTN - UiTheme.SP_3 - UiTheme.SEARCH_W;
+	}
+
+	private int styleX(int wx, int ww) {
+		return searchX(wx, ww) - UiTheme.SP_3 - STYLE_BTN_W;
+	}
+
+	/**
+	 * The button that switches the window style.
+	 *
+	 * It is a plain chip showing the name of the style in use, next to a
+	 * chevron: clicking it moves to the next entry in {@link GuiStyle}. A new
+	 * style therefore needs no new button, and the window keeps exactly one
+	 * control for the whole family.
+	 */
+	private void renderStyleButton(UiCanvas c, UiType type, int wx, int wy, int ww,
+			int mouseX, int mouseY) {
+		int x = styleX(wx, ww);
+		int y = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
+		int w = STYLE_BTN_W;
+		int h = UiTheme.SEARCH_H;
+		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+		styleHovered = hovered;
+		styleBtnX = x;
+		styleBtnY = y;
+
+		Ui.surface(c, x, y, w, h, UiTheme.RADIUS,
+				hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
+				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, x, y, w, h, UiTheme.RADIUS, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
+
+		UiText font = type.regular();
+		Ui.drawEllipsized(c, font, style.label(), x + UiTheme.SP_3,
+				Ui.centerTextY(y, h, font), w - UiTheme.SP_5 - 10,
+				hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+		UiIcons.draw(c, UiIcons.Icon.CHEVRON, x + w - 14, y + h / 2 - 3, 8,
+				hovered ? UiTheme.TEXT : UiTheme.TEXT_3);
 	}
 
 	private void renderSidebar(UiCanvas c, UiType type, int wx, int wy, int ww, int wh, int mouseX, int mouseY,
@@ -547,6 +604,9 @@ public final class GuiFrame {
 				&& mouseY >= hintY - 2 && mouseY < hintY + type.regular().lineHeight() + 2;
 		if (hintHovered) {
 			tooltip.show("Esc closes the GUI. Rebind the key in Options - Controls.", hintX, hintY);
+		} else if (styleHovered) {
+			tooltip.show("GUI style: " + style.label() + " — click to switch.",
+					styleBtnX, styleBtnY + UiTheme.SEARCH_H);
 		} else {
 			tooltip.hide();
 		}
@@ -704,6 +764,21 @@ public final class GuiFrame {
 		if (footerFitted() && themePicker.isExpanded() && themePicker.mouseClicked(mx, my)) {
 			applyThemeIfChanged();
 			return true;
+		}
+
+		// GUI style: the header chip cycles through the available looks and
+		// remembers the choice. It is checked before the search field because
+		// the two sit on the same row.
+		if (button == 0) {
+			int sx = styleX(windowX(), windowWidth());
+			int sy = windowY() + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
+			if (mx >= sx && mx < sx + STYLE_BTN_W && my >= sy && my < sy + UiTheme.SEARCH_H) {
+				style = style.next();
+				ClientConfig config = ClientConfig.get();
+				config.setGuiStyle(style.id());
+				ClientConfig.saveNow();
+				return true;
+			}
 		}
 
 		// Search.

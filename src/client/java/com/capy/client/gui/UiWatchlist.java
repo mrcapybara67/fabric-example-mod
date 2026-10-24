@@ -1,6 +1,6 @@
 package com.capy.client.gui;
 
-import com.capy.client.module.WatchlistSetting;
+import com.capy.client.module.ListResult;
 import java.util.List;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
@@ -9,17 +9,29 @@ import net.minecraft.client.input.KeyEvent;
  * Watchlist editor: a text field for entering a username, a button that adds
  * it, and a list of watched names with a remove button each.
  *
- * The component owns the validation feedback (invalid name, duplicate, list
+ * The component owns the validation feedback (invalid entry, duplicate, list
  * full) and clears the field only when an entry was actually accepted.
+ *
+ * The same editor serves every list setting — watched usernames and the block
+ * ESP filter — so a list always looks and behaves like every other list. What
+ * differs between them (the placeholder, the wording of each rejection and the
+ * empty state) is the {@link Copy} it is built with, never the mechanics.
  */
 public class UiWatchlist {
 	/** Data source the editor works against. */
 	public interface Model {
 		List<String> entries();
 
-		WatchlistSetting.AddResult add(String name);
+		ListResult add(String value);
 
-		boolean remove(String name);
+		boolean remove(String value);
+	}
+
+	/** The wording of one list, so a block filter does not talk about users. */
+	public record Copy(String placeholder, String emptyText, String invalidText, String duplicateText,
+			String fullText) {
+		public static final Copy USERNAMES = new Copy("Username", "No usernames watched yet",
+				"Not a valid username", "Already watched", "Watchlist is full");
 	}
 
 	private static final int INPUT_H = 22;
@@ -33,13 +45,19 @@ public class UiWatchlist {
 	private final UiTextField field = new UiTextField();
 	private final Model model;
 	private final String label;
+	private final Copy copy;
 	private String status = "";
 	private long statusUntil;
 
 	public UiWatchlist(Model model, String label) {
+		this(model, label, Copy.USERNAMES);
+	}
+
+	public UiWatchlist(Model model, String label, Copy copy) {
 		this.model = model;
 		this.label = label;
-		this.field.setPlaceholder("Username");
+		this.copy = copy;
+		this.field.setPlaceholder(copy.placeholder());
 		this.field.onSubmit(this::submit);
 	}
 
@@ -73,15 +91,15 @@ public class UiWatchlist {
 	/** Attempts to add the typed name. */
 	private void submit() {
 		String name = field.text().trim();
-		WatchlistSetting.AddResult result = model.add(name);
+		ListResult result = model.add(name);
 		switch (result) {
 			case ADDED -> {
 				field.clear();
 				status = "";
 			}
-			case INVALID -> status = "Not a valid username";
-			case DUPLICATE -> status = "Already watched";
-			case FULL -> status = "Watchlist is full";
+			case INVALID -> status = copy.invalidText();
+			case DUPLICATE -> status = copy.duplicateText();
+			case FULL -> status = copy.fullText();
 		}
 		if (!status.isEmpty()) {
 			statusUntil = System.currentTimeMillis() + 2200L;
@@ -120,7 +138,7 @@ public class UiWatchlist {
 
 		List<String> entries = model.entries();
 		if (entries.isEmpty()) {
-			font.draw(c, "No usernames watched yet", x, cy, UiTheme.TEXT_3);
+			font.draw(c, copy.emptyText(), x, cy, UiTheme.TEXT_3);
 			return;
 		}
 

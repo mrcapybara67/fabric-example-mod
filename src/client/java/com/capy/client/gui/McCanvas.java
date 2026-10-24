@@ -34,6 +34,14 @@ public final class McCanvas implements UiCanvas {
 	}
 
 	@Override
+	public void gradient(int x1, int y1, int x2, int y2, int top, int bottom) {
+		if (x2 <= x1 || y2 <= y1) {
+			return;
+		}
+		graphics.fillGradient(x1, y1, x2, y2, top, bottom);
+	}
+
+	@Override
 	public void pushClip(int x, int y, int width, int height) {
 		if (width <= 0 || height <= 0) {
 			// Still push an empty region so the matching pop stays balanced.

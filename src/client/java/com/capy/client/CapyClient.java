@@ -12,6 +12,10 @@ import com.capy.client.module.modules.AntiAdminModule;
 import com.capy.client.module.modules.CustomKnifeModule;
 import com.capy.client.module.modules.SwingSpeedModule;
 import com.capy.client.module.modules.WeatherNotifierModule;
+import com.capy.client.module.modules.esp.BlockEspModule;
+import com.capy.client.module.modules.esp.EspRenderer;
+import com.capy.client.module.modules.esp.PlayerEspModule;
+import com.capy.client.module.modules.esp.StorageEspModule;
 import com.capy.client.module.modules.hud.HudElements;
 import com.capy.client.module.modules.hud.HudRenderer;
 import net.fabricmc.api.ClientModInitializer;
@@ -19,6 +23,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.resources.Identifier;
 
@@ -40,6 +45,12 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(weather);
 		AntiAdminModule antiAdmin = new AntiAdminModule();
 		modules.register(antiAdmin);
+		// The three world overlays. They share one renderer and one set of
+		// drawing rules, so what they highlight differs but how they look
+		// never does.
+		modules.register(new PlayerEspModule());
+		modules.register(new StorageEspModule());
+		modules.register(new BlockEspModule());
 		// The HUD is a set of independent elements, not one panel.
 		HudElements.register(modules);
 
@@ -94,6 +105,18 @@ public class CapyClient implements ClientModInitializer {
 				}
 			}
 		});
+
+		// The world overlays are drawn with the debug pass: after the entities
+		// they wrap and before translucent terrain, so water and glass tint a
+		// highlight instead of hiding it.
+		//
+		// Each overlay then decides for itself whether a wall may hide it: the
+		// see-through pair of render types has no depth test, so a box behind
+		// terrain is still drawn. The debug pass is safe for that because it
+		// runs after the terrain depth buffer is complete - the boxes simply
+		// ignore it, and they write no depth either, so nothing drawn later is
+		// clipped by an occluder that is not on screen.
+		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(EspRenderer::render);
 
 		// The HUD chips go first, so an alert is never hidden behind them.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "hud"),

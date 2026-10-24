@@ -45,6 +45,7 @@ public final class ClientConfig {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
 	private static final String KEY_THEME = "theme";
+	private static final String KEY_GUI_STYLE = "gui_style";
 	private static final String KEY_MODULES = "modules";
 	/** Per module: whether it was switched on when the game was last closed. */
 	private static final String KEY_ENABLED = "enabled";
@@ -52,6 +53,7 @@ public final class ClientConfig {
 	private static ClientConfig instance = new ClientConfig();
 
 	private String theme = "sakura";
+	private String guiStyle = "normal";
 	private final Map<String, JsonObject> moduleData = new LinkedHashMap<>();
 
 	private ClientConfig() {
@@ -68,6 +70,17 @@ public final class ClientConfig {
 	public void setTheme(String theme) {
 		if (theme != null && !theme.isEmpty()) {
 			this.theme = theme;
+		}
+	}
+
+	/** The id of the GUI style the window last used. */
+	public String guiStyle() {
+		return guiStyle;
+	}
+
+	public void setGuiStyle(String style) {
+		if (style != null && !style.isEmpty()) {
+			this.guiStyle = style;
 		}
 	}
 
@@ -106,6 +119,7 @@ public final class ClientConfig {
 	private void readFrom(JsonObject root) {
 		String storedTheme = ConfigValues.stringValue(root, KEY_THEME, theme);
 		theme = storedTheme;
+		guiStyle = ConfigValues.stringValue(root, KEY_GUI_STYLE, guiStyle);
 
 		JsonElement modulesElement = root.get(KEY_MODULES);
 		if (modulesElement != null && modulesElement.isJsonObject()) {
@@ -141,6 +155,7 @@ public final class ClientConfig {
 	private JsonObject toJson() {
 		JsonObject root = new JsonObject();
 		root.addProperty(KEY_THEME, theme);
+		root.addProperty(KEY_GUI_STYLE, guiStyle);
 
 		JsonObject modules = new JsonObject();
 		for (Module module : ModuleManager.get().modules()) {
@@ -169,7 +184,14 @@ public final class ClientConfig {
 		if (loader == null) {
 			return;
 		}
-		instance.save(loader.getConfigDir());
+		try {
+			instance.save(loader.getConfigDir());
+		} catch (RuntimeException e) {
+			// A loader that is not fully initialised (an offline renderer, a
+			// data generation run) has no config directory. Saving is a
+			// convenience, never a reason to fail the thing that saved.
+			LOGGER.warn("Capy: could not resolve the config directory ({}).", e.toString());
+		}
 	}
 
 	/**

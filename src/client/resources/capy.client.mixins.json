@@ -6,7 +6,8 @@
 		"LivingEntityMixin",
 		"ClientPacketListenerMixin",
 		"ItemModelResolverMixin",
-		"ItemInHandRendererMixin"
+		"ItemInHandRendererMixin",
+		"RenderTypeAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1

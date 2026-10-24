@@ -9,6 +9,7 @@ import com.capy.client.module.modules.WeatherNotifierModule;
 import com.capy.client.module.modules.antiadmin.AdminAlert;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
 import com.capy.client.module.modules.antiadmin.AlertRenderer;
+import com.capy.client.module.modules.esp.PlayerEspModule;
 import com.capy.client.module.modules.hud.HudElements;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -58,6 +59,11 @@ public final class Preview {
 		modules.register(new CustomKnifeModule());
 		modules.register(new WeatherNotifierModule());
 		modules.register(new AntiAdminModule());
+		// Only the player overlay: the other two resolve block tags, which needs
+		// the game's registries to be bootstrapped and this renderer runs without
+		// them. The card, the settings and the layout are shared, so one overlay
+		// is enough to review the whole group.
+		modules.register(new PlayerEspModule());
 		HudElements.register(modules);
 
 		SwingType type = new SwingType();
@@ -73,6 +79,10 @@ public final class Preview {
 				Category.VISUAL.ordinal(), 1);
 		saveExpanded(out.resolve("07-world-weather.png"), type, 1600, 900,
 				Category.WORLD.ordinal(), 0);
+		// A world overlay with its settings open: colour, range, the two layers
+		// and the through-walls switch all belong to the shared ESP base.
+		saveExpanded(out.resolve("08-visual-player-esp.png"), type, 1600, 900,
+				Category.VISUAL.ordinal(), 2);
 
 		// The alert at the points of its timeline that matter: the face in,
 		// the peak, the bottom of the travel, the hand over to the wording,

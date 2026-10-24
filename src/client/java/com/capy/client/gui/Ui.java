@@ -80,13 +80,26 @@ public final class Ui {
 			}
 			return;
 		}
-		for (int dy = -radius; dy < radius; dy++) {
-			double half = (double) radius * radius - ((double) dy + 0.5) * ((double) dy + 0.5);
-			if (half <= 0) {
+		// Two rows per submission, cut at the narrower of the two so the disc
+		// stays inside its radius. At this size the difference between one row
+		// and two is not visible, and every badge and switch knob on screen
+		// costs half the fills.
+		for (int dy = -radius; dy < radius; dy += 2) {
+			int rows = Math.min(2, radius - dy);
+			float dx = -1f;
+			for (int k = 0; k < rows; k++) {
+				double half = (double) radius * radius
+						- ((double) dy + k + 0.5) * ((double) dy + k + 0.5);
+				if (half <= 0) {
+					continue;
+				}
+				float rowDx = (float) Math.sqrt(half);
+				dx = dx < 0f ? rowDx : Math.min(dx, rowDx);
+			}
+			if (dx < 0f) {
 				continue;
 			}
-			float dx = (float) Math.sqrt(half);
-			span(c, cx - dx, cx + dx, cy + dy, color);
+			spanBand(c, cx - dx, cx + dx, cy + dy, rows, color);
 		}
 	}
 
@@ -98,7 +111,16 @@ public final class Ui {
 	 * most three draw calls per row instead of one per pixel.
 	 */
 	private static void span(UiCanvas c, float left, float right, int y, int color) {
-		if (right <= left) {
+		spanBand(c, left, right, y, 1, color);
+	}
+
+	/**
+	 * The same span over {@code rows} rows. Used where a shape is built row by
+	 * row: two rows can share one submission because the colour and the cut of
+	 * a one pixel arc cannot change by a visible amount between them.
+	 */
+	private static void spanBand(UiCanvas c, float left, float right, int y, int rows, int color) {
+		if (right <= left || rows <= 0) {
 			return;
 		}
 		int alpha = color >>> 24;
@@ -112,22 +134,22 @@ public final class Ui {
 			int blended = Math.round(alpha * Math.min(1f, right - left));
 			if (blended > 0) {
 				int px = (int) Math.floor(left);
-				c.fill(px, y, px + 1, y + 1, (blended << 24) | rgb);
+				c.fill(px, y, px + 1, y + rows, (blended << 24) | rgb);
 			}
 			return;
 		}
-		c.fill(start, y, end, y + 1, color);
+		c.fill(start, y, end, y + rows, color);
 		int leftEdge = start - 1;
 		if (leftEdge >= (int) Math.floor(left)) {
 			int blended = Math.round(alpha * (start - left));
 			if (blended > 0) {
-				c.fill(leftEdge, y, leftEdge + 1, y + 1, (blended << 24) | rgb);
+				c.fill(leftEdge, y, leftEdge + 1, y + rows, (blended << 24) | rgb);
 			}
 		}
 		if (right > end) {
 			int blended = Math.round(alpha * (right - end));
 			if (blended > 0) {
-				c.fill(end, y, end + 1, y + 1, (blended << 24) | rgb);
+				c.fill(end, y, end + 1, y + rows, (blended << 24) | rgb);
 			}
 		}
 	}
@@ -173,19 +195,62 @@ public final class Ui {
 			return;
 		}
 		int r = clampRadius(radius, w, h);
-		boolean flat = topColor == bottomColor || h <= 1;
+		if (topColor == bottomColor || h <= 1) {
+			// Flat surfaces do not need a gradient at all, and the rounded
+			// rectangle path is cheaper than one fill per row.
+			roundRect(c, x, y, w, h, r, topColor);
+			return;
+		}
+		if (r <= 1 || h <= r * 2 + 1) {
+			// Too short for a gradient band to exist between the corners.
+			rowSurface(c, x, y, w, h, r, topColor, bottomColor);
+			return;
+		}
+
+		// Only the corner rows need per-row widths; the whole middle is one
+		// gradient quad. A panel used to cost one submission per row, which is
+		// what made the interface lag on a large window.
+		int last = h - 1;
+		for (int i = 0; i < r; i++) {
+			int inset = cornerInset(r, i);
+			c.fill(x + inset, y + i, x + w - inset, y + i + 1,
+					lerpColor(topColor, bottomColor, i / (float) last));
+			int lower = last - i;
+			c.fill(x + inset, y + lower, x + w - inset, y + lower + 1,
+					lerpColor(topColor, bottomColor, lower / (float) last));
+		}
+		c.gradient(x, y + r, x + w, y + h - r,
+				lerpColor(topColor, bottomColor, r / (float) last),
+				lerpColor(topColor, bottomColor, (last - r) / (float) last));
+	}
+
+	/** The row by row fallback, used only by surfaces shorter than their corners. */
+	private static void rowSurface(UiCanvas c, int x, int y, int w, int h, int r, int topColor, int bottomColor) {
 		boolean smooth = r >= 3;
-		for (int i = 0; i < h; i++) {
-			int color = flat ? topColor : lerpColor(topColor, bottomColor, i / (float) (h - 1));
-			float inset = r <= 0
-					? 0f
-					: (smooth
-							? Math.max(insetAt(r, i), insetAt(r, h - 1 - i))
-							: Math.max(cornerInset(r, i), cornerInset(r, h - 1 - i)));
+		int last = Math.max(1, h - 1);
+		// This path is used by short surfaces - pills, chips, the toggle track -
+		// where the corner bands meet in the middle and every row genuinely
+		// differs in width. Two rows share one submission: the colour of a band
+		// this small differs by less than one step and the cut of the arc by a
+		// pixel at most, which is invisible, while the count of submissions for
+		// every chip on screen is halved.
+		int step = h >= 10 ? 2 : 1;
+		for (int i = 0; i < h; i += step) {
+			int rows = Math.min(step, h - i);
+			int color = lerpColor(topColor, bottomColor,
+					Math.min(i + (rows - 1) * 0.5f, last) / (float) last);
+			float inset = 0f;
+			for (int k = 0; k < rows; k++) {
+				int row = i + k;
+				float rowInset = smooth
+						? Math.max(insetAt(r, row), insetAt(r, h - 1 - row))
+						: Math.max(cornerInset(r, row), cornerInset(r, h - 1 - row));
+				inset = Math.max(inset, rowInset);
+			}
 			if (inset <= 0.003f) {
-				c.fill(x, y + i, x + w, y + i + 1, color);
+				c.fill(x, y + i, x + w, y + i + rows, color);
 			} else {
-				span(c, x + inset, x + w - inset, y + i, color);
+				spanBand(c, x + inset, x + w - inset, y + i, rows, color);
 			}
 		}
 	}
@@ -222,23 +287,28 @@ public final class Ui {
 		// arc is drawn at its real position and blended over the two pixels it
 		// straddles, which is what turns a staircase into a curve.
 		boolean smooth = r >= 3;
-		for (int i = 0; i < r; i++) {
+		// Two corner rows share one rasterised step. The arc is one pixel wide
+		// and a soft colour; at this size the pairing is invisible, and it
+		// halves the submissions of every panel outline in the window.
+		int step = smooth ? 2 : 1;
+		for (int i = 0; i < r; i += step) {
+			int rows = Math.min(step, r - i);
 			int rowTop = y + i;
-			int rowBottom = y + h - 1 - i;
+			int rowBottom = y + h - i - rows;
 			int colorTop = lerpColor(topColor, bottomColor, i / (float) Math.max(1, h - 1));
 			int colorBottom = lerpColor(topColor, bottomColor, (h - 1 - i) / (float) Math.max(1, h - 1));
 			if (smooth) {
 				float inset = insetAt(r, i);
-				edgePixel(c, x + inset, rowTop, colorTop);
-				edgePixel(c, x + w - inset - 1, rowTop, colorTop);
-				edgePixel(c, x + inset, rowBottom, colorBottom);
-				edgePixel(c, x + w - inset - 1, rowBottom, colorBottom);
+				edgePixelBand(c, x + inset, rowTop, rows, colorTop);
+				edgePixelBand(c, x + w - inset - 1, rowTop, rows, colorTop);
+				edgePixelBand(c, x + inset, rowBottom, rows, colorBottom);
+				edgePixelBand(c, x + w - inset - 1, rowBottom, rows, colorBottom);
 			} else {
 				int inset = cornerInset(r, i);
-				c.fill(x + inset, rowTop, x + inset + 1, rowTop + 1, colorTop);
-				c.fill(x + w - 1 - inset, rowTop, x + w - inset, rowTop + 1, colorTop);
-				c.fill(x + inset, rowBottom, x + inset + 1, rowBottom + 1, colorBottom);
-				c.fill(x + w - 1 - inset, rowBottom, x + w - inset, rowBottom + 1, colorBottom);
+				c.fill(x + inset, rowTop, x + inset + 1, rowTop + rows, colorTop);
+				c.fill(x + w - 1 - inset, rowTop, x + w - inset, rowTop + rows, colorTop);
+				c.fill(x + inset, rowBottom, x + inset + 1, rowBottom + rows, colorBottom);
+				c.fill(x + w - 1 - inset, rowBottom, x + w - inset, rowBottom + rows, colorBottom);
 			}
 		}
 	}
@@ -248,9 +318,9 @@ public final class Ui {
 	 * x. The line is split over the two pixels it actually covers, so an arc
 	 * made of these reads as a curve instead of a staircase.
 	 */
-	private static void edgePixel(UiCanvas c, float x, int y, int color) {
+	private static void edgePixelBand(UiCanvas c, float x, int y, int height, int color) {
 		int alpha = color >>> 24;
-		if (alpha <= 0) {
+		if (alpha <= 0 || height <= 0) {
 			return;
 		}
 		int rgb = color & 0x00FFFFFF;
@@ -259,10 +329,10 @@ public final class Ui {
 		int left = Math.round(alpha * (1f - fraction));
 		int right = Math.round(alpha * fraction);
 		if (left > 0) {
-			c.fill(base, y, base + 1, y + 1, (left << 24) | rgb);
+			c.fill(base, y, base + 1, y + height, (left << 24) | rgb);
 		}
 		if (right > 0) {
-			c.fill(base + 1, y, base + 2, y + 1, (right << 24) | rgb);
+			c.fill(base + 1, y, base + 2, y + height, (right << 24) | rgb);
 		}
 	}
 
@@ -331,12 +401,15 @@ public final class Ui {
 		c.fill(x + r, y, x + w - r, y + h, color);
 		c.fill(x, y + r, x + r, y + h - r, color);
 		c.fill(x + w - r, y + r, x + w, y + h - r, color);
-		for (int i = 0; i < r; i++) {
+		// Shadows are soft and almost transparent, so their corners can be
+		// stepped in two pixel bands without any visible difference.
+		for (int i = 0; i < r; i += 2) {
 			int inset = cornerInset(r, i);
-			c.fill(x + inset, y + i, x + r, y + i + 1, color);
-			c.fill(x + w - r, y + i, x + w - inset, y + i + 1, color);
-			c.fill(x + inset, y + h - 1 - i, x + r, y + h - i, color);
-			c.fill(x + w - r, y + h - 1 - i, x + w - inset, y + h - i, color);
+			int band = Math.min(2, r - i);
+			c.fill(x + inset, y + i, x + r, y + i + band, color);
+			c.fill(x + w - r, y + i, x + w - inset, y + i + band, color);
+			c.fill(x + inset, y + h - i - band, x + r, y + h - i, color);
+			c.fill(x + w - r, y + h - i - band, x + w - inset, y + h - i, color);
 		}
 	}
 
@@ -367,8 +440,8 @@ public final class Ui {
 		int from = (int) Math.floor(center - halfWidth);
 		int to = (int) Math.ceil(center + halfWidth);
 		c.pushClip(ix, iy, iw, ih);
-		for (int col = from; col <= to; col++) {
-			float d = (col - center) / halfWidth;
+		for (int col = from; col <= to; col += 2) {
+			float d = (col + 0.5f - center) / halfWidth;
 			if (d <= -1f || d >= 1f) {
 				continue;
 			}
@@ -377,7 +450,7 @@ public final class Ui {
 			if (alpha <= 0) {
 				continue;
 			}
-			c.fill(ix + col, iy, ix + col + 1, iy + ih, (alpha << 24) | 0x00FFFFFF);
+			c.fill(ix + col, iy, ix + col + 2, iy + ih, (alpha << 24) | 0x00FFFFFF);
 		}
 		c.popClip();
 	}
@@ -387,7 +460,7 @@ public final class Ui {
 		if (w <= 0) {
 			return;
 		}
-		int edge = Math.min(w / 2, 20);
+		int edge = Math.min(w / 2, 12);
 		int baseAlpha = color >>> 24;
 		int rgb = color & 0x00FFFFFF;
 
@@ -416,15 +489,20 @@ public final class Ui {
 		if (alpha <= 0) {
 			return;
 		}
-		int shaded = (alpha << 24) | (color & 0x00FFFFFF);
-		for (int i = 0; i < h; i++) {
-			float t = h <= 1 ? 1f : i / (float) (h - 1);
+		int rgb = color & 0x00FFFFFF;
+		// The falloff is a smooth curve; a band every few rows samples it
+		// closely enough to be indistinguishable and keeps a full window glow
+		// at a few dozen submissions instead of hundreds.
+		int step = Math.max(1, h / 32);
+		for (int i = 0; i < h; i += step) {
+			int rows = Math.min(step, h - i);
+			float t = h <= 1 ? 0.5f : (i + rows * 0.5f) / (float) h;
 			float falloff = (float) Math.sin(t * Math.PI);
 			int a = Math.round(alpha * falloff);
 			if (a <= 0) {
 				continue;
 			}
-			c.fill(x, y + i, x + w, y + i + 1, (a << 24) | (color & 0x00FFFFFF));
+			c.fill(x, y + i, x + w, y + i + rows, (a << 24) | rgb);
 		}
 	}
 

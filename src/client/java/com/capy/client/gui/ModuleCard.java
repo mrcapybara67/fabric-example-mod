@@ -1,7 +1,10 @@
 package com.capy.client.gui;
 
+import com.capy.client.module.BlockListSetting;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.ChoiceSetting;
+import com.capy.client.module.ColorSetting;
+import com.capy.client.module.ListResult;
 import com.capy.client.module.Module;
 import com.capy.client.module.Setting;
 import com.capy.client.module.SliderSetting;
@@ -53,6 +56,9 @@ public class ModuleCard {
 	private final Map<BooleanSetting, String> switchLabels = new IdentityHashMap<>();
 	private final Map<SliderSetting, String> sliderUnits = new IdentityHashMap<>();
 	private final Map<WatchlistSetting, UiWatchlist> watchlists = new IdentityHashMap<>();
+	private final Map<BlockListSetting, UiWatchlist> blockLists = new IdentityHashMap<>();
+	private final Map<ColorSetting, UiColorPicker> pickers = new IdentityHashMap<>();
+	private final Map<ColorSetting, String> pickerLabels = new IdentityHashMap<>();
 
 	private final Anim hover = new Anim(0f, 14f);
 	private final Anim on = new Anim(0f, 18f);
@@ -98,6 +104,13 @@ public class ModuleCard {
 				choiceRowLabels.put(choice, settingLabel(choice.key()));
 			} else if (s instanceof WatchlistSetting watch) {
 				watchlists.put(watch, new UiWatchlist(new WatchlistModel(watch), settingLabel(watch.key())));
+			} else if (s instanceof BlockListSetting blocks) {
+				blockLists.put(blocks, new UiWatchlist(new BlockListModel(blocks), settingLabel(blocks.key()),
+						new UiWatchlist.Copy("Block id", "No blocks filtered yet",
+								"Not a known block", "Already filtered", "Filter is full")));
+			} else if (s instanceof ColorSetting color) {
+				pickers.put(color, new UiColorPicker(color));
+				pickerLabels.put(color, settingLabel(color.key()));
 			}
 		}
 	}
@@ -116,13 +129,37 @@ public class ModuleCard {
 		}
 
 		@Override
-		public WatchlistSetting.AddResult add(String name) {
+		public ListResult add(String name) {
 			return setting.add(name);
 		}
 
 		@Override
 		public boolean remove(String name) {
 			return setting.remove(name);
+		}
+	}
+
+	/** Bridges a block filter to the same editor. */
+	private static final class BlockListModel implements UiWatchlist.Model {
+		private final BlockListSetting setting;
+
+		BlockListModel(BlockListSetting setting) {
+			this.setting = setting;
+		}
+
+		@Override
+		public java.util.List<String> entries() {
+			return setting.entries();
+		}
+
+		@Override
+		public ListResult add(String value) {
+			return setting.add(value);
+		}
+
+		@Override
+		public boolean remove(String value) {
+			return setting.remove(value);
 		}
 	}
 
@@ -222,6 +259,14 @@ public class ModuleCard {
 		if (s instanceof WatchlistSetting watch) {
 			UiWatchlist ui = watchlists.get(watch);
 			return (ui == null ? 0 : ui.height()) + UiTheme.SP_3;
+		}
+		if (s instanceof BlockListSetting blocks) {
+			UiWatchlist ui = blockLists.get(blocks);
+			return (ui == null ? 0 : ui.height()) + UiTheme.SP_3;
+		}
+		if (s instanceof ColorSetting color) {
+			UiColorPicker picker = pickers.get(color);
+			return (picker == null ? UiColorPicker.ROW_H : picker.height()) + UiTheme.SP_3;
 		}
 		return 0;
 	}
@@ -470,6 +515,22 @@ public class ModuleCard {
 			return settingHeight(s);
 		}
 
+		if (s instanceof BlockListSetting blocks) {
+			UiWatchlist ui = blockLists.get(blocks);
+			ui.bind(contentX, rowY, contentW);
+			ui.render(c, regular, contentX, rowY, contentW, mouseX, mouseY, delta);
+			return settingHeight(s);
+		}
+
+		if (s instanceof ColorSetting color) {
+			UiColorPicker picker = pickers.get(color);
+			if (picker != null) {
+				picker.bind(contentX, rowY, contentW, pickerLabels.get(color));
+				picker.render(c, regular, mouseX, mouseY, delta);
+			}
+			return settingHeight(s);
+		}
+
 		return 0;
 	}
 
@@ -512,11 +573,19 @@ public class ModuleCard {
 		for (UiWatchlist ui : watchlists.values()) {
 			ui.clearFocus();
 		}
+		for (UiWatchlist ui : blockLists.values()) {
+			ui.clearFocus();
+		}
 	}
 
 	/** True while a text field inside the card owns the keyboard. */
 	public boolean hasTextInput() {
 		for (UiWatchlist ui : watchlists.values()) {
+			if (ui.isFocused()) {
+				return true;
+			}
+		}
+		for (UiWatchlist ui : blockLists.values()) {
 			if (ui.isFocused()) {
 				return true;
 			}
@@ -584,6 +653,16 @@ public class ModuleCard {
 				return true;
 			}
 		}
+		for (UiWatchlist ui : blockLists.values()) {
+			if (ui.mouseClicked(mx, my)) {
+				return true;
+			}
+		}
+		for (UiColorPicker picker : pickers.values()) {
+			if (picker.mouseClicked(mx, my)) {
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -592,7 +671,11 @@ public class ModuleCard {
 		for (UiSlider slider : sliders.values()) {
 			slider.dragged(mx);
 		}
-		return false;
+		boolean consumed = false;
+		for (UiColorPicker picker : pickers.values()) {
+			consumed |= picker.mouseDragged(mx);
+		}
+		return consumed;
 	}
 
 	/** Returns true if a card interaction finished (click or drag end). */
@@ -600,6 +683,9 @@ public class ModuleCard {
 		boolean hadPress = pressed;
 		for (UiSlider slider : sliders.values()) {
 			slider.released();
+		}
+		for (UiColorPicker picker : pickers.values()) {
+			picker.released();
 		}
 		pressed = false;
 		return hadPress;
@@ -612,12 +698,22 @@ public class ModuleCard {
 				return true;
 			}
 		}
+		for (UiWatchlist ui : blockLists.values()) {
+			if (ui.charTyped(event)) {
+				return true;
+			}
+		}
 		return false;
 	}
 
 	/** Routes key presses to the card's text fields. */
 	public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
 		for (UiWatchlist ui : watchlists.values()) {
+			if (ui.keyPressed(event)) {
+				return true;
+			}
+		}
+		for (UiWatchlist ui : blockLists.values()) {
 			if (ui.keyPressed(event)) {
 				return true;
 			}

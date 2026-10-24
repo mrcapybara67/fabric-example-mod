@@ -68,6 +68,15 @@ public final class AlertRenderer {
 
 	/** Gap between the name line and the sign-off. */
 	private static final int LINE_GAP = 12;
+	/**
+	 * The middle-of-the-screen wording is red for every alert kind.
+	 *
+	 * The notification in the corner stays on the theme palette, but this is
+	 * the line that has to be impossible to miss while the player is fighting:
+	 * red reads as a warning before the words are even parsed, which the pink
+	 * accent never did.
+	 */
+	private static final int ALERT_RED = 0xFFFF3B3B;
 
 	private AlertRenderer() {
 	}
@@ -96,7 +105,11 @@ public final class AlertRenderer {
 		float fall = (float) Math.pow(t, 1.6);
 
 		int base = Math.min(screenW, screenH);
-		int size = Math.max(96, Math.min(260, Math.round(base * 0.42f)));
+		// A touch larger than the old portrait: the guardian face is the part
+		// that makes the alert unmistakable, but growing it much would start
+		// to swallow the screen it is supposed to warn about. Half the short
+		// side reads as deliberately imposing without covering the world.
+		int size = Math.max(104, Math.min(300, Math.round(base * 0.50f)));
 		// Vanilla's head shrinks a little as it pitches away.
 		int drawSize = Math.round(size * (1f - 0.10f * t));
 
@@ -148,12 +161,12 @@ public final class AlertRenderer {
 			};
 			String line = pattern.replace("%s", alert.username());
 			drawShadowedCentered(c, nameFont, line, screenW / 2, top, maxWidth,
-					Ui.withAlpha(UiTheme.TEXT, Math.round(255f * nameAlpha)));
+					Ui.withAlpha(ALERT_RED, Math.round(255f * nameAlpha)));
 		}
 		if (signOffAlpha > 0.01f) {
 			drawShadowedCentered(c, signOffFont, LABEL_SIGN_OFF, screenW / 2,
 					top + nameFont.lineHeight() + LINE_GAP,
-					maxWidth, Ui.withAlpha(UiTheme.ACCENT, Math.round(255f * signOffAlpha)));
+					maxWidth, Ui.withAlpha(ALERT_RED, Math.round(255f * signOffAlpha)));
 		}
 	}
 
