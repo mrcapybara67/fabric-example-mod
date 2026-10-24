@@ -1,6 +1,1 @@
-{
-  "model": {
-    "type": "minecraft:model",
-    "model": "capy:item/knife/kukri_wooden"
-  }
-}
+{"model":{"type":"minecraft:model","model":"capy:item/knife/kukri_wooden"}}

@@ -1,6 +1,1 @@
-{
-  "model": {
-    "type": "minecraft:model",
-    "model": "capy:item/knife/stiletto_iron"
-  }
-}
+{"model":{"type":"minecraft:model","model":"capy:item/knife/stiletto_iron"}}

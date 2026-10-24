@@ -36,17 +36,39 @@ public final class UiIcons {
 	/**
 	 * Draws the chevron rotated between 0 (pointing right, collapsed) and
 	 * 1 (pointing down, expanded) by {@code openness}.
+	 *
+	 * It is two solid arms, not two columns of single pixels: at twelve pixels
+	 * a one-pixel arm reads as three stray dots, which is what the expander
+	 * looked like before.
 	 */
 	public static void chevron(UiCanvas c, int x, int y, int size, int color, float openness) {
+		float t = Math.max(0f, Math.min(1f, openness));
 		int cx = x + size / 2;
 		int cy = y + size / 2;
 		int half = Math.max(2, size / 2 - 1);
-		int rows = Math.max(1, half);
-		for (int i = 0; i < rows; i++) {
-			int spread = Math.round(half * (1f - openness));
-			int dy = Math.round((i - (rows - 1) / 2f) * (0.6f + openness));
-			c.fill(cx - spread, cy + dy, cx - spread + 1, cy + dy + 1, color);
-			c.fill(cx + spread - 1, cy + dy, cx + spread, cy + dy + 1, color);
+
+		// The shape is a V that pivots about its top-left corner: collapsed it
+		// points right, expanded it points down. Only the joint and the free
+		// end move, which is what makes the transition read as one rotation.
+		int lx = cx - half + 1;
+		int ly = cy - half + 1;
+		int jointX = Math.round((cx + half - 2) * (1f - t) + cx * t);
+		int jointY = Math.round(cy * (1f - t) + (cy + half - 2) * t);
+		int endX = Math.round((lx) * (1f - t) + (cx + half - 1) * t);
+		int endY = Math.round((cy + half - 1) * (1f - t) + ly * t);
+
+		arm(c, jointX, jointY, lx, ly, color);
+		arm(c, jointX, jointY, endX, endY, color);
+	}
+
+	/** A two-pixel thick line, drawn one step at a time so it stays crisp. */
+	private static void arm(UiCanvas c, int x0, int y0, int x1, int y1, int color) {
+		int steps = Math.max(1, Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)));
+		int thickness = 2;
+		for (int i = 0; i <= steps; i++) {
+			int px = x0 + Math.round((x1 - x0) * (i / (float) steps));
+			int py = y0 + Math.round((y1 - y0) * (i / (float) steps));
+			c.fill(px, py, px + thickness, py + thickness, color);
 		}
 	}
 

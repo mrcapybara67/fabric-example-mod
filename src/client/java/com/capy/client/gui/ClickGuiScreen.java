@@ -1,8 +1,7 @@
 package com.capy.client.gui;
 
 import com.capy.client.config.ClientConfig;
-import net.minecraft.client.KeyMapping;
-import net.minecraft.client.Minecraft;
+import com.capy.client.keybind.ClientKeybinds;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
@@ -197,6 +196,19 @@ public class ClickGuiScreen extends Screen {
 		closingAt = System.nanoTime();
 	}
 
+	/**
+	 * True once the outro has finished and the screen has closed itself.
+	 *
+	 * The tick listener checks this and detaches the screen if it is somehow
+	 * still attached. That is the last line of defence against the one failure
+	 * mode this screen must never have: a screen that paints nothing but keeps
+	 * swallowing every key and click, which the player experiences as a frozen
+	 * game.
+	 */
+	public boolean isFinished() {
+		return finished;
+	}
+
 	/** Called once, from the tick, after the outro finished. */
 	private void finishClose() {
 		if (finished) {
@@ -205,30 +217,11 @@ public class ClickGuiScreen extends Screen {
 		finished = true;
 		ClientConfig.saveNow();
 		super.onClose();
-		restoreGameInput();
-	}
-
-	/**
-	 * Hands the keyboard and the mouse back to the game.
-	 *
-	 * Vanilla does most of this in {@code setScreen(null)}: it grabs the mouse
-	 * again and, while doing so, re-reads the physical keyboard into the key
-	 * mappings, because opening a screen released every one of them. Both steps
-	 * are skipped when the window happens to be unfocused at that instant, and
-	 * the result is indistinguishable from a frozen player - the movement keys
-	 * stay released even while they are held. Retrying here is a no-op when
-	 * vanilla already did it and keeps the player from being stuck when it did
-	 * not.
-	 */
-	private void restoreGameInput() {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc == null || mc.level == null || mc.player == null || mc.screen != null) {
-			return;
-		}
-		if (!mc.mouseHandler.isMouseGrabbed()) {
-			mc.mouseHandler.grabMouse();
-		}
-		KeyMapping.setAll();
+		// Vanilla re-grabs the mouse and restores the *toggle* keys, but it does
+		// not read a held movement key back into its mapping, and it skips the
+		// mouse entirely when the window is not focused. The restore is done
+		// from the tick, where it can be retried until it actually worked.
+		ClientKeybinds.requestInputRestore();
 	}
 
 	@Override

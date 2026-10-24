@@ -134,8 +134,8 @@ public final class Preview {
 				"CookieAdmin", "CookieAdmin", 12.4, 0L, null);
 		AdminAlert alert = new AdminAlert(match, AdminAlert.Kind.NEARBY,
 				System.currentTimeMillis() - at);
-		AlertRenderer.renderFaceAlert(canvas, type.medium(), type.display(), null, w, h, alert);
-		AlertRenderer.renderNotification(canvas, type.regular(), type.medium(), w, h, alert,
+		AlertRenderer.renderFaceAlert(canvas, type, null, w, h, alert);
+		AlertRenderer.renderNotification(canvas, type, w, h, alert,
 				alert.alpha(System.currentTimeMillis()));
 		ImageIO.write(canvas.image(), "png", file.toFile());
 	}
@@ -241,6 +241,7 @@ public final class Preview {
 		private final SwingText medium;
 		private final SwingText bold;
 		private final SwingText display;
+		private final SwingText headline;
 
 		SwingType() throws Exception {
 			BufferedImage probe = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
@@ -249,6 +250,7 @@ public final class Preview {
 			this.medium = new SwingText(load("inter-500.ttf", 9f), g);
 			this.bold = new SwingText(load("inter-600.ttf", 9f), g);
 			this.display = new SwingText(load("inter-700.ttf", 12f), g);
+			this.headline = new SwingText(load("inter-700.ttf", 17f), g);
 		}
 
 		private static Font load(String name, float size) throws Exception {
@@ -275,6 +277,11 @@ public final class Preview {
 		@Override
 		public UiText display() {
 			return display;
+		}
+
+		@Override
+		public UiText headline() {
+			return headline;
 		}
 	}
 }

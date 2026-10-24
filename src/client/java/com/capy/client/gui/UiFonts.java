@@ -30,11 +30,12 @@ import org.slf4j.LoggerFactory;
  * (SIL Open Font License) rendered through the same TrueType pipeline vanilla
  * uses for its own fonts.
  *
- * Vector-smooth grotesque letterforms in four static weights:
- *   regular() = Inter 400 — body text, descriptions, values
- *   medium()  = Inter 500 — module names, labels
- *   bold()    = Inter 600 — headings, emphasised values
- *   display() = Inter 700 at a larger size — wordmark, alert headline
+ * Vector-smooth grotesque letterforms in five static cuts:
+ *   regular()  = Inter 400 — body text, descriptions, values
+ *   medium()   = Inter 500 — module names, labels
+ *   bold()     = Inter 600 — headings, emphasised values
+ *   display()  = Inter 700 at a larger size — wordmark, alert headline
+ *   headline() = Inter 700, larger again — the Anti Admin alert
  *
  * Why the fonts are opened directly instead of going through
  * {@code TrueTypeGlyphProviderDefinition}: that definition resolves its
@@ -59,6 +60,12 @@ public final class UiFonts {
 	private static final float SIZE = 9.0f;
 	/** Size of the display weight used for the wordmark and alert headlines. */
 	private static final float DISPLAY_SIZE = 12.0f;
+	/**
+	 * Size of the headline weight. Large on purpose: the Anti Admin alert is
+	 * the one piece of text in the client that has to be read instantly, from
+	 * the middle of the screen, without stopping to look at it.
+	 */
+	private static final float HEADLINE_SIZE = 17.0f;
 	private static final float OVERSAMPLE = 2.0f;
 
 	/** Bundle-relative path of each static weight. */
@@ -72,12 +79,14 @@ public final class UiFonts {
 	private static FontSet setMedium;
 	private static FontSet setBold;
 	private static FontSet setDisplay;
+	private static FontSet setHeadline;
 	/** Strong references to the loaded providers: each owns a native FT_Face. */
 	private static List<GlyphProvider> providers = List.of();
 	private static Font regular;
 	private static Font medium;
 	private static Font bold;
 	private static Font display;
+	private static Font headline;
 	private static boolean initializing;
 	private static boolean failed;
 	private static int attempts;
@@ -104,6 +113,25 @@ public final class UiFonts {
 	public static Font display() {
 		ensureCreated();
 		return display;
+	}
+
+	/** The largest weight, used only by the Anti Admin alert. */
+	public static Font headline() {
+		ensureCreated();
+		return headline;
+	}
+
+	/**
+	 * Builds the bundled faces ahead of the first frame that needs them.
+	 *
+	 * The faces are rasterised into a GPU texture, so creating them in the
+	 * middle of a frame - which is what the lazy path did the first time the
+	 * GUI or the HUD asked for a font - means uploading a texture while a draw
+	 * batch is open. Calling this from the tick moves that work to a moment
+	 * where nothing is being drawn. It is idempotent and cheap once loaded.
+	 */
+	public static void warmUp() {
+		ensureCreated();
 	}
 
 	/**
@@ -133,17 +161,24 @@ public final class UiFonts {
 			loaded.add(loadFromBundle(MEDIUM_TTF, SIZE));
 			loaded.add(loadFromBundle(BOLD_TTF, SIZE));
 			loaded.add(loadFromBundle(BOLD_TTF, DISPLAY_SIZE));
+			loaded.add(loadFromBundle(BOLD_TTF, HEADLINE_SIZE));
 			providers = List.copyOf(loaded);
 
 			setRegular = buildSet(mc, "regular", loaded.get(0));
 			setMedium = buildSet(mc, "medium", loaded.get(1));
 			setBold = buildSet(mc, "bold", loaded.get(2));
-			setDisplay = buildSet(mc, "display", loaded.get(3));
+			// Index 3 is the 9 px bold face; the display and headline cut are the
+			// two larger rasterisations that follow it. Keeping the display face
+			// on the 9 px entry was why the in-game wordmark was smaller than the
+			// preview: the preview always used 12 px.
+			setDisplay = buildSet(mc, "display", loaded.get(4));
+			setHeadline = buildSet(mc, "headline", loaded.get(5));
 
 			regular = fontFor(setRegular);
 			medium = fontFor(setMedium);
 			bold = fontFor(setBold);
 			display = fontFor(setDisplay);
+			headline = fontFor(setHeadline);
 		} catch (Throwable t) {
 			// Loud on purpose: a silent fallback is impossible to tell apart
 			// from shipping the wrong font. The load is retried, because the

@@ -92,8 +92,11 @@ public final class UiTheme {
 			0xFFFFEAF1,
 			0xFFFFF4F8,
 			0xFFBBAAB7,
-			0xFF8A7A88,
-			0xFF7B6B7A,
+			// Muted text is used for every description in the interface. It was
+			// two contrast steps below the body text, which made the interface
+			// look softer than it read; this keeps it quiet but legible.
+			0xFF9C8C99,
+			0xFF8C7C8A,
 			0xFF3A0F22
 	);
 
@@ -123,8 +126,8 @@ public final class UiTheme {
 			0xFFFFE2EE,
 			0xFFFFF4F8,
 			0xFFBBAAB7,
-			0xFF877787,
-			0xFF786879,
+			0xFF99899A,
+			0xFF8A7A8B,
 			0xFF36091F
 	);
 
@@ -154,8 +157,8 @@ public final class UiTheme {
 			0xFFFFEFF5,
 			0xFFFFF6FA,
 			0xFFC7B4C2,
-			0xFF95838F,
-			0xFF857381,
+			0xFFA795A2,
+			0xFF978593,
 			0xFF401327
 	);
 

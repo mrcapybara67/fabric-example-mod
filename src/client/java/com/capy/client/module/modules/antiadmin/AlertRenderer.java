@@ -6,6 +6,7 @@ import com.capy.client.gui.UiIcons;
 import com.capy.client.gui.UiLabels;
 import com.capy.client.gui.UiText;
 import com.capy.client.gui.UiTheme;
+import com.capy.client.gui.UiType;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.world.entity.player.PlayerSkin;
@@ -66,20 +67,20 @@ public final class AlertRenderer {
 			UiLabels.translate("capy.alert.hidden_tag_title", "WATCHLIST PLAYER NAMETAG HIDDEN");
 
 	/** Gap between the name line and the sign-off. */
-	private static final int LINE_GAP = 10;
+	private static final int LINE_GAP = 12;
 
 	private AlertRenderer() {
 	}
 
 	/** Draws the guardian style face effect and then the wording. */
-	public static void renderFaceAlert(UiCanvas c, UiText medium, UiText display,
-			GuiGraphics graphics, int screenW, int screenH, AdminAlert alert) {
+	public static void renderFaceAlert(UiCanvas c, UiType type, GuiGraphics graphics,
+			int screenW, int screenH, AdminAlert alert) {
 		long now = System.currentTimeMillis();
 		if (alert.alpha(now) <= 0.01f) {
 			return;
 		}
 		renderFace(c, graphics, screenW, screenH, alert, now);
-		renderWording(c, medium, display, screenW, screenH, alert, now);
+		renderWording(c, type, screenW, screenH, alert, now);
 	}
 
 	// ------------------------------------------------------------------ face
@@ -116,17 +117,22 @@ public final class AlertRenderer {
 
 	// --------------------------------------------------------------- wording
 
-	private static void renderWording(UiCanvas c, UiText medium, UiText display,
+	private static void renderWording(UiCanvas c, UiType type,
 			int screenW, int screenH, AdminAlert alert, long now) {
 		float nameAlpha = alert.nameAlpha(now);
 		float signOffAlpha = alert.signOffAlpha(now);
 		if (nameAlpha <= 0.01f && signOffAlpha <= 0.01f) {
 			return;
 		}
+		// The headline is the interface's largest face. This wording is the one
+		// thing on screen the player has to read without looking for it, so it
+		// is deliberately much bigger than the rest of the HUD.
+		UiText nameFont = type.headline();
+		UiText signOffFont = type.display();
 
 		// The block is centred where the face was, so the eye stays in one
 		// place through the whole sequence.
-		int blockH = display.lineHeight() + LINE_GAP + medium.lineHeight();
+		int blockH = nameFont.lineHeight() + LINE_GAP + signOffFont.lineHeight();
 		int top = Math.round(screenH * 0.44f) - blockH / 2;
 		int maxWidth = Math.max(40, screenW - 48);
 
@@ -141,11 +147,12 @@ public final class AlertRenderer {
 				case NEARBY -> LABEL_WATCHING;
 			};
 			String line = pattern.replace("%s", alert.username());
-			drawShadowedCentered(c, display, line, screenW / 2, top, maxWidth,
+			drawShadowedCentered(c, nameFont, line, screenW / 2, top, maxWidth,
 					Ui.withAlpha(UiTheme.TEXT, Math.round(255f * nameAlpha)));
 		}
 		if (signOffAlpha > 0.01f) {
-			drawShadowedCentered(c, medium, LABEL_SIGN_OFF, screenW / 2, top + display.lineHeight() + LINE_GAP,
+			drawShadowedCentered(c, signOffFont, LABEL_SIGN_OFF, screenW / 2,
+					top + nameFont.lineHeight() + LINE_GAP,
 					maxWidth, Ui.withAlpha(UiTheme.ACCENT, Math.round(255f * signOffAlpha)));
 		}
 	}
@@ -195,7 +202,7 @@ public final class AlertRenderer {
 	 * at fixed offsets, so the title and the name line up on the same left
 	 * edge whatever the fonts resolve to.
 	 */
-	public static void renderNotification(UiCanvas c, UiText regular, UiText medium, int screenW, int screenH,
+	public static void renderNotification(UiCanvas c, UiType type, int screenW, int screenH,
 			AdminAlert alert, float alpha) {
 		if (alpha <= 0.01f) {
 			return;
@@ -215,8 +222,13 @@ public final class AlertRenderer {
 		// ghost does, because the position was remembered before they went.
 		String detail = alert.detailText();
 		String name = detail.isEmpty() ? alert.username() : alert.username() + "  ·  " + detail;
-		int w = Math.max(medium.width(title), regular.width(name)) + 52;
-		int h = 42;
+		// Both lines are one step larger than the old SMALL/MEDIUM pair. The
+		// corner notification is a secondary cue, but it still has to be
+		// readable while the player is fighting, not only in a screenshot.
+		UiText titleFont = type.display();
+		UiText nameFont = type.medium();
+		int w = Math.max(titleFont.width(title), nameFont.width(name)) + 56;
+		int h = 48;
 		int slide = Math.round((1f - alpha) * 14f);
 		int x = screenW - w - 12 - slide;
 		int y = 12;
@@ -227,15 +239,15 @@ public final class AlertRenderer {
 				Ui.withAlpha(UiTheme.PANEL_TOP, Math.round(240 * alpha)));
 		Ui.outline(c, x, y, w, h, UiTheme.RADIUS, Ui.withAlpha(accent, Math.round(170 * alpha)));
 
-		int iconSize = 16;
-		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, x + 11, y + (h - iconSize) / 2, iconSize,
+		int iconSize = 18;
+		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, x + 12, y + (h - iconSize) / 2, iconSize,
 				Ui.withAlpha(accent, Math.round(240 * alpha)));
 
-		int textX = x + 34;
+		int textX = x + 38;
 		int rowH = h / 2;
-		Ui.drawEllipsized(c, medium, title, textX, Ui.centerTextY(y, rowH, medium), w - 44,
+		Ui.drawEllipsized(c, titleFont, title, textX, Ui.centerTextY(y, rowH, titleFont), w - 48,
 				Ui.withAlpha(accent, Math.round(240 * alpha)));
-		Ui.drawEllipsized(c, regular, name, textX, Ui.centerTextY(y + rowH, rowH, regular), w - 44,
+		Ui.drawEllipsized(c, nameFont, name, textX, Ui.centerTextY(y + rowH, rowH, nameFont), w - 48,
 				Ui.withAlpha(UiTheme.TEXT, Math.round(240 * alpha)));
 	}
 

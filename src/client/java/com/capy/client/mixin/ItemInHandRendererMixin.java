@@ -1,7 +1,8 @@
 package com.capy.client.mixin;
 
-import com.capy.client.module.modules.knife.KnifeInspect;
+import com.capy.client.module.modules.knife.KnifePose;
 import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.ItemInHandRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.world.entity.LivingEntity;
@@ -13,32 +14,46 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Wraps the item draw in the first person hand with the inspect flourish.
+ * Feeds the knife pose system from the first person hand renderer.
  *
- * {@code ItemInHandRenderer.renderItem} is the point where the pose stack is
- * already in hand space (the arm transform has been applied) and the item has
- * not been submitted yet, so a transform pushed here rotates the knife about
- * the hand - exactly the pivot a flourish needs. The display transform that
- * makes a knife sit in the hand is applied further down, inside the render
- * state, so it composes with this one and is not disturbed.
+ * Two hooks, and they are deliberately separate:
+ *
+ *  - {@code renderHandsWithItems} runs once per frame with the local player and
+ *    the same partial tick vanilla uses for the arm swing. Sampling the attack
+ *    animation there is what keeps our swing on exactly the same clock as the
+ *    arm, and it is the only sample that is interpolated correctly.
+ *
+ *  - {@code renderItem} is the point where the pose stack is already in hand
+ *    space (the arm transform has been applied) and the item has not been
+ *    submitted yet, so a transform pushed here moves and turns the knife about
+ *    the fist - exactly the space the stance, the swing and the flourish need.
+ *    The display transform that makes a knife sit in the hand is applied
+ *    further down, inside the render state, so it composes with this one and is
+ *    not disturbed.
  *
  * The pose is pushed at HEAD and popped at RETURN, which is safe because
- * {@code renderItem} has only two exits (an empty stack, and the normal end)
- * and RETURN covers both.
+ * {@code renderItem} has only two exits (an empty stack, and the normal end) and
+ * RETURN covers both.
  */
 @Mixin(ItemInHandRenderer.class)
 public class ItemInHandRendererMixin {
+	@Inject(method = "renderHandsWithItems", at = @At("HEAD"))
+	private void capy$knifeFrame(float partialTick, PoseStack pose, SubmitNodeCollector collector,
+			LocalPlayer player, int light, CallbackInfo ci) {
+		KnifePose.frame(player, partialTick);
+	}
+
 	@Inject(method = "renderItem", at = @At("HEAD"))
-	private void capy$inspectBegin(LivingEntity entity, ItemStack stack,
+	private void capy$knifeBegin(LivingEntity entity, ItemStack stack,
 			ItemDisplayContext context, PoseStack pose, SubmitNodeCollector collector,
 			int light, CallbackInfo ci) {
-		KnifeInspect.begin(pose, entity, stack, context);
+		KnifePose.begin(pose, entity, stack, context);
 	}
 
 	@Inject(method = "renderItem", at = @At("RETURN"))
-	private void capy$inspectEnd(LivingEntity entity, ItemStack stack,
+	private void capy$knifeEnd(LivingEntity entity, ItemStack stack,
 			ItemDisplayContext context, PoseStack pose, SubmitNodeCollector collector,
 			int light, CallbackInfo ci) {
-		KnifeInspect.end(pose);
+		KnifePose.end(pose);
 	}
 }

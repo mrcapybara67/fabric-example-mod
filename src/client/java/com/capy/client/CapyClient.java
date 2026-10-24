@@ -2,6 +2,7 @@ package com.capy.client;
 
 import com.capy.client.config.ClientConfig;
 import com.capy.client.gui.ClickGuiScreen;
+import com.capy.client.gui.UiFonts;
 import com.capy.client.gui.UiTheme;
 import com.capy.client.keybind.ClientKeybinds;
 import com.capy.client.module.Module;
@@ -58,12 +59,26 @@ public class CapyClient implements ClientModInitializer {
 
 		// One tick listener drives the keybind and every tickable module.
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			// Build the bundled faces outside a frame. The lazy path would
+			// otherwise upload a font texture in the middle of the first GUI or
+			// HUD draw, which is the worst possible moment for it.
+			UiFonts.warmUp();
 			// The click counter is drained every tick, so a press that happens
 			// while a screen is open is dropped instead of queued.
 			boolean clicked = ClientKeybinds.consumeOpenGuiClick();
 			if (clicked && client.screen == null) {
 				client.setScreen(new ClickGuiScreen());
 			}
+			// A finished window must never stay attached: a screen that has
+			// played its outro but is still set would keep swallowing every
+			// key and click while painting nothing.
+			if (client.screen instanceof ClickGuiScreen gui && gui.isFinished()) {
+				client.setScreen(null);
+				ClientKeybinds.requestInputRestore();
+			}
+			// Hands the mouse and the held keys back after the GUI closes,
+			// retrying while the window is unfocused.
+			ClientKeybinds.tickInputRestore(client);
 			// The inspect key is drained every tick for the same reason, and
 			// only acted on while the player is actually in the world.
 			boolean inspect = ClientKeybinds.consumeInspectClick();

@@ -6,7 +6,7 @@ import com.capy.client.module.Category;
 import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
-import com.capy.client.module.modules.knife.KnifeInspect;
+import com.capy.client.module.modules.knife.KnifePose;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.component.DataComponents;
@@ -36,7 +36,12 @@ import net.minecraft.world.item.Items;
  * like netherite.
  *
  * Holding the inspect key (C by default, rebindable in Controls) plays a short
- * flourish in first person; each style has its own. See {@link KnifeInspect}.
+ * flourish in first person; each style has its own. See {@link KnifePose}.
+ *
+ * The same class also owns how each style sits in the hand and how it swings:
+ * a karambit rests in a reverse grip below the fist, a cleaver chops, a
+ * stiletto thrusts. That work is done in hand space by a mixin into the first
+ * person item renderer, so it stays pure presentation.
  *
  * Scope: only the local player's own items are changed. {@code owner} is the
  * entity the item is being rendered for, so another player's sword is left
@@ -103,10 +108,21 @@ public class CustomKnifeModule extends Module implements Configurable {
 		return inspect.value();
 	}
 
-	/** True when the given stack is one this module would draw as a knife. */
+	/**
+	 * True when the given stack is one this module draws as a knife.
+	 *
+	 * Deliberately independent of the "inspect animation" setting: that setting
+	 * only governs the on demand flourish. The stance and the swing belong to
+	 * the knife itself, so turning the flourish off must not turn the karambit
+	 * back into a sword held blade up.
+	 */
+	public boolean armed(ItemStack stack) {
+		return isEnabled() && stack != null && !stack.isEmpty() && stack.is(ItemTags.SWORDS);
+	}
+
+	/** True when the inspect flourish may be played for the given stack. */
 	public boolean inspectReady(ItemStack stack) {
-		return isEnabled() && inspect.value()
-				&& stack != null && !stack.isEmpty() && stack.is(ItemTags.SWORDS);
+		return armed(stack) && inspect.value();
 	}
 
 	/**
@@ -124,7 +140,10 @@ public class CustomKnifeModule extends Module implements Configurable {
 		if (mc == null || mc.player == null || !inspectReady(mc.player.getMainHandItem())) {
 			return;
 		}
-		KnifeInspect.start(styleId());
+		// The flourish is started for the style the player is holding, which is
+		// also the style the renderer will pose. Both read the same setting, so
+		// they cannot disagree if it changes mid animation.
+		KnifePose.start(styleId());
 	}
 
 	/** The selected style id, for the model path and the config file. */

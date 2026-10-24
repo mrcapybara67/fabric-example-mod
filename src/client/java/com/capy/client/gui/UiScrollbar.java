@@ -110,8 +110,14 @@ public class UiScrollbar {
 			return;
 		}
 		int w = 4;
+		// The rail is the whole travel, very faint. It tells the eye how much
+		// of the list is on screen, which a floating thumb alone cannot.
+		Ui.surface(c, railX, trackY, w, trackH, UiTheme.RADIUS_PILL, 0x14FFFFFF, 0x0DFFFFFF);
+		// A soft bloom behind the thumb, so it reads as lit rather than painted.
+		Ui.roundRect(c, railX - 2, thumbY - 2, w + 4, thumbH + 4, UiTheme.RADIUS_PILL,
+				Ui.withAlpha(UiTheme.ACCENT, 0x1F));
 		Ui.surface(c, railX, thumbY, w, thumbH, UiTheme.RADIUS_PILL,
-				Ui.withAlpha(UiTheme.ACCENT, 0x9A), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x8C));
+				Ui.withAlpha(UiTheme.ACCENT, 0xB4), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0xA0));
 		Ui.surfaceEdge(c, railX, thumbY, w, thumbH, UiTheme.RADIUS_PILL, 0x4DFFFFFF, 0x1AFFFFFF);
 	}
 

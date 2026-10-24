@@ -337,6 +337,10 @@ public final class GuiFrame {
 		Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());
 		Ui.outline(c, wx, wy, ww, wh, r, UiTheme.BORDER);
 		Ui.innerBevel(c, wx, wy, ww, wh, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
+		// One accent hairline along the top edge. It is the only place the shell
+		// itself is allowed to glow, which gives the window a lit edge instead
+		// of a uniform frame.
+		Ui.surface(c, wx + r, wy + 1, ww - r * 2, 1, 0, Ui.withAlpha(UiTheme.ACCENT, 0x4D));
 
 		// The accent reveal: a soft pink light sweeps down over the window
 		// while it opens.
@@ -427,7 +431,16 @@ public final class GuiFrame {
 				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
 		Ui.outline(c, bx, by, UiTheme.CLOSE_BTN, UiTheme.CLOSE_BTN, UiTheme.RADIUS,
 				hovered ? UiTheme.ACCENT : UiTheme.BORDER);
+		if (hovered) {
+			Ui.glow(c, bx - 5, by - 5, UiTheme.CLOSE_BTN + 10, UiTheme.CLOSE_BTN + 10,
+					UiTheme.ACCENT, 0.20f);
+		}
 		UiIcons.draw(c, UiIcons.Icon.CLOSE, bx + 9, by + 9, 8, hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+
+		// A hairline closes the header band, so the wordmark reads as a title
+		// bar rather than as text floating on the shell.
+		Ui.fadeLine(c, wx + UiTheme.SP_5, wy + UiTheme.HEADER_H - 1,
+				ww - UiTheme.SP_5 * 2, Ui.withAlpha(UiTheme.BORDER, 0xA6));
 	}
 
 	private int searchX(int wx, int ww) {
@@ -521,13 +534,15 @@ public final class GuiFrame {
 		themePicker.bind(sx0 + UiTheme.SP_2, pickerY, sw - UiTheme.SP_4, THEME_PICKER_H, true);
 		themePicker.render(c, type.regular(), mouseX, mouseY, delta);
 
-		// Keybind hint.
+		// Keybind hint. Escape always works, so it is named next to the
+		// player's own binding instead of being discoverable only by trying it.
 		String hint = ClientKeybinds.openClickGui() == null
 				? "?"
 				: ClientKeybinds.openClickGui().getTranslatedKeyMessage().getString();
 		int hintY = Ui.textYFromBottom(py + ph, UiTheme.SP_5, type.regular());
 		int hintX = sx0 + UiTheme.SP_3;
-		Ui.drawEllipsized(c, type.regular(), hint + "  to close", hintX, hintY, sw - UiTheme.SP_4, UiTheme.TEXT_3);
+		Ui.drawEllipsized(c, type.regular(), hint + " / ESC to close", hintX, hintY,
+				sw - UiTheme.SP_4, UiTheme.TEXT_3);
 		boolean hintHovered = mouseX >= hintX && mouseX < hintX + sw - UiTheme.SP_4
 				&& mouseY >= hintY - 2 && mouseY < hintY + type.regular().lineHeight() + 2;
 		if (hintHovered) {
@@ -552,10 +567,22 @@ public final class GuiFrame {
 		UiText bold = type.bold();
 		UiText meta = type.regular();
 		String title = showCategory ? "Search results" : CATEGORIES[selected].title;
-		Ui.drawEllipsized(c, bold, title, cx, Ui.centerTextY(top, headerH, bold), cw - 60, UiTheme.TEXT);
-		Ui.drawRightAligned(c, meta,
-				list.size() + (list.size() == 1 ? " module" : " modules"),
-				cx + cw, Ui.centerTextY(top, headerH, meta), UiTheme.TEXT_3);
+		// The module count is a pill, not loose text: it is metadata about the
+		// page, and a small surface is what makes that read as metadata. It is
+		// measured before the title is drawn, so the title is trimmed against
+		// the pill instead of against a guessed width.
+		String countLabel = list.size() + (list.size() == 1 ? " module" : " modules");
+		int pillH = Math.max(14, meta.lineHeight() + 6);
+		int pillW = meta.width(countLabel) + 14;
+		int pillX = cx + cw - pillW;
+		int pillY = top + (headerH - pillH) / 2 - 2;
+		int titleRoom = Math.max(0, pillX - cx - UiTheme.SP_4);
+		Ui.drawEllipsized(c, bold, title, cx, Ui.centerTextY(top, headerH, bold), titleRoom, UiTheme.TEXT);
+		Ui.surface(c, pillX, pillY, pillW, pillH, pillH / 2,
+				Ui.withAlpha(UiTheme.PANEL_ALT, 0xB8), Ui.withAlpha(UiTheme.PANEL_TOP, 0x94));
+		Ui.outline(c, pillX, pillY, pillW, pillH, pillH / 2, Ui.withAlpha(UiTheme.BORDER, 0x8C));
+		Ui.drawCentered(c, meta, countLabel, pillX + pillW / 2,
+				pillY + (pillH - meta.lineHeight()) / 2, UiTheme.TEXT_3);
 		// A delicate line under the section header.
 		Ui.fadeLine(c, cx, top + headerH - 6, cw, Ui.withAlpha(UiTheme.BORDER, 0xC0));
 
@@ -736,7 +763,9 @@ public final class GuiFrame {
 		// Cards.
 		int cx = contentX();
 		int cw = contentW();
-		int listTop = contentTop() + 26;
+		// The same header height the renderer uses, so a click can never land
+		// one row off when the header changes.
+		int listTop = contentTop() + SECTION_HEADER_H;
 		if (mx >= cx && mx < cx + cw && my >= listTop && my < contentBottom()) {
 			List<ModuleCard> list = visibleCards();
 			for (int i = list.size() - 1; i >= 0; i--) {
@@ -803,6 +832,15 @@ public final class GuiFrame {
 	 * text field owns the keyboard.
 	 */
 	public boolean keyPressed(KeyEvent event) {
+		// Escape always closes, even while the search field has the keyboard.
+		// It used to be swallowed by the field first, so the first Escape only
+		// blurred the field and the window stayed open over a frozen world -
+		// which reads as "the GUI will not close".
+		if (event.isEscape()) {
+			clearAllTextFocus();
+			closeRequested = true;
+			return true;
+		}
 		if (!hasTextInput() && ClientKeybinds.openClickGui() != null
 				&& ClientKeybinds.openClickGui().matches(event)) {
 			closeRequested = true;
@@ -842,6 +880,12 @@ public final class GuiFrame {
 				card.clearTextInput();
 			}
 		}
+	}
+
+	/** Drops the keyboard focus of every field, including the search box. */
+	private void clearAllTextFocus() {
+		search.setFocused(false);
+		clearCardTextFocus();
 	}
 
 	// ----------------------------------------------------------------- theme

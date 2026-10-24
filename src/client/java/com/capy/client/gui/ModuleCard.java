@@ -57,6 +57,8 @@ public class ModuleCard {
 	private final Anim hover = new Anim(0f, 14f);
 	private final Anim on = new Anim(0f, 18f);
 	private final Anim expand = new Anim(0f, 16f);
+	/** Eased press, so a click darkens the card instead of snapping it. */
+	private final Anim press = new Anim(0f, 26f);
 	private boolean expanded;
 	private boolean pressed;
 
@@ -187,6 +189,7 @@ public class ModuleCard {
 	/** Advances the expand animation once per frame and caches the height. */
 	public void animate(float delta) {
 		expand.to(expanded ? 1f : 0f, delta);
+		press.to(pressed ? 1f : 0f, delta);
 		animatedHeight = UiTheme.CARD_H + Math.round(settingsFullHeight() * expand.value());
 	}
 
@@ -200,7 +203,10 @@ public class ModuleCard {
 		for (Setting<?> s : module.settings()) {
 			total += settingHeight(s);
 		}
-		return total == 0 ? 0 : PAD + total;
+		// Padding above *and* below the rows. With only the top padding the
+		// last row sat flush against the bottom of the well, so the toggle that
+		// ends the list looked clipped by the card.
+		return total == 0 ? 0 : PAD * 2 + total;
 	}
 
 	private int settingHeight(Setting<?> s) {
@@ -254,9 +260,10 @@ public class ModuleCard {
 		// the accent while the module is enabled.
 		int top = Ui.lerpColor(UiTheme.CARD_TOP, UiTheme.CARD_HOVER_TOP, hv);
 		int bottom = Ui.lerpColor(UiTheme.CARD_BOTTOM, UiTheme.CARD_HOVER_BOTTOM, hv);
-		if (pressed) {
-			top = Ui.lerpColor(top, 0xFF191220, 0.45f);
-			bottom = Ui.lerpColor(bottom, 0xFF140E19, 0.45f);
+		float pressT = press.value();
+		if (pressT > 0.01f) {
+			top = Ui.lerpColor(top, 0xFF191220, 0.42f * pressT);
+			bottom = Ui.lerpColor(bottom, 0xFF140E19, 0.42f * pressT);
 		}
 		Ui.surface(c, x, y, w, h, r, top, bottom);
 		if (onv > 0.02f) {
@@ -301,11 +308,23 @@ public class ModuleCard {
 		}
 
 		// The settings chevron sits in its own strip between the name and the
-		// switch. That strip is the hit target, so it is defined once.
+		// switch. That strip is the hit target, so it is defined once, and it
+		// gets its own surface so the target is visible before it is clicked.
 		if (hasSettings()) {
-			int cx = chevronLeft(w) + (CHEVRON_W - CHEVRON_SIZE) / 2;
+			int stripX = chevronLeft(w);
+			boolean chevronHovered = mouseX >= stripX && mouseX < stripX + CHEVRON_W
+					&& mouseY >= y && mouseY < y + UiTheme.CARD_H;
+			float emphasis = Math.max(chevronHovered ? 1f : 0f, expand.value());
+			if (emphasis > 0.02f) {
+				int pillH = 20;
+				Ui.surface(c, stripX, y + (UiTheme.CARD_H - pillH) / 2, CHEVRON_W, pillH, 6,
+						Ui.withAlpha(UiTheme.PANEL_ALT, Math.round(0x5C * emphasis)),
+						Ui.withAlpha(UiTheme.PANEL_TOP, Math.round(0x3C * emphasis)));
+			}
+			int cx = stripX + (CHEVRON_W - CHEVRON_SIZE) / 2;
 			int cy = y + (UiTheme.CARD_H - CHEVRON_SIZE) / 2;
-			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT, Math.max(hv, expand.value() * 0.8f));
+			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT,
+					Math.max(hv * 0.7f, Math.max(chevronHovered ? 0.85f : 0f, expand.value() * 0.8f)));
 			UiIcons.chevron(c, cx, cy, CHEVRON_SIZE, chev, expand.value());
 		}
 
@@ -320,6 +339,13 @@ public class ModuleCard {
 		toggle.update(module.isEnabled(), switchHovered, delta);
 		toggle.render(c, tx, ty, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
 
+		// A hairline under the header once the well is opening, so the card
+		// reads as a header plus a panel instead of one tall slab.
+		if (expand.value() > 0.02f) {
+			Ui.surface(c, x + UiTheme.SP_4, y + UiTheme.CARD_H - 1, w - UiTheme.SP_4 * 2, 1, 0,
+					Ui.withAlpha(UiTheme.BORDER, Math.round(0xA0 * expand.value())));
+		}
+
 		// The settings well: an inset surface that holds the setting rows.
 		int full = settingsFullHeight();
 		if (full > 0 && expand.value() > 0.01f) {
@@ -329,7 +355,10 @@ public class ModuleCard {
 			int inset = UiTheme.SP_3;
 			Ui.surface(c, x + inset, wy, w - inset * 2, full - 2, UiTheme.RADIUS,
 					UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
-			Ui.outline(c, x + inset, wy, w - inset * 2, full - 2, UiTheme.RADIUS, 0x26FFFFFF);
+			Ui.outline(c, x + inset, wy, w - inset * 2, full - 2, UiTheme.RADIUS, 0x33FFFFFF);
+			// A one pixel shade along the top of the well: the panel is inset, and
+			// without it the well and the card read as the same surface.
+			Ui.surface(c, x + inset + UiTheme.RADIUS, wy + 1, w - (inset + UiTheme.RADIUS) * 2, 1, 0, 0x38000000);
 
 			int cy = wy + PAD;
 			for (Setting<?> s : module.settings()) {
@@ -352,7 +381,11 @@ public class ModuleCard {
 			int trackY = rowY + 28;
 			ui.bind(sliderLabels.get(slider), sliderValueText(slider), trackX0, trackX1, trackY);
 			ui.render(c, regular, trackX0, trackX1 - trackX0);
-			sliderBounds.put(slider, new int[]{trackX0, trackX1, rowY, rowY + ROW_SLIDER});
+			int[] sb = sliderBounds.computeIfAbsent(slider, key -> new int[4]);
+			sb[0] = trackX0;
+			sb[1] = trackX1;
+			sb[2] = rowY;
+			sb[3] = rowY + ROW_SLIDER;
 			return ROW_SLIDER;
 		}
 
@@ -372,7 +405,11 @@ public class ModuleCard {
 			sw.render(c, tx, ty, tw, th);
 			Ui.drawEllipsized(c, regular, label, contentX, Ui.centerTextY(rowY, ROW_TOGGLE, regular),
 					(tx - contentX) - UiTheme.SP_3, rowHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
-			switchBounds.put(bool, new int[]{contentX, x + w - UiTheme.SP_6, rowY, rowY + ROW_TOGGLE});
+			int[] bb = switchBounds.computeIfAbsent(bool, key -> new int[4]);
+			bb[0] = contentX;
+			bb[1] = x + w - UiTheme.SP_6;
+			bb[2] = rowY;
+			bb[3] = rowY + ROW_TOGGLE;
 			return ROW_TOGGLE;
 		}
 
@@ -417,8 +454,12 @@ public class ModuleCard {
 			Ui.drawEllipsized(c, regular, rowLabel == null ? choice.key() : rowLabel, contentX,
 					Ui.centerTextY(rowY, ROW_CHOICE, regular),
 					Math.max(0, px - contentX - UiTheme.SP_3), UiTheme.TEXT_2);
-			choiceBounds.put(choice, new int[]{px, px + pillW, py, py + STEPPER_H,
-					px + STEPPER_ARROW_BOX});
+			int[] cb = choiceBounds.computeIfAbsent(choice, key -> new int[5]);
+			cb[0] = px;
+			cb[1] = px + pillW;
+			cb[2] = py;
+			cb[3] = py + STEPPER_H;
+			cb[4] = px + STEPPER_ARROW_BOX;
 			return ROW_CHOICE;
 		}
 

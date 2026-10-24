@@ -41,3 +41,6 @@ replay_*.log
 
 # local runtime artifacts
 logs/
+
+# python
+__pycache__/

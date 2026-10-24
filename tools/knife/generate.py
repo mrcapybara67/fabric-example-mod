@@ -292,18 +292,31 @@ def is_curved(points, threshold=2.0):
 
 
 def blade_path(parts, points, widths, depth, edge=1, overlap=None,
-               uv=(0.04, 0.78)):
-    """A blade run along a centre line, as a plate plus a bright edge strip.
+               uv=(0.04, 0.78), spine=True):
+    """A blade run along a centre line: plate, bright edge, forged spine.
 
     Placing each segment on the line it belongs to, and overlapping neighbours
     slightly, is what keeps a curved blade continuous: consecutive segments
     meet inside each other instead of showing a join.
+
+    Three strips, not one. The plate carries the body of the steel, the bright
+    strip along the cutting side reads as the grind, and a narrow, slightly
+    proud strip along the spine reads as the forged back of the blade. That
+    last strip is what gives the knife an edge in silhouette from the side:
+    without it a blade is a flat card, whatever texture is painted on it.
     """
     curved = is_curved(points)
     if curved:
-        points, widths = resample(points, widths)
+        # Dense sampling on purpose: a cuboid chain can only approximate a
+        # curve, and the error at each joint is what shows as a tooth on the
+        # silhouette. Ten slices per span pushes that error below a pixel at
+        # the size a held knife is actually drawn.
+        points, widths = resample(points, widths, 10)
     if overlap is None:
-        overlap = 0.10 if curved else 0.0
+        # A curved blade is a chain of short segments; the overlap is what
+        # hides the joint between them. On a straight blade there is no joint
+        # to hide, and the overlap would only make the ends uneven.
+        overlap = 0.18 if curved else 0.0
     for i in range(len(points) - 1):
         (x0, y0), (x1, y1) = points[i], points[i + 1]
         dx, dy = x1 - x0, y1 - y0
@@ -314,8 +327,20 @@ def blade_path(parts, points, widths, depth, edge=1, overlap=None,
         half = (widths[i] + widths[i + 1]) / 2.0
         cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
         ca, sa = math.cos(math.radians(angle)), math.sin(math.radians(angle))
-        edge_w = max(0.09, 0.17 * half)
-        jitter = 1.0
+        edge_w = max(0.085, 0.13 * half)
+        # Alternate the thickness by a hair. Consecutive segments overlap, and
+        # without this their two front faces would lie in exactly the same
+        # plane and flicker against each other.
+        jitter = 1.0 + 0.012 * (i % 2)
+        if curved:
+            # A curved blade is drawn as plate strips only, with the bright
+            # grind painted into the strip. A separate proud edge strip would
+            # show its own end face at every joint - which is what turns a
+            # smooth hook into a saw blade at item scale.
+            parts.append(Part("blade", cx, cy, half * 2.0, length + overlap,
+                              depth * jitter, angle, (0.04, 1.0),
+                              flip=edge < 0))
+            continue
         plate_cx = cx - edge * (edge_w / 2.0) * ca
         plate_cy = cy - edge * (edge_w / 2.0) * sa
         parts.append(Part("blade", plate_cx, plate_cy, (half - edge_w) * 2.0,
@@ -326,6 +351,17 @@ def blade_path(parts, points, widths, depth, edge=1, overlap=None,
                           length + overlap + 0.05,
                           depth * 1.14 * jitter, angle, (0.88, 1.0),
                           flip=edge < 0))
+        # The spine: a thin, proud strip of the darkest part of the steel, so
+        # the back of the blade catches a highlight instead of disappearing.
+        # Straight blades only: on a curve, consecutive strips would step in
+        # and out of each other and the back of the blade would look sawn.
+        if spine and not curved:
+            spine_w = max(0.075, 0.12 * half)
+            spine_off = -edge * (half - spine_w / 2.0)
+            parts.append(Part("blade", cx + spine_off * ca, cy + spine_off * sa,
+                              spine_w, length + overlap + 0.02,
+                              depth * 1.08 * jitter, angle, (0.0, 0.20),
+                              flip=edge > 0))
 
 
 def blade_double(parts, points, widths, depth, uv=(0.0, 0.16)):
@@ -336,8 +372,8 @@ def blade_double(parts, points, widths, depth, uv=(0.0, 0.16)):
     """
     curved = is_curved(points)
     if curved:
-        points, widths = resample(points, widths)
-    overlap = 0.10 if curved else 0.0
+        points, widths = resample(points, widths, 6)
+    overlap = 0.18 if curved else 0.0
     for i in range(len(points) - 1):
         (x0, y0), (x1, y1) = points[i], points[i + 1]
         dx, dy = x1 - x0, y1 - y0
@@ -347,7 +383,7 @@ def blade_double(parts, points, widths, depth, uv=(0.0, 0.16)):
         angle = math.degrees(math.atan2(dy, dx)) - 90.0
         half = (widths[i] + widths[i + 1]) / 2.0
         cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-        edge_w = max(0.09, 0.15 * half)
+        edge_w = max(0.085, 0.13 * half)
         jitter = 1.0
         parts.append(Part("blade", cx, cy, (half - edge_w) * 2.0,
                           length + overlap, depth * jitter, angle, uv))
@@ -358,6 +394,13 @@ def blade_double(parts, points, widths, depth, uv=(0.0, 0.16)):
                               length + overlap + 0.05,
                               depth * 1.14 * jitter, angle, (0.88, 1.0),
                               flip=side < 0))
+        # A central ridge between the two grinds. A double edged blade without
+        # one reads as a flat strip no matter how it is lit. Only on straight
+        # blades, for the same reason as the spine strip.
+        if not curved:
+            ridge_w = max(0.085, 0.15 * half)
+            parts.append(Part("blade", cx, cy, ridge_w, length + overlap,
+                              depth * 1.10 * jitter, angle, (0.42, 0.60)))
 
 
 def blade_tip(parts, x, y, half, depth, angle=0.0, flip=False):
@@ -366,6 +409,10 @@ def blade_tip(parts, x, y, half, depth, angle=0.0, flip=False):
     The lower half of the square sits inside the blade, so what shows is a
     clean triangular point of exactly the blade's width - no bulge and no
     cuboid step at the last and most visible millimetre of the knife.
+
+    The square is exactly as wide as the blade on purpose: a narrower one
+    leaves a step between the plate and the point, which is the one place a
+    knife must not have one.
     """
     side = half * 2.0 / math.sqrt(2.0)
     # The tip is the full thickness of the blade.  A thinner point sits inside
@@ -391,17 +438,34 @@ def styles():
         seg("accent", 8.38, -0.28, 9.38, 0.22, 2.00),
         seg("accent", 7.05, 1.00, 7.33, 1.24, 1.96),
         seg("accent", 8.67, 1.00, 8.95, 1.24, 1.96),
+        # The pivot boss: the pin the whole knife turns on, and the reason a
+        # balisong is recognisable even as a still picture.
+        seg("guard", 7.55, 4.30, 8.45, 5.20, 2.06),
+        seg("hole", 7.88, 4.64, 8.12, 4.88, 2.12),
+        # The latch ends at the base of the two handles.
+        seg("accent", 6.92, -0.60, 7.44, -0.24, 2.06),
+        seg("accent", 8.56, -0.60, 9.08, -0.24, 2.06),
     ]
     table["butterfly"] = butterfly
 
     # ---- karambit: hook blade, finger ring where the pommel would be
-    karambit = ring("guard", 7.55, -1.35, 1.28, 0.50, 1.12, 6, 30.0)
+    # The ring is a ten sided polygon rather than a hexagon: at item scale the
+    # difference between a ring and a nut is exactly the number of sides, and
+    # the ring is the one feature that identifies a karambit at a glance.
+    karambit = ring("guard", 7.55, -1.35, 1.32, 0.46, 1.12, 10, 18.0)
     karambit += [
+        # The backspacer runs from the ring into the handle, which is what
+        # makes the ring part of the knife instead of a hoop behind it.
+        seg("grip", 6.98, -1.10, 8.42, 0.55, 1.28),
         seg("grip", 7.05, 0.15, 8.35, 4.15, 1.45, -8.0, (7.70, 0.55)),
         seg("accent", 6.90, 4.10, 8.80, 4.72, 1.65),
+        # Thumb ramp jimping: three teeth on the spine where the thumb sits.
+        seg("accent", 6.78, 3.62, 7.06, 3.80, 1.62),
+        seg("accent", 6.82, 3.90, 7.10, 4.08, 1.62),
+        seg("accent", 6.88, 4.18, 7.16, 4.36, 1.62),
     ]
     hook = [(7.95, 4.15), (8.30, 7.10), (9.15, 9.20), (10.45, 10.55), (11.75, 11.05)]
-    blade_path(karambit, hook, [0.98, 0.98, 0.98, 0.92, 0.78], 0.92)
+    blade_path(karambit, hook, [0.94, 0.99, 1.02, 0.88, 0.62], 0.92)
     last = hook[-1]
     blade_tip(karambit, last[0], last[1], 0.78, 0.92,
               math.degrees(math.atan2(last[1] - hook[-2][1], last[0] - hook[-2][0])) - 90.0)
@@ -412,6 +476,13 @@ def styles():
         seg("accent", 7.05, -0.28, 8.95, 0.32, 1.75),
         seg("grip", 7.20, 0.28, 8.80, 6.45, 1.60),
         seg("guard", 6.90, 6.40, 9.10, 7.15, 1.70),
+        # A forged bolster between the handle and the blade, proud of both.
+        seg("accent", 6.86, 6.42, 9.14, 6.86, 1.86),
+        # Rivets through the full tang.
+        seg("accent", 7.24, 2.15, 7.50, 2.41, 1.72),
+        seg("accent", 8.50, 2.15, 8.76, 2.41, 1.72),
+        seg("accent", 7.24, 4.55, 7.50, 4.81, 1.72),
+        seg("accent", 8.50, 4.55, 8.76, 4.81, 1.72),
     ]
     blade_path(cleaver, [(9.30, 7.15), (9.30, 14.40)], [2.55, 2.55], 1.02,
                edge=1)
@@ -420,6 +491,8 @@ def styles():
         seg("blade", 8.42, 7.15, 9.05, 14.45, 1.18, uv=(0.0, 0.34)),
         seg("blade", 9.05, 14.05, 14.42, 14.48, 1.06, uv=(0.0, 0.34)),
         seg("hole", 10.60, 12.55, 11.45, 13.40, 1.24, uv=(0.0, 1.0)),
+        # Thumb notch on the spine, where a butcher braces the blade.
+        seg("hole", 9.05, 13.55, 9.45, 13.95, 1.22, uv=(0.0, 1.0)),
     ]
     table["cleaver"] = cleaver
 
@@ -431,6 +504,10 @@ def styles():
         seg("accent", 7.24, 3.50, 8.76, 3.73, 1.32),
         seg("guard", 6.55, 3.98, 9.45, 4.46, 0.95),
         seg("guard", 7.65, 3.92, 8.35, 4.58, 1.35),
+        # A pommel disc, so the grip ends in hardware rather than in a cut.
+        seg("accent", 7.34, -0.86, 8.66, -0.42, 1.42),
+        # Ricasso: the short unsharpened section a guard is fitted against.
+        seg("guard", 7.54, 4.52, 8.46, 4.92, 1.08),
     ]
     blade_double(dagger, [(8.0, 4.52), (8.0, 8.80), (8.0, 11.60)],
                  [0.68, 0.60, 0.44], 0.95)
@@ -447,6 +524,12 @@ def styles():
         seg("wrap", 7.22, 3.12, 8.78, 3.48, 1.38),
         seg("guard", 6.75, 4.02, 9.25, 4.48, 0.95),
         seg("guard", 7.65, 3.96, 8.35, 4.56, 1.32),
+        # Kashira: the metal cap on the butt of a wrapped Japanese grip.
+        seg("accent", 7.28, -0.52, 8.72, -0.18, 1.46),
+        # Habaki: the collar that locks the blade into the handle.
+        seg("accent", 7.44, 4.30, 8.56, 4.74, 1.44),
+        # Mekugi pin through the tang.
+        seg("accent", 7.68, 2.60, 7.92, 2.84, 1.42),
     ]
     blade_path(tanto, [(8.0, 4.52), (8.0, 9.60), (8.0, 12.10)],
                [0.94, 0.86, 0.62], 0.95)
@@ -458,6 +541,9 @@ def styles():
         seg("grip", 6.62, -0.38, 8.72, 0.38, 1.70),
         seg("grip", 7.02, 0.12, 8.38, 4.10, 1.50, 7.0, (7.70, 0.18)),
         seg("accent", 6.78, 4.06, 8.86, 4.68, 1.70),
+        # A pinned bolster, and the pin that holds it.
+        seg("accent", 6.82, 4.02, 8.90, 4.42, 1.82),
+        seg("hole", 7.74, 4.08, 7.96, 4.30, 1.88),
     ]
     curve = [(7.95, 4.35), (8.35, 7.20), (9.35, 9.55), (11.05, 11.35), (13.05, 12.55)]
     blade_path(kukri, curve, [0.90, 1.00, 1.12, 1.26, 1.22], 1.00)
@@ -472,8 +558,12 @@ def styles():
         seg("grip", 7.02, 0.00, 8.98, 4.75, 1.60),
         seg("guard", 6.78, 4.68, 9.22, 5.16, 1.52),
     ]
-    for rivet_y in (0.95, 2.30):
+    for rivet_y in (0.95, 2.30, 3.65):
         machete.append(seg("accent", 7.30, rivet_y, 7.58, rivet_y + 0.26, 1.74))
+    # Jimping on the spine, just forward of the grip: the notches a hand braces
+    # against when the blade is pushed through something heavy.
+    for jimp_y in (5.18, 5.50, 5.82, 6.14):
+        machete.append(seg("accent", 7.08, jimp_y, 7.30, jimp_y + 0.18, 1.26))
     # A machete is a long broad blade with a heavy spine.  It is built from one
     # long plate tilted a few degrees off the grip axis, a proud edge strip on
     # the same line and a thick spine slab, so every blade surface stays a
@@ -487,6 +577,9 @@ def styles():
     ]
     tip_x, tip_y = rotate(8.50, 14.70, root[0], root[1], tilt)
     blade_tip(machete, tip_x, tip_y, 1.40, 1.02, tilt)
+    # The fuller: a shallow groove down the middle of the blade, darker than
+    # the steel around it, which is what stops a long blade reading as a plank.
+    machete.append(seg("blade", 8.02, 5.30, 8.44, 13.90, 1.09, tilt, root, (0.02, 0.24)))
     table["machete"] = machete
 
     # ---- stiletto: needle blade, slim crossguard, tapered grip
@@ -495,6 +588,12 @@ def styles():
         seg("grip", 7.54, 0.00, 8.46, 3.55, 1.00),
         seg("guard", 6.60, 3.52, 9.40, 3.92, 0.85),
         seg("guard", 7.62, 3.44, 8.38, 4.02, 1.30),
+        # Two quillons: the long thin crossguard of a thrusting blade.
+        seg("guard", 6.30, 3.60, 6.66, 3.84, 0.92),
+        seg("guard", 9.34, 3.60, 9.70, 3.84, 0.92),
+        # A weighted pommel, and a ricasso behind the guard.
+        seg("accent", 7.56, -0.96, 8.44, -0.56, 1.34),
+        seg("guard", 7.54, 3.98, 8.46, 4.22, 0.94),
     ]
     for band_y in (0.34, 1.24, 2.14):
         stiletto.append(seg("accent", 7.50, band_y, 8.50, band_y + 0.18, 1.06))
@@ -610,8 +709,12 @@ def java_constants(name):
 
 def write_json(path, payload):
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Compact on purpose: a generated model is 100+ cuboids with six faces
+    # each, and indentation tripled the size of the 48 shipped models without
+    # making a single number easier to read. The generator is the source these
+    # files are read from when a human wants to inspect them.
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2)
+        json.dump(payload, handle, separators=(",", ":"))
         handle.write("\n")
 
 

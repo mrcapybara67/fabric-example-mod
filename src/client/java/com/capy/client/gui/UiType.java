@@ -19,4 +19,13 @@ public interface UiType {
 
 	/** Large display cut used for the wordmark and alert headlines. */
 	UiText display();
+
+	/**
+	 * The largest cut, used for the Anti Admin alert.
+	 *
+	 * It is a real face rather than a scaled copy of {@link #display()}: the
+	 * alert has to be readable at a glance from across a fight, and scaled
+	 * text would be blurry at exactly the moment it matters.
+	 */
+	UiText headline();
 }
