@@ -14,8 +14,10 @@ import org.lwjgl.glfw.GLFW;
  * released focus.
  */
 public class UiTextField {
-	private static final int MAX_LEN = 16;
+	/** Minecraft's own username limit. */
+	private static final int DEFAULT_MAX_LEN = 16;
 
+	private final int maxLen;
 	private final Anim focus = new Anim(0f, 16f);
 	private final Anim hover = new Anim(0f, 14f);
 	private String text = "";
@@ -28,8 +30,23 @@ public class UiTextField {
 	private int w;
 	private int h;
 
+	public UiTextField() {
+		this(DEFAULT_MAX_LEN);
+	}
+
+	/** A field that accepts longer text, such as a webhook address. */
+	public UiTextField(int maxLen) {
+		this.maxLen = Math.max(1, maxLen);
+	}
+
 	public String text() {
 		return text;
+	}
+
+	/** Replaces the text, truncating to the field's limit. */
+	public void setText(String value) {
+		String next = value == null ? "" : value;
+		text = next.length() > maxLen ? next.substring(0, maxLen) : next;
 	}
 
 	public void clear() {
@@ -68,7 +85,7 @@ public class UiTextField {
 		if (!focused || !event.isAllowedChatCharacter()) {
 			return false;
 		}
-		if (text.length() >= MAX_LEN) {
+		if (text.length() >= maxLen) {
 			return true; // swallow at the limit
 		}
 		text += event.codepointAsString();

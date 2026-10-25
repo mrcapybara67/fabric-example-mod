@@ -8,6 +8,7 @@ import com.capy.client.module.ListResult;
 import com.capy.client.module.Module;
 import com.capy.client.module.Setting;
 import com.capy.client.module.SliderSetting;
+import com.capy.client.module.StringSetting;
 import com.capy.client.module.WatchlistSetting;
 import com.capy.client.module.modules.esp.EspModule;
 import java.util.IdentityHashMap;
@@ -40,6 +41,11 @@ public class ModuleCard {
 	private static final int ROW_SLIDER = 40;
 	private static final int ROW_TOGGLE = 30;
 	private static final int ROW_CHOICE = 30;
+	/** A label line with a one line text field under it. */
+	private static final int ROW_TEXT = 46;
+	private static final int TEXT_INPUT_H = 22;
+	/** Long enough for a webhook URL, short enough to stay one line. */
+	private static final int TEXT_MAX_LEN = 200;
 	/** Stepper geometry, shared by the renderer and the hit test. */
 	private static final int STEPPER_H = 22;
 	private static final int STEPPER_ARROW_BOX = 18;
@@ -60,6 +66,8 @@ public class ModuleCard {
 	private final Map<BlockListSetting, UiWatchlist> blockLists = new IdentityHashMap<>();
 	private final Map<ColorSetting, UiColorPicker> pickers = new IdentityHashMap<>();
 	private final Map<ColorSetting, String> pickerLabels = new IdentityHashMap<>();
+	private final Map<StringSetting, UiTextField> fields = new IdentityHashMap<>();
+	private final Map<StringSetting, String> fieldLabels = new IdentityHashMap<>();
 
 	private final Anim hover = new Anim(0f, 14f);
 	private final Anim on = new Anim(0f, 18f);
@@ -112,6 +120,12 @@ public class ModuleCard {
 			} else if (s instanceof ColorSetting color) {
 				pickers.put(color, new UiColorPicker(color));
 				pickerLabels.put(color, settingLabel(color.key()));
+			} else if (s instanceof StringSetting text) {
+				UiTextField field = new UiTextField(TEXT_MAX_LEN);
+				field.setText(text.value());
+				field.setPlaceholder(hintLabel(text.key()));
+				fields.put(text, field);
+				fieldLabels.put(text, settingLabel(text.key()));
 			}
 		}
 	}
@@ -174,6 +188,28 @@ public class ModuleCard {
 		String key = "capy.module." + module.id() + "." + settingKey;
 		String s = UiLabels.translate(key, null);
 		return s == null ? UiLabels.humanize(settingKey) : s;
+	}
+
+	/** Placeholder for a text field: {@code capy.module.<module>.<setting>.hint}. */
+	private String hintLabel(String settingKey) {
+		String key = "capy.module." + module.id() + "." + settingKey + ".hint";
+		String s = UiLabels.translate(key, null);
+		return s == null ? "" : s;
+	}
+
+	/** Writes a text field back into its setting. */
+	private void commitField(StringSetting setting, UiTextField field) {
+		setting.set(field.text());
+	}
+
+	/** Writes every focused field back and releases the keyboard. */
+	private void commitAndBlurFields() {
+		for (Map.Entry<StringSetting, UiTextField> entry : fields.entrySet()) {
+			if (entry.getValue().isFocused()) {
+				commitField(entry.getKey(), entry.getValue());
+			}
+			entry.getValue().setFocused(false);
+		}
 	}
 
 	/** Resolves every option label once: {@code capy.module.<id>.<key>.<option>}. */
@@ -268,6 +304,9 @@ public class ModuleCard {
 		if (s instanceof ColorSetting color) {
 			UiColorPicker picker = pickers.get(color);
 			return (picker == null ? UiColorPicker.ROW_H : picker.height()) + UiTheme.SP_3;
+		}
+		if (s instanceof StringSetting) {
+			return ROW_TEXT;
 		}
 		return 0;
 	}
@@ -540,6 +579,23 @@ public class ModuleCard {
 			return settingHeight(s);
 		}
 
+		if (s instanceof StringSetting text) {
+			UiTextField field = fields.get(text);
+			if (field == null) {
+				return 0;
+			}
+			// While the field is focused it is the authority: rewriting it from
+			// the setting every frame would delete what is being typed. Once it
+			// is not, the setting is (it may have been loaded from the config).
+			if (!field.isFocused() && !field.text().equals(text.value())) {
+				field.setText(text.value());
+			}
+			Ui.drawEllipsized(c, regular, fieldLabels.get(text), contentX, rowY, contentW, UiTheme.TEXT_2);
+			field.bind(contentX, rowY + 15, contentW, TEXT_INPUT_H);
+			field.render(c, regular, mouseX, mouseY, delta);
+			return ROW_TEXT;
+		}
+
 		return 0;
 	}
 
@@ -585,6 +641,7 @@ public class ModuleCard {
 		for (UiWatchlist ui : blockLists.values()) {
 			ui.clearFocus();
 		}
+		commitAndBlurFields();
 	}
 
 	/** True while a text field inside the card owns the keyboard. */
@@ -596,6 +653,11 @@ public class ModuleCard {
 		}
 		for (UiWatchlist ui : blockLists.values()) {
 			if (ui.isFocused()) {
+				return true;
+			}
+		}
+		for (UiTextField field : fields.values()) {
+			if (field.isFocused()) {
 				return true;
 			}
 		}
@@ -634,6 +696,26 @@ public class ModuleCard {
 
 	/** Routes a click to the setting controls. */
 	private boolean mouseClickedSetting(double mx, double my) {
+		// A click anywhere else in the card takes the keyboard away from a
+		// field, committing what was typed first.
+		boolean overField = false;
+		for (UiTextField field : fields.values()) {
+			if (field.contains(mx, my)) {
+				overField = true;
+				break;
+			}
+		}
+		if (!overField) {
+			commitAndBlurFields();
+		} else {
+			for (Map.Entry<StringSetting, UiTextField> entry : fields.entrySet()) {
+				UiTextField field = entry.getValue();
+				if (field.contains(mx, my)) {
+					field.setFocused(true);
+					return true;
+				}
+			}
+		}
 		for (Map.Entry<SliderSetting, int[]> entry : sliderBounds.entrySet()) {
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
@@ -712,6 +794,12 @@ public class ModuleCard {
 				return true;
 			}
 		}
+		for (Map.Entry<StringSetting, UiTextField> entry : fields.entrySet()) {
+			if (entry.getValue().charTyped(event)) {
+				commitField(entry.getKey(), entry.getValue());
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -724,6 +812,12 @@ public class ModuleCard {
 		}
 		for (UiWatchlist ui : blockLists.values()) {
 			if (ui.keyPressed(event)) {
+				return true;
+			}
+		}
+		for (Map.Entry<StringSetting, UiTextField> entry : fields.entrySet()) {
+			if (entry.getValue().keyPressed(event)) {
+				commitField(entry.getKey(), entry.getValue());
 				return true;
 			}
 		}

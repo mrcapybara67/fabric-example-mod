@@ -50,6 +50,8 @@ public final class AlertRenderer {
 	private static final String LABEL_PROBED = UiLabels.translate("capy.alert.probed", "%s is online and hidden");
 	private static final String LABEL_SPECTATOR = UiLabels.translate("capy.alert.spectator", "%s is in spectator");
 	private static final String LABEL_HIDDEN_TAG = UiLabels.translate("capy.alert.hidden_tag", "%s hid their nametag");
+	private static final String LABEL_UNSEEN =
+			UiLabels.translate("capy.alert.unseen", "someone is here and unseen");
 	private static final String LABEL_SIGN_OFF =
 			UiLabels.translate("capy.alert.stay_safe", "stay safe capy client user");
 	private static final String LABEL_NEARBY = UiLabels.translate("capy.alert.nearby", "WATCHLIST PLAYER NEARBY");
@@ -65,6 +67,8 @@ public final class AlertRenderer {
 			UiLabels.translate("capy.alert.spectator_title", "WATCHLIST PLAYER IN SPECTATOR");
 	private static final String LABEL_HIDDEN_TAG_TITLE =
 			UiLabels.translate("capy.alert.hidden_tag_title", "WATCHLIST PLAYER NAMETAG HIDDEN");
+	private static final String LABEL_UNSEEN_TITLE =
+			UiLabels.translate("capy.alert.unseen_title", "SOMEONE IS HERE AND UNSEEN");
 
 	/** Gap between the name line and the sign-off. */
 	private static final int LINE_GAP = 12;
@@ -158,6 +162,7 @@ public final class AlertRenderer {
 				case SPECTATOR -> LABEL_SPECTATOR;
 				case HIDDEN_TAG -> LABEL_HIDDEN_TAG;
 				case NEARBY -> LABEL_WATCHING;
+				case UNSEEN -> LABEL_UNSEEN;
 			};
 			String line = pattern.replace("%s", alert.username());
 			drawShadowedCentered(c, nameFont, line, screenW / 2, top, maxWidth,
@@ -230,6 +235,7 @@ public final class AlertRenderer {
 			case PROBED -> LABEL_PROBED_TITLE;
 			case SPECTATOR -> LABEL_SPECTATOR_TITLE;
 			case HIDDEN_TAG -> LABEL_HIDDEN_TAG_TITLE;
+			case UNSEEN -> LABEL_UNSEEN_TITLE;
 		};
 		// A join and the two tab tells carry no position at all; a vanish or a
 		// ghost does, because the position was remembered before they went.

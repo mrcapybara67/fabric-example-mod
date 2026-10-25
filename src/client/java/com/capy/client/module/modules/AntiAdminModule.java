@@ -7,25 +7,51 @@ import com.capy.client.gui.UiCanvas;
 import com.capy.client.gui.UiType;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
+import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
+import com.capy.client.module.StringSetting;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.WatchlistSetting;
 import com.capy.client.module.modules.antiadmin.AdminAlert;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
 import com.capy.client.module.modules.antiadmin.AlertManager;
+import com.capy.client.module.modules.antiadmin.AlertRecord;
 import com.capy.client.module.modules.antiadmin.AlertRenderer;
 import com.capy.client.module.modules.antiadmin.AlertSound;
+import com.capy.client.module.modules.antiadmin.AntiAdminHudRenderer;
+import com.capy.client.module.modules.antiadmin.AntiAdminWebhook;
+import com.capy.client.module.modules.antiadmin.BlockInteractDetector;
+import com.capy.client.module.modules.antiadmin.ChatDetector;
+import com.capy.client.module.modules.antiadmin.Confidence;
+import com.capy.client.module.modules.antiadmin.ContainerDetector;
+import com.capy.client.module.modules.antiadmin.Correlator;
+import com.capy.client.module.modules.antiadmin.DetectionKind;
+import com.capy.client.module.modules.antiadmin.EntityTabCrossRefDetector;
+import com.capy.client.module.modules.antiadmin.ExplosionDetector;
+import com.capy.client.module.modules.antiadmin.GamemodeDetector;
+import com.capy.client.module.modules.antiadmin.GhostUiDetector;
+import com.capy.client.module.modules.antiadmin.KnownPlayerStore;
+import com.capy.client.module.modules.antiadmin.NpcFingerprinter;
+import com.capy.client.module.modules.antiadmin.Observation;
 import com.capy.client.module.modules.antiadmin.PacketSignals;
+import com.capy.client.module.modules.antiadmin.ParticleDetector;
+import com.capy.client.module.modules.antiadmin.PingGhostDetector;
+import com.capy.client.module.modules.antiadmin.ProbeDetector;
+import com.capy.client.module.modules.antiadmin.RapidPacketDetector;
+import com.capy.client.module.modules.antiadmin.ServerProfile;
+import com.capy.client.module.modules.antiadmin.ServerProfileMatcher;
+import com.capy.client.module.modules.antiadmin.ShadowMapDetector;
+import com.capy.client.module.modules.antiadmin.SignalBuffer;
+import com.capy.client.module.modules.antiadmin.SignalDetector;
+import com.capy.client.module.modules.antiadmin.SoundDetector;
+import com.capy.client.module.modules.antiadmin.TeamPacketDetector;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.HashMap;
+import java.util.EnumMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -33,73 +59,38 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.multiplayer.PlayerInfo;
-import net.minecraft.world.entity.player.PlayerSkin;
+import net.minecraft.core.BlockPos;
 
 /**
- * Anti Admin - warns the player when a watched account stops being visible.
+ * Anti Admin: watches the accounts on your watchlist and the traces a vanished
+ * player leaves behind.
  *
- * Six independent signals feed one alert queue, in the order the server makes
- * them available:
+ * The module is the wiring, not the detection. Signals are collected by the
+ * detectors into a rolling buffer, scored once per tick by the correlator, and
+ * shown by the manager; this class only decides who is enabled, which profile
+ * is in force and where the output goes.
  *
- *   <ul>
- *     <li><b>nearby</b> - the entity is in the world and inside the radius.
- *         The only signal with a real distance;</li>
- *     <li><b>ghost</b> - the tab entry was removed but the entity is still in
- *         the world a tick later. A real disconnect removes both;</li>
- *     <li><b>vanished</b> - an {@code UPDATE_LISTED false} packet, read at the
- *         packet level so no transition can fall between two ticks;</li>
- *     <li><b>probed</b> - the entry and the entity are gone, but the server's
- *         own command completion still names the player. Nothing else can see
- *         this case;</li>
- *     <li><b>spectator</b> - listed, but in spectator mode. Vanilla never
- *         sends a spectator's entity to a survival client, so the tab list is
- *         the only place that says so;</li>
- *     <li><b>hidden tag</b> - listed, but on a team that hides nametags.</li>
- *   </ul>
+ * Two sources feed it, deliberately kept apart:
+ * <ul>
+ *   <li>the <b>watchlist</b>, which is about accounts the user named — a
+ *       sighting is reported directly, because being told a watched player is
+ *       standing next to you does not need a correlation;</li>
+ *   <li>the <b>signal layer</b>, which is about accounts nobody named — it
+ *       reports what the server did, not who did it.</li>
+ * </ul>
  *
- * Each signal is reported at most once per player per session, so a plugin
- * that flaps the listed flag cannot spam the screen. The last known position
- * is remembered, which is what lets a vanish still say how far away the
- * player was when the server took them.
- *
- * Honest limits: a player in spectator mode is not sent to other clients, and
- * a server that removes the account and the entity leaves nothing behind -
- * the probe is the only thing that can answer for that case, and it is a
- * request the server can see.
+ * Ghost mode silences the screen and the sound but keeps the webhook, which is
+ * the whole point of running this on a server where a visible alert would be a
+ * liability.
  */
 public class AntiAdminModule extends Module implements Configurable, Tickable {
-	/** Ticks between two world scans. 4 ticks is 5 scans per second. */
-	public static final int SCAN_INTERVAL_TICKS = 4;
-
 	public static final int MIN_RANGE = 8;
 	public static final int MAX_RANGE = 128;
 	public static final int DEFAULT_RANGE = 32;
-
-	public static final int MIN_COOLDOWN = 0;
-	public static final int MAX_COOLDOWN = 60;
-	public static final int DEFAULT_COOLDOWN = 10;
-
-	/**
-	 * Ticks after joining a world during which nothing is announced.
-	 *
-	 * The server sends the whole tab list right after the connection is
-	 * established, so without this window the first scan would announce every
-	 * watched player already online as if they had just joined.
-	 */
-	private static final int JOIN_GRACE_TICKS = 40;
-	/** Announced events that may wait their turn on screen. */
-	private static final int QUEUE_MAX = 5;
-	/** Ticks between two probes: one completion request per second. */
-	private static final int PROBE_INTERVAL_TICKS = 20;
-	/** Probes waiting their turn. */
-	private static final int PROBE_QUEUE_MAX = 32;
-	/** How long a probe may stay unanswered before it is abandoned. */
-	private static final int PROBE_TIMEOUT_TICKS = 100;
-	/** Ticks to wait before deciding whether a removed player is really gone. */
-	private static final int GHOST_DELAY_TICKS = 1;
-	/** A remembered position older than this is not worth reporting. */
-	private static final long LAST_SEEN_MAX_MS = 300_000L;
+	/** The watchlist scan is a player loop; twice a second is plenty. */
+	private static final int SCAN_INTERVAL = 10;
+	/** The profile is re-resolved this often, in ticks. */
+	private static final int PROFILE_INTERVAL = 40;
 
 	private final WatchlistSetting watchlist = setting(new WatchlistSetting("watchlist"));
 	private final SliderSetting range = setting(new SliderSetting("range", DEFAULT_RANGE, MIN_RANGE, MAX_RANGE));
@@ -107,360 +98,270 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private final BooleanSetting notification = setting(new BooleanSetting("notification", true));
 	private final BooleanSetting sound = setting(new BooleanSetting("sound", true));
 	private final BooleanSetting probe = setting(new BooleanSetting("probe", true));
-	private final SliderSetting cooldown = setting(new SliderSetting("cooldown", DEFAULT_COOLDOWN, MIN_COOLDOWN, MAX_COOLDOWN));
+	private final BooleanSetting ghostMode = setting(new BooleanSetting("ghost_mode", false));
+	private final ChoiceSetting threshold =
+			setting(new ChoiceSetting("alert_threshold", 1, "low", "medium", "high", "certain"));
+	private final ChoiceSetting profileChoice =
+			setting(new ChoiceSetting("profile", 0, "auto", "default", "donut-family", "anarchy"));
+	private final StringSetting webhookUrl = setting(new StringSetting("webhook", ""));
 
-	/** The typefaces are created once and reused for every frame. */
-	private static final UiType TYPE = new McType();
+	/** One switch per signal, in enum order so the GUI list is stable. */
+	private final Map<DetectionKind, BooleanSetting> signalToggles = new EnumMap<>(DetectionKind.class);
+	private final List<SignalDetector> detectors = new ArrayList<>();
+	private final Set<UUID> npcs = new HashSet<>();
 
-	/** An announced event waiting for the screen to be free. */
-	private record Pending(AdminDetector.Match match, AdminAlert.Kind kind) {
-	}
-
-	/** Where a watched player was, and when. */
-	private record Seen(double distance, long atMs) {
-	}
-
-	/** A removed player whose entity still has to be looked for. */
-	private record Ghost(UUID uuid, String name, int dueTick) {
-	}
-
-	/** A completion request waiting to be sent; the UUID is null when unknown. */
-	private record Probe(String name, UUID uuid) {
-	}
-
+	private final SignalBuffer buffer = new SignalBuffer();
 	private final AlertManager alerts = new AlertManager();
-	/** UUIDs already listed this session, so one arrival is announced once. */
-	private final Set<UUID> joinSeen = new HashSet<>();
-	/** Signals already announced per player, so each is reported once. */
-	private final Map<UUID, Set<AdminAlert.Kind>> reported = new HashMap<>();
-	/** Announced events waiting for the screen to be free. */
-	private final ArrayDeque<Pending> pending = new ArrayDeque<>();
-	/** Last known distance per watched player, kept after they disappear. */
-	private final Map<UUID, Seen> lastSeen = new HashMap<>();
-	/** Removed players whose entity has not been checked yet. */
-	private final List<Ghost> ghosts = new ArrayList<>();
-	private final ArrayDeque<Probe> probes = new ArrayDeque<>();
-	/** Names already queued for a probe, so one player is asked about once. */
-	private final Set<String> probeAsked = new HashSet<>();
-	private Probe probeInFlight;
-	private int probeId = -1;
-	private int probeSentTick;
-	private int probeCooldown;
-	private int ticksUntilScan;
-	/** Ticks since the session started, used for the join grace period. */
-	private int ticksSinceSessionStart;
-	private int tickCounter;
-	private boolean watchlistProbed;
+	private final KnownPlayerStore known = new KnownPlayerStore();
+	private final ServerProfileMatcher matcher = new ServerProfileMatcher();
+	private final AntiAdminWebhook webhook = new AntiAdminWebhook("");
+	private final AntiAdminHudRenderer hud = new AntiAdminHudRenderer();
+	private final Correlator correlator = new Correlator(buffer, alerts, known, npcs);
+
+	private ServerProfile profile = ServerProfile.DEFAULT;
+	private String host = "unknown";
+	/** The URL the sender is currently pointed at, so a new one is noticed. */
+	private String appliedWebhook = "";
+	private long tick;
+	private int scanCountdown;
+	private int profileCountdown;
+	private boolean loaded;
 
 	public AntiAdminModule() {
 		super(Category.MISC, "anti_admin");
+		for (DetectionKind kind : DetectionKind.values()) {
+			signalToggles.put(kind, setting(new BooleanSetting(kind.settingKey(), true)));
+		}
+
+		NpcFingerprinter fingerprinter = new NpcFingerprinter(buffer, npcs);
+		detectors.add(new EntityTabCrossRefDetector(buffer, npcs));
+		detectors.add(fingerprinter);
+		detectors.add(new ParticleDetector(buffer));
+		detectors.add(new ExplosionDetector(buffer));
+		detectors.add(new SoundDetector(buffer));
+		detectors.add(new BlockInteractDetector(buffer));
+		detectors.add(new ChatDetector(buffer));
+		detectors.add(new ProbeDetector(buffer));
+		detectors.add(new PingGhostDetector(buffer));
+		detectors.add(new TeamPacketDetector(buffer));
+		detectors.add(new GamemodeDetector(buffer));
+		detectors.add(new RapidPacketDetector(buffer));
+		detectors.add(new ShadowMapDetector(buffer));
+		detectors.add(new ContainerDetector(buffer));
+		detectors.add(new GhostUiDetector(buffer));
+
+		alerts.sink(this::deliver);
 	}
 
 	// ------------------------------------------------------------- lifecycle
 
 	@Override
 	protected void onToggle(boolean state) {
-		// Enabling mid-session must not announce everyone who was already
-		// online, and disabling must not leave stale signals behind.
-		reset();
+		if (state) {
+			if (!loaded) {
+				loaded = true;
+				known.load();
+			}
+			known.bind(host);
+			resolveProfile(Minecraft.getInstance());
+			for (SignalDetector detector : detectors) {
+				detector.onEnable();
+			}
+		} else {
+			for (SignalDetector detector : detectors) {
+				detector.onDisable();
+			}
+			known.save();
+			clear();
+		}
 	}
 
-	/** Clears the transient detection state (world change, disconnect). */
+	/** Drops per-session state. Called on a world change and on a disconnect. */
 	public void reset() {
-		alerts.reset();
-		PacketSignals.clear();
-		joinSeen.clear();
-		reported.clear();
-		pending.clear();
-		lastSeen.clear();
-		ghosts.clear();
-		probes.clear();
-		probeAsked.clear();
-		probeInFlight = null;
-		probeId = -1;
-		probeCooldown = 0;
-		ticksUntilScan = 0;
-		ticksSinceSessionStart = 0;
-		watchlistProbed = false;
+		known.save();
+		clear();
 	}
 
-	/** Runs one detection step. Called from the client tick. */
+	private void clear() {
+		buffer.clear();
+		alerts.reset();
+		hud.clear();
+		npcs.clear();
+		PacketSignals.clear();
+		tick = 0L;
+		scanCountdown = 0;
+		profileCountdown = 0;
+		for (SignalDetector detector : detectors) {
+			detector.reset();
+		}
+	}
+
+	// ------------------------------------------------------------------- tick
+
 	@Override
 	public void onTick(Minecraft mc) {
 		if (!isEnabled()) {
 			return;
 		}
-		if (mc.level == null || mc.player == null) {
-			reset();
+		if (mc == null || mc.level == null || mc.player == null) {
+			if (tick != 0L) {
+				clear();
+			}
 			return;
 		}
-		tickCounter++;
-		ticksSinceSessionStart++;
-
-		// Draining every tick is what makes the packet signals instant.
-		List<PacketSignals.Event> events = PacketSignals.drainEvents();
-		List<PacketSignals.ProbeResponse> responses = PacketSignals.drainResponses();
-
-		if (ticksUntilScan > 0) {
-			ticksUntilScan--;
-		} else {
-			ticksUntilScan = SCAN_INTERVAL_TICKS - 1;
-			scan(mc);
+		tick++;
+		buffer.tick(tick);
+		syncWebhook();
+		if (--profileCountdown <= 0) {
+			profileCountdown = PROFILE_INTERVAL;
+			resolveProfile(mc);
 		}
+		for (PacketSignals.Event event : PacketSignals.drain()) {
+			for (SignalDetector detector : detectors) {
+				if (active(detector)) {
+					detector.onPacket(event);
+				}
+			}
+		}
+		for (SignalDetector detector : detectors) {
+			if (active(detector)) {
+				detector.onTick(mc);
+			}
+		}
+		correlator.tick(mc, profile, minimumConfidence(), host);
+		if (--scanCountdown <= 0) {
+			scanCountdown = SCAN_INTERVAL;
+			scanWatchlist(mc);
+		}
+	}
 
-		handleEvents(events);
-		handleGhosts(mc);
-		handleResponses(responses);
-		pumpProbes();
+	/** Reports every watched player the client can see inside the range. */
+	private void scanWatchlist(Minecraft mc) {
+		for (AdminDetector.Match match : AdminDetector.scan(mc, watchlist)) {
+			if (match.distance() > detectionRange()) {
+				continue;
+			}
+			AlertRecord record = new AlertRecord(match.uuid(), match.username(), Confidence.HIGH,
+					List.<Observation>of(), System.currentTimeMillis(),
+					positionOf(mc, match.uuid()), match.distance(), host, AdminAlert.Kind.NEARBY);
+			alerts.raise(record);
+		}
+	}
 
-		long now = System.currentTimeMillis();
-		if (!pending.isEmpty() && !alerts.isBusy(now)) {
-			Pending next = pending.poll();
-			if (next != null && alerts.raise(next.match(), next.kind(), now) && sound.value()) {
+	/** Where a watched player is standing right now, or null when gone. */
+	private static BlockPos positionOf(Minecraft mc, UUID uuid) {
+		net.minecraft.world.entity.Entity entity = mc.level == null ? null : mc.level.getPlayerByUUID(uuid);
+		return entity == null ? null : entity.blockPosition();
+	}
+
+	/** Re-resolves the profile for the current host and bind the store to it. */
+	private void resolveProfile(Minecraft mc) {
+		String current = ServerProfileMatcher.hostOf(mc);
+		host = current == null ? "singleplayer" : current;
+		ServerProfile resolved = matcher.resolve(mc, profileChoice.option());
+		if (resolved != profile || !known.host().equals(host)) {
+			profile = resolved;
+			known.bind(host);
+		}
+	}
+
+	// ----------------------------------------------------------------- output
+
+	/**
+	 * Everything that happens when an alert is accepted: the card, the sound and
+	 * the webhook. Ghost mode keeps only the webhook.
+	 */
+	private void deliver(AlertRecord record) {
+		syncWebhook();
+		if (!ghostMode.value()) {
+			hud.push(record, System.currentTimeMillis());
+			if (sound.value() && record.confidence().atLeast(Confidence.HIGH)) {
 				AlertSound.play();
 			}
 		}
+		webhook.send(record);
 	}
 
-	// ------------------------------------------------------------------ scan
-
-	/** The periodic half: everything that can be read from the world and the tab list. */
-	private void scan(Minecraft mc) {
-		long now = System.currentTimeMillis();
-		lastSeen.values().removeIf(seen -> now - seen.atMs() > LAST_SEEN_MAX_MS);
-
-		double maxDistance = detectionRange();
-		List<AdminDetector.Match> inRange = new ArrayList<>();
-		for (AdminDetector.Match match : AdminDetector.scan(mc, watchlist)) {
-			lastSeen.put(match.uuid(), new Seen(match.distance(), now));
-			if (match.distance() <= maxDistance) {
-				inRange.add(match);
-			}
+	public void onHudRender(GuiGraphics graphics, int screenW, int screenH) {
+		if (!isEnabled() || ghostMode.value()) {
+			return;
 		}
-		alerts.update(inRange, Math.max(0, cooldown.get()) * 1000L,
-				sound.value() ? AlertSound::play : null, now);
-
-		for (AdminDetector.Match joined : AdminDetector.scanJoins(mc, watchlist, joinSeen)) {
-			enqueue(joined, AdminAlert.Kind.JOINED);
-		}
-
-		for (AdminDetector.TabTell tell : AdminDetector.scanTells(mc, watchlist)) {
-			AdminAlert.Kind kind = tell.tell() == AdminDetector.Tell.SPECTATOR
-					? AdminAlert.Kind.SPECTATOR
-					: AdminAlert.Kind.HIDDEN_TAG;
-			enqueue(tell.match(), kind);
-		}
-
-		// Once per session, ask about every watched name that is not online at
-		// all: a player hidden before the connection was made leaves no trace
-		// anywhere else.
-		if (!watchlistProbed && probe.value() && ticksSinceSessionStart >= JOIN_GRACE_TICKS) {
-			watchlistProbed = true;
-			seedProbes(mc);
-		}
-	}
-
-	// ----------------------------------------------------------- packet level
-
-	private void handleEvents(List<PacketSignals.Event> events) {
-		for (PacketSignals.Event event : events) {
-			String name = event.name();
-			if (name == null || !watchlist.matches(name)) {
-				continue;
-			}
-			switch (event.kind()) {
-				case UNLISTED -> enqueue(withLastSeen(event.uuid(), name), AdminAlert.Kind.VANISHED);
-				case REMOVED -> {
-					// The entity can outlive the entry; the next tick decides.
-					ghosts.add(new Ghost(event.uuid(), name, tickCounter + GHOST_DELAY_TICKS));
-					queueProbe(name, event.uuid());
+		AlertManager manager = alerts;
+		AdminAlert alert = manager.active();
+		if (alert != null) {
+			float alpha = alert.alpha(System.currentTimeMillis());
+			if (alpha > 0.01f) {
+				UiCanvas canvas = McCanvas.of(graphics);
+				UiType type = new McType();
+				if (faceAlert.value()) {
+					AlertRenderer.renderFaceAlert(canvas, type, graphics, screenW, screenH, alert);
+				}
+				if (notification.value()) {
+					AlertRenderer.renderNotification(canvas, type, screenW, screenH, alert, alpha);
 				}
 			}
 		}
+		hud.render(graphics, screenW, screenH);
 	}
 
-	private void handleGhosts(Minecraft mc) {
-		for (Iterator<Ghost> it = ghosts.iterator(); it.hasNext();) {
-			Ghost ghost = it.next();
-			if (tickCounter < ghost.dueTick()) {
-				continue;
-			}
-			it.remove();
-			if (mc.level.getPlayerByUUID(ghost.uuid()) != null) {
-				enqueue(withLastSeen(ghost.uuid(), ghost.name()), AdminAlert.Kind.GHOST);
-			}
-		}
+	// --------------------------------------------------------------- settings
+
+	/** True when the per-signal switch allows this detector to run. */
+	private boolean signalOn(DetectionKind kind) {
+		BooleanSetting toggle = signalToggles.get(kind);
+		return toggle != null && toggle.value();
 	}
 
-	// ---------------------------------------------------------------- probing
-
-	private void seedProbes(Minecraft mc) {
-		Set<String> online = new HashSet<>();
-		if (mc.getConnection() != null) {
-			for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
-				String name = info.getProfile() == null ? null : info.getProfile().name();
-				if (name != null) {
-					online.add(name.toLowerCase(Locale.ROOT));
-				}
-			}
+	/** A detector runs when its own switch is on and the module permits it. */
+	private boolean active(SignalDetector detector) {
+		if (!signalOn(detector.kind())) {
+			return false;
 		}
-		for (String entry : watchlist.entries()) {
-			if (!online.contains(entry.toLowerCase(Locale.ROOT))) {
-				queueProbe(entry, null);
-			}
-		}
+		// The probe is the only detector that sends anything to the server, so
+		// it also answers to its own kill switch.
+		return !(detector instanceof ProbeDetector) || probingAllowed();
 	}
 
-	private void queueProbe(String name, UUID uuid) {
-		if (!probe.value() || probes.size() >= PROBE_QUEUE_MAX) {
-			return;
-		}
-		if (probeAsked.add(name.toLowerCase(Locale.ROOT))) {
-			probes.add(new Probe(name, uuid));
-		}
-	}
-
-	private void pumpProbes() {
-		if (probeId >= 0) {
-			// A server that never answers must not stall the queue forever.
-			if (tickCounter - probeSentTick > PROBE_TIMEOUT_TICKS) {
-				probeId = -1;
-				probeInFlight = null;
-			}
-			return;
-		}
-		if (!probe.value()) {
-			probes.clear();
-			return;
-		}
-		if (probeCooldown > 0) {
-			probeCooldown--;
-			return;
-		}
-		Probe next = probes.poll();
-		if (next == null) {
-			return;
-		}
-		probeId = PacketSignals.probe(next.name());
-		probeInFlight = probeId < 0 ? null : next;
-		probeSentTick = tickCounter;
-		probeCooldown = PROBE_INTERVAL_TICKS;
-	}
-
-	private void handleResponses(List<PacketSignals.ProbeResponse> responses) {
-		for (PacketSignals.ProbeResponse response : responses) {
-			if (probeId < 0 || response.id() != probeId) {
-				continue;
-			}
-			Probe asked = probeInFlight;
-			probeId = -1;
-			probeInFlight = null;
-			if (asked == null) {
-				return;
-			}
-			for (String name : response.names()) {
-				if (name.equalsIgnoreCase(asked.name())) {
-					enqueue(probedMatch(asked), AdminAlert.Kind.PROBED);
-					return;
-				}
-			}
-			return;
-		}
-	}
-
-	// ----------------------------------------------------------------- alerts
-
-	/** Queues an alert, unless this signal was already reported for that player. */
-	private void enqueue(AdminDetector.Match match, AdminAlert.Kind kind) {
-		if (match == null || ticksSinceSessionStart < JOIN_GRACE_TICKS || pending.size() >= QUEUE_MAX) {
-			return;
-		}
-		Set<AdminAlert.Kind> seen = reported.computeIfAbsent(match.uuid(),
-				key -> EnumSet.noneOf(AdminAlert.Kind.class));
-		// A player already reported as hidden is not reported again because a
-		// later packet hid them harder; the screen has already said it.
-		if (kind == AdminAlert.Kind.PROBED
-				&& (seen.contains(AdminAlert.Kind.VANISHED) || seen.contains(AdminAlert.Kind.GHOST))) {
-			return;
-		}
-		if (seen.add(kind)) {
-			pending.add(new Pending(match, kind));
-		}
-	}
-
-	/** The match for a player the client can no longer see. */
-	private AdminDetector.Match withLastSeen(UUID uuid, String name) {
-		Seen seen = lastSeen.get(uuid);
-		double distance = seen == null ? -1.0 : seen.distance();
-		long age = seen == null ? -1L : System.currentTimeMillis() - seen.atMs();
-		return new AdminDetector.Match(uuid, name, name, distance, age, skinOf(uuid));
-	}
-
-	/** The match for a player the server named but the client cannot see at all. */
-	private AdminDetector.Match probedMatch(Probe probe) {
-		UUID uuid = probe.uuid() != null
-				? probe.uuid()
-				: UUID.nameUUIDFromBytes(probe.name().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
-		return withLastSeen(uuid, probe.name());
-	}
-
-	private static PlayerSkin skinOf(UUID uuid) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.getConnection() == null) {
-			return null;
-		}
-		PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
-		return info == null ? null : info.getSkin();
-	}
-
-	// -------------------------------------------------------------- rendering
-
-	/** Draws the alerts over the HUD. */
-	public void onHudRender(GuiGraphics g, int screenW, int screenH) {
-		if (!isEnabled()) {
-			return;
-		}
-		AdminAlert alert = alerts.active();
-		if (alert == null) {
-			return;
-		}
-		float alpha = alert.alpha(System.currentTimeMillis());
-		if (alpha <= 0.01f) {
-			return;
-		}
-		UiCanvas canvas = McCanvas.of(g);
-		UiType type = TYPE;
-		if (faceAlert.value()) {
-			AlertRenderer.renderFaceAlert(canvas, type, g, screenW, screenH, alert);
-		}
-		if (notification.value()) {
-			AlertRenderer.renderNotification(canvas, type, screenW, screenH, alert, alpha);
-		}
-	}
-
-	// -------------------------------------------------------------- settings
-
-	/** Detection radius in blocks. */
 	public int detectionRange() {
 		return Math.max(MIN_RANGE, Math.min(MAX_RANGE, range.get()));
 	}
 
-	// ---------------------------------------------------------- persistence
+	/** The lowest confidence that produces an alert. */
+	public Confidence minimumConfidence() {
+		return switch (threshold.option()) {
+			case "low" -> Confidence.LOW;
+			case "high" -> Confidence.HIGH;
+			case "certain" -> Confidence.CERTAIN;
+			default -> Confidence.MEDIUM;
+		};
+	}
+
+	/** The profile in force, exposed for the debug readout. */
+	public ServerProfile activeProfile() {
+		return profile;
+	}
 
 	@Override
 	public void loadConfig(JsonObject json) {
 		watchlist.set(ConfigValues.stringList(json, "watchlist"));
-		range.set(clamp(ConfigValues.intValue(json, "range", DEFAULT_RANGE), MIN_RANGE, MAX_RANGE));
+		range.set(ConfigValues.intValue(json, "range", DEFAULT_RANGE));
 		faceAlert.set(ConfigValues.boolValue(json, "face_alert", true));
 		notification.set(ConfigValues.boolValue(json, "notification", true));
 		sound.set(ConfigValues.boolValue(json, "sound", true));
 		probe.set(ConfigValues.boolValue(json, "probe", true));
-		cooldown.set(clamp(ConfigValues.intValue(json, "cooldown", DEFAULT_COOLDOWN), MIN_COOLDOWN, MAX_COOLDOWN));
+		ghostMode.set(ConfigValues.boolValue(json, "ghost_mode", false));
+		threshold.select(ConfigValues.stringValue(json, "alert_threshold", "medium"));
+		profileChoice.select(ConfigValues.stringValue(json, "profile", ServerProfile.AUTO));
+		webhookUrl.set(ConfigValues.stringValue(json, "webhook", ""));
+		syncWebhook();
+		for (Map.Entry<DetectionKind, BooleanSetting> entry : signalToggles.entrySet()) {
+			entry.getValue().set(ConfigValues.boolValue(json, entry.getKey().settingKey(), true));
+		}
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
-		com.google.gson.JsonArray names = new com.google.gson.JsonArray();
+		JsonArray names = new JsonArray();
 		for (String entry : watchlist.entries()) {
 			names.add(entry);
 		}
@@ -470,10 +371,40 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		json.addProperty("notification", notification.value());
 		json.addProperty("sound", sound.value());
 		json.addProperty("probe", probe.value());
-		json.addProperty("cooldown", Math.max(MIN_COOLDOWN, Math.min(MAX_COOLDOWN, cooldown.get())));
+		json.addProperty("ghost_mode", ghostMode.value());
+		json.addProperty("alert_threshold", threshold.option());
+		json.addProperty("profile", profileChoice.option());
+		json.addProperty("webhook", webhookUrl.value());
+		for (Map.Entry<DetectionKind, BooleanSetting> entry : signalToggles.entrySet()) {
+			json.addProperty(entry.getKey().settingKey(), entry.getValue().value());
+		}
 	}
 
-	private static int clamp(int value, int min, int max) {
-		return Math.max(min, Math.min(max, value));
+	/**
+	 * Points the sender at the URL currently in the setting.
+	 *
+	 * The setting can change while the module is running (the webhook field in
+	 * the GUI), so the sender is re-read every tick rather than only when the
+	 * config is loaded. The comparison is a string equals, and it only calls
+	 * through when the text actually differs.
+	 */
+	private void syncWebhook() {
+		String url = webhookUrl.value();
+		if (!url.equals(appliedWebhook)) {
+			appliedWebhook = url;
+			webhook.configure(url);
+		}
+	}
+
+	/** True when the probe detector is allowed to run. */
+	public boolean probingAllowed() {
+		return probe.value();
+	}
+
+	/** A one line state summary, used by the log when a session starts. */
+	public String summary() {
+		return String.format(Locale.ROOT, "%s · %s · %d watched · %d signals on",
+				host, profile.name(), watchlist.entries().size(),
+				signalToggles.values().stream().filter(BooleanSetting::value).count());
 	}
 }

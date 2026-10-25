@@ -42,7 +42,13 @@ public final class AdminAlert {
 		/** Listed, but in spectator mode: invisible, and the tab list says so. */
 		SPECTATOR,
 		/** Listed, but their team hides nametags: the older vanish style. */
-		HIDDEN_TAG
+		HIDDEN_TAG,
+		/**
+		 * The evidence has no account attached: a door opened by nobody, a
+		 * footstep with no feet. The wording says so instead of inventing a
+		 * name for a player the client was never told about.
+		 */
+		UNSEEN
 	}
 
 	/** Vanilla's elder guardian particle lives for 30 ticks. */
