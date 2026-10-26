@@ -67,10 +67,18 @@ public final class AlertManager {
 		}
 		long now = System.currentTimeMillis();
 		Raised previous = raised.get(record.uuid());
-		if (previous != null && previous.kind == record.kind()
-				&& now - previous.at < DEDUP_MS
-				&& !record.confidence().atLeast(previous.confidence)) {
-			return false;
+		if (previous != null) {
+			// Only a strictly stronger finding reopens an alert that is already
+			// on the screen. The correlator re-evaluates every subject every
+			// tick, so "not weaker than" is the wrong test: with it an
+			// unchanged finding reopens the alert fifty times a second, which
+			// restarts the guardian face at zero every frame and keeps the
+			// wording - which only starts after the face - from ever appearing.
+			// Equal evidence means "still true", not "tell them again".
+			boolean stronger = record.confidence().ordinal() > previous.confidence.ordinal();
+			if (previous.kind == record.kind() && now - previous.at < DEDUP_MS && !stronger) {
+				return false;
+			}
 		}
 		raised.put(record.uuid(), new Raised(record.kind(), record.confidence(), now));
 		active = toAlert(record, now);

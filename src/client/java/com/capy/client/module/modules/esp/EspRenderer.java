@@ -7,7 +7,9 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -31,10 +33,12 @@ import org.slf4j.LoggerFactory;
  *       single line at this distance is a hairline, while a faint bloom under
  *       the bright core reads as thickness without a second geometry
  *       pass;</li>
- *   <li>optional tracers: a line from just in front of the camera to the
+ *   <li>optional tracers: a line from the centre of the crosshair to the
  *       centre of every box, in the same hue and under the same depth rule.
- *       They are the fastest way to answer "which direction is that" while
- *       keeping the boxes as the precise overlay.</li>
+ *       Every line leaves from the same pixel, so a bundle of them reads as a
+ *       fan of directions rather than as lines that start at six different
+ *       places; they are the fastest way to answer "which direction is that"
+ *       while keeping the boxes as the precise overlay.</li>
  *   </ul>
  *
  * Boxes are sorted far to near before anything is submitted. The fills are
@@ -70,9 +74,19 @@ public final class EspRenderer {
 	 */
 	private static final int BUFFER_BYTES = 2 * 1024 * 1024;
 	private static MultiBufferSource.BufferSource batch;
+	/** The builder behind {@link #batch}, kept so a dropped one can be freed. */
+	private static ByteBufferBuilder buffer;
 
 	private static final List<EspModule> ACTIVE = new ArrayList<>();
-	private static final List<AABB> BOXES = new ArrayList<>();
+	/**
+	 * The sorted boxes of every active module for this frame.
+	 *
+	 * Both passes need the same far-to-near order, and a module's boxes cost a
+	 * walk (players) or a copy (everything else) to produce, so the list is
+	 * built once per frame here and then read twice. A map keyed by identity
+	 * keeps one list per module without allocating a pair for every box.
+	 */
+	private static final Map<EspModule, List<AABB>> SORTED = new IdentityHashMap<>();
 	private static double camX;
 	private static double camY;
 	private static double camZ;
@@ -121,14 +135,17 @@ public final class EspRenderer {
 			camY = camera.y;
 			camZ = camera.z;
 
-			// A tracer starts a little in front of and below the eye: exactly at
-			// the camera it would begin inside the near plane and be invisible
-			// for the first few blocks, which reads as a late tracer.
+			// The anchor is the crosshair. A point anywhere else on the view
+			// axis projects to the centre of the screen, so a half block in
+			// front of the eye is the smallest offset that keeps the line out of
+			// the near plane while still starting exactly on the crosshair. The
+			// up vector used to be subtracted from it, which pushed every tracer
+			// below the crosshair and made the bundle aim at a point the player
+			// was not looking at.
 			var forward = mc.gameRenderer.getMainCamera().forwardVector();
-			var up = mc.gameRenderer.getMainCamera().upVector();
-			anchorX = forward.x() * 0.45 - up.x() * 0.10;
-			anchorY = forward.y() * 0.45 - up.y() * 0.10;
-			anchorZ = forward.z() * 0.45 - up.z() * 0.10;
+			anchorX = forward.x() * 0.5;
+			anchorY = forward.y() * 0.5;
+			anchorZ = forward.z() * 0.5;
 
 			// AFTER_ENTITIES is called after the frame pass has created its
 			// matrix stack, so this is normally non-null. A null would silently
@@ -145,6 +162,13 @@ public final class EspRenderer {
 			// has to follow the GUI scale to look the same on every screen.
 			float crisp = Math.max(1.4f, mc.getWindow().getGuiScale() * 1.25f);
 			float glow = crisp * GLOW_SCALE;
+
+			// Every module's boxes are gathered and sorted once here, before
+			// either pass: both the fills and the lines draw the same list in
+			// the same order, and gathering twice per module per frame would
+			// walk the player list twice and re-sort twice for no difference on
+			// screen.
+			prepare();
 
 			// One layer at a time. A buffer source hands out a shared buffer for
 			// custom render types and flushes the previous one as soon as another
@@ -165,10 +189,22 @@ public final class EspRenderer {
 				try {
 					batch.endBatch();
 				} catch (RuntimeException ignored) {
-					// The buffer is already unusable; the reference is dropped
-					// below and a fresh one is created next frame.
+					// The buffer is already unusable; it is freed below and a
+					// fresh one is created next frame.
 				}
 				batch = null;
+			}
+			// Dropping the builder without closing it leaks the native memory
+			// it holds - and the retry above runs once per frame for as long as
+			// the failure lasts, so the leak would be megabytes a second rather
+			// than a one-off.
+			if (buffer != null) {
+				try {
+					buffer.close();
+				} catch (RuntimeException ignored) {
+					// Nothing useful to do: the reference is dropped either way.
+				}
+				buffer = null;
 			}
 			if (!throughFailed) {
 				throughFailed = true;
@@ -179,6 +215,32 @@ public final class EspRenderer {
 		}
 	}
 
+	/**
+	 * Builds this frame's sorted box list for every active module.
+	 *
+	 * Called once per frame, before either pass, so a module that draws both a
+	 * fill and an outline is walked and sorted once.
+	 */
+	private static void prepare() {
+		for (EspModule module : ACTIVE) {
+			List<AABB> boxes = SORTED.get(module);
+			if (boxes == null) {
+				boxes = new ArrayList<>();
+				SORTED.put(module, boxes);
+			} else {
+				boxes.clear();
+			}
+			boxes.addAll(module.boxes());
+			if (boxes.size() > 1) {
+				boxes.sort(FAR_TO_NEAR);
+			}
+		}
+		// A module that was switched off since the last frame keeps no list:
+		// the map is the cache, and a cache that never forgets would grow every
+		// time a module is toggled.
+		SORTED.keySet().retainAll(ACTIVE);
+	}
+
 	private static void drawLayers(MultiBufferSource.BufferSource batches, PoseStack.Pose pose,
 			float crisp, float glow, boolean anyFill, boolean anyLine) {
 		if (anyFill) {
@@ -186,15 +248,16 @@ public final class EspRenderer {
 				if (!module.fills()) {
 					continue;
 				}
-				gather(module);
-				if (BOXES.isEmpty()) {
+				List<AABB> boxes = SORTED.get(module);
+				if (boxes == null || boxes.isEmpty()) {
 					continue;
 				}
-				VertexConsumer fills = batches.getBuffer(EspRenderTypes.quads(module.throughWalls()));
-				int top = module.fillTop();
-				int bottom = module.fillBottom();
-				for (AABB box : BOXES) {
-					fill(fills, pose, box, top, bottom);
+				VertexConsumer fills = batches.getBuffer(EspRenderTypes.quads());
+				for (AABB box : boxes) {
+					// The colour belongs to the box, not to the module: storage
+					// draws a chest and a shulker box in different hues.
+					int argb = module.colorFor(box);
+					fill(fills, pose, box, EspModule.fillTop(argb), EspModule.fillBottom(argb));
 				}
 				// Flush per module: a module can contribute hundreds of boxes and
 				// the next module must start from a fresh builder, because a
@@ -207,25 +270,25 @@ public final class EspRenderer {
 				if (!module.outlines() && !module.tracers()) {
 					continue;
 				}
-				gather(module);
-				if (BOXES.isEmpty()) {
+				List<AABB> boxes = SORTED.get(module);
+				if (boxes == null || boxes.isEmpty()) {
 					continue;
 				}
-				VertexConsumer lines = batches.getBuffer(EspRenderTypes.lines(module.throughWalls()));
-				int color = module.color();
-				int glowColor = halo(color);
+				VertexConsumer lines = batches.getBuffer(EspRenderTypes.lines());
 				if (module.tracers()) {
 					// Tracers go under the outlines: the box edge is the precise
 					// information, the line is the pointer to it.
-					for (AABB box : BOXES) {
+					for (AABB box : boxes) {
+						int glowColor = halo(module.colorFor(box));
 						tracer(lines, pose, box, glowColor, glow);
-						tracer(lines, pose, box, color, crisp);
+						tracer(lines, pose, box, module.colorFor(box), crisp);
 					}
 				}
 				if (module.outlines()) {
-					for (AABB box : BOXES) {
+					for (AABB box : boxes) {
+						int glowColor = halo(module.colorFor(box));
 						outline(lines, pose, box, glowColor, glow);
-						outline(lines, pose, box, color, crisp);
+						outline(lines, pose, box, module.colorFor(box), crisp);
 					}
 				}
 				batches.endBatch();
@@ -236,18 +299,10 @@ public final class EspRenderer {
 	/** The reusable batch, created on the first frame that needs it. */
 	private static MultiBufferSource.BufferSource batch() {
 		if (batch == null) {
-			batch = MultiBufferSource.immediate(new ByteBufferBuilder(BUFFER_BYTES));
+			buffer = new ByteBufferBuilder(BUFFER_BYTES);
+			batch = MultiBufferSource.immediate(buffer);
 		}
 		return batch;
-	}
-
-	/** Copies a module's boxes into the scratch list, far to near. */
-	private static void gather(EspModule module) {
-		BOXES.clear();
-		BOXES.addAll(module.boxes());
-		if (BOXES.size() > 1) {
-			BOXES.sort(FAR_TO_NEAR);
-		}
 	}
 
 	/** The same hue at a fixed fraction of the outline alpha. */

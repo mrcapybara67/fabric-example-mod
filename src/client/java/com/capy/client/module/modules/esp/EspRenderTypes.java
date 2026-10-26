@@ -12,7 +12,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Render types for the ESP overlays, including the see-through pair.
+ * Render types for the ESP overlays: the see-through pair, used for every box
+ * by every overlay.
  *
  * Vanilla's {@code lines} and {@code debugQuads} pipelines are depth tested, so
  * a container behind a wall simply disappears — which defeats the point of a
@@ -50,9 +51,9 @@ public final class EspRenderTypes {
 		throughQuads = null;
 	}
 
-	/** Outline lines, depth tested or not. */
-	public static RenderType lines(boolean throughWalls) {
-		if (!throughWalls || unavailable) {
+	/** Outline lines, always without a depth test. */
+	public static RenderType lines() {
+		if (unavailable) {
 			return RenderTypes.lines();
 		}
 		if (throughLines == null) {
@@ -61,9 +62,9 @@ public final class EspRenderTypes {
 		return throughLines == null ? RenderTypes.lines() : throughLines;
 	}
 
-	/** Filled box faces, depth tested or not. */
-	public static RenderType quads(boolean throughWalls) {
-		if (!throughWalls || unavailable) {
+	/** Filled box faces, always without a depth test. */
+	public static RenderType quads() {
+		if (unavailable) {
 			return RenderTypes.debugQuads();
 		}
 		if (throughQuads == null) {

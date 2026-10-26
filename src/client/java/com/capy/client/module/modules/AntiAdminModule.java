@@ -27,7 +27,6 @@ import com.capy.client.module.modules.antiadmin.ChatDetector;
 import com.capy.client.module.modules.antiadmin.Confidence;
 import com.capy.client.module.modules.antiadmin.ContainerDetector;
 import com.capy.client.module.modules.antiadmin.Correlator;
-import com.capy.client.module.modules.antiadmin.DetectionKind;
 import com.capy.client.module.modules.antiadmin.EntityTabCrossRefDetector;
 import com.capy.client.module.modules.antiadmin.ExplosionDetector;
 import com.capy.client.module.modules.antiadmin.GamemodeDetector;
@@ -50,11 +49,9 @@ import com.capy.client.module.modules.antiadmin.TeamPacketDetector;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
@@ -105,8 +102,6 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			setting(new ChoiceSetting("profile", 0, "auto", "default", "donut-family", "anarchy"));
 	private final StringSetting webhookUrl = setting(new StringSetting("webhook", ""));
 
-	/** One switch per signal, in enum order so the GUI list is stable. */
-	private final Map<DetectionKind, BooleanSetting> signalToggles = new EnumMap<>(DetectionKind.class);
 	private final List<SignalDetector> detectors = new ArrayList<>();
 	private final Set<UUID> npcs = new HashSet<>();
 
@@ -129,10 +124,11 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 
 	public AntiAdminModule() {
 		super(Category.MISC, "anti_admin");
-		for (DetectionKind kind : DetectionKind.values()) {
-			signalToggles.put(kind, setting(new BooleanSetting(kind.settingKey(), true)));
-		}
-
+		// Every detector runs. The one switch that used to sit per signal is
+		// gone: seventeen rows the user had to open and check, all of which
+		// defaulted to on anyway. Which signals matter on a given server is the
+		// profile's job, and how loud it has to be before an alert is the
+		// threshold's job - both already answer it with one row each.
 		NpcFingerprinter fingerprinter = new NpcFingerprinter(buffer, npcs);
 		detectors.add(new EntityTabCrossRefDetector(buffer, npcs));
 		detectors.add(fingerprinter);
@@ -164,6 +160,12 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			}
 			known.bind(host);
 			resolveProfile(Minecraft.getInstance());
+			// The packet queue is fed by the mixin whether or not this module is
+			// on, so it can hold a pile of events from a time nobody was
+			// watching. Draining them on enable would report a burst of old
+			// evidence as if it had just happened - right at the moment the
+			// user opens the module to see what it finds.
+			PacketSignals.clear();
 			for (SignalDetector detector : detectors) {
 				detector.onEnable();
 			}
@@ -306,19 +308,14 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 
 	// --------------------------------------------------------------- settings
 
-	/** True when the per-signal switch allows this detector to run. */
-	private boolean signalOn(DetectionKind kind) {
-		BooleanSetting toggle = signalToggles.get(kind);
-		return toggle != null && toggle.value();
-	}
-
-	/** A detector runs when its own switch is on and the module permits it. */
+	/**
+	 * Whether this detector runs at all.
+	 *
+	 * Every detector runs by default - the module is a watcher, not a list to
+	 * configure. The probe is the single exception: it is the only detector
+	 * that sends anything to the server, so it answers to its own switch.
+	 */
 	private boolean active(SignalDetector detector) {
-		if (!signalOn(detector.kind())) {
-			return false;
-		}
-		// The probe is the only detector that sends anything to the server, so
-		// it also answers to its own kill switch.
 		return !(detector instanceof ProbeDetector) || probingAllowed();
 	}
 
@@ -354,9 +351,6 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		profileChoice.select(ConfigValues.stringValue(json, "profile", ServerProfile.AUTO));
 		webhookUrl.set(ConfigValues.stringValue(json, "webhook", ""));
 		syncWebhook();
-		for (Map.Entry<DetectionKind, BooleanSetting> entry : signalToggles.entrySet()) {
-			entry.getValue().set(ConfigValues.boolValue(json, entry.getKey().settingKey(), true));
-		}
 	}
 
 	@Override
@@ -375,9 +369,6 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		json.addProperty("alert_threshold", threshold.option());
 		json.addProperty("profile", profileChoice.option());
 		json.addProperty("webhook", webhookUrl.value());
-		for (Map.Entry<DetectionKind, BooleanSetting> entry : signalToggles.entrySet()) {
-			json.addProperty(entry.getKey().settingKey(), entry.getValue().value());
-		}
 	}
 
 	/**
@@ -403,8 +394,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 
 	/** A one line state summary, used by the log when a session starts. */
 	public String summary() {
-		return String.format(Locale.ROOT, "%s · %s · %d watched · %d signals on",
-				host, profile.name(), watchlist.entries().size(),
-				signalToggles.values().stream().filter(BooleanSetting::value).count());
+		return String.format(Locale.ROOT, "%s · %s · %d watched · %d detectors",
+				host, profile.name(), watchlist.entries().size(), detectors.size());
 	}
 }

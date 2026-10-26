@@ -1,8 +1,13 @@
 package com.capy.client.module.modules.esp;
 
+import com.capy.client.config.ConfigValues;
+import com.capy.client.module.ColorSetting;
+import com.capy.client.module.Setting;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -12,7 +17,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 
 /**
- * Storage ESP — a box around every container in range.
+ * Storage ESP — a box around every container in range, in the colour of the
+ * container it is.
  *
  * The scan reads the block entities the client already holds, so it costs one
  * map walk per loaded chunk and never asks the server for anything. It runs
@@ -25,6 +31,11 @@ import net.minecraft.world.phys.AABB;
  * chests, barrels, shulker boxes, furnaces, hoppers, dispensers, brewing
  * stands, pots and bookshelves all do. Ender chests hold their items in the
  * player instead, so they are the one type added back by block id.
+ *
+ * Each box keeps its {@link StorageKind} so the renderer can pick that kind's
+ * colour for both the fill and the outline. The map is identity based on
+ * purpose: the boxes are rebuilt every scan, so the reference is the key and
+ * neither side has to hash a floating point box.
  */
 public final class StorageEspModule extends EspModule {
 	/** Ticks between two scans. */
@@ -34,17 +45,48 @@ public final class StorageEspModule extends EspModule {
 
 	private final List<AABB> boxes = new ArrayList<>();
 	private final List<AABB> scratch = new ArrayList<>();
+	/** One colour row per kind, in enum order so the card is stable. */
+	private final Map<StorageKind, ColorSetting> colors = new java.util.EnumMap<>(StorageKind.class);
+	/** The kind of every published box. Cleared and rebuilt with the boxes. */
+	private final Map<AABB, StorageKind> kinds = new IdentityHashMap<>();
+	private final Map<AABB, StorageKind> scratchKinds = new IdentityHashMap<>();
 	private ClientLevel level;
 	private int cooldown;
 	private int lastRange = -1;
 
 	public StorageEspModule() {
-		super("storage_esp", 0xFFF7A93B, 64, false);
+		super("storage_esp", 64, false);
+		for (StorageKind kind : StorageKind.values()) {
+			colors.put(kind, setting(new ColorSetting(kind.settingKey(), kind.defaultColor())));
+		}
+		// The colour rows belong at the top of the card, where every other
+		// overlay keeps its colour: they are the settings this module is
+		// opened for, and the core rows below them are shared with the other
+		// two overlays anyway.
+		List<Setting<?>> settings = settings();
+		List<Setting<?>> colours = new ArrayList<>(colors.values());
+		settings.removeAll(colours);
+		settings.addAll(0, colours);
 	}
 
 	@Override
 	public List<AABB> boxes() {
 		return boxes;
+	}
+
+	/** The representative colour: the card's accent bar uses it. */
+	@Override
+	public int color() {
+		ColorSetting chest = colors.get(StorageKind.CHEST);
+		return chest == null ? super.color() : chest.argb();
+	}
+
+	/** The colour of this kind of storage, falling back to the base colour. */
+	@Override
+	public int colorFor(AABB box) {
+		StorageKind kind = kinds.get(box);
+		ColorSetting setting = kind == null ? null : colors.get(kind);
+		return setting == null ? super.colorFor(box) : setting.argb();
 	}
 
 	@Override
@@ -57,6 +99,8 @@ public final class StorageEspModule extends EspModule {
 			level = null;
 			boxes.clear();
 			scratch.clear();
+			kinds.clear();
+			scratchKinds.clear();
 			cooldown = 0;
 			return;
 		}
@@ -65,6 +109,8 @@ public final class StorageEspModule extends EspModule {
 			level = current;
 			boxes.clear();
 			scratch.clear();
+			kinds.clear();
+			scratchKinds.clear();
 			cooldown = 0;
 		}
 		boolean rangeChanged = range() != lastRange;
@@ -78,6 +124,7 @@ public final class StorageEspModule extends EspModule {
 
 	private void scan(ClientLevel level, BlockPos center) {
 		scratch.clear();
+		scratchKinds.clear();
 		int limit = range();
 		double limitSq = (double) limit * limit;
 		double cx = center.getX() + 0.5;
@@ -92,7 +139,9 @@ public final class StorageEspModule extends EspModule {
 				if (EspScanner.distanceSqr(pos, cx, cy, cz) > limitSq) {
 					continue;
 				}
-				scratch.add(new AABB(pos).inflate(INFLATE));
+				AABB box = new AABB(pos).inflate(INFLATE);
+				scratch.add(box);
+				scratchKinds.put(box, StorageKind.of(entity.getBlockState()));
 				if (scratch.size() >= MAX_BOXES) {
 					return false;
 				}
@@ -102,10 +151,12 @@ public final class StorageEspModule extends EspModule {
 		publish();
 	}
 
-	/** Copies the fresh scan into the published list without reallocating it. */
+	/** Copies the fresh scan into the published lists without reallocating them. */
 	private void publish() {
 		boxes.clear();
 		boxes.addAll(scratch);
+		kinds.clear();
+		kinds.putAll(scratchKinds);
 	}
 
 	private static boolean isStorage(BlockEntity entity) {
@@ -125,6 +176,8 @@ public final class StorageEspModule extends EspModule {
 	protected void clear() {
 		boxes.clear();
 		scratch.clear();
+		kinds.clear();
+		scratchKinds.clear();
 		level = null;
 		cooldown = 0;
 		lastRange = -1;
@@ -135,8 +188,20 @@ public final class StorageEspModule extends EspModule {
 	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
+		for (Map.Entry<StorageKind, ColorSetting> entry : colors.entrySet()) {
+			entry.getValue().set(ConfigValues.intValue(json, entry.getKey().settingKey(),
+					entry.getKey().defaultColor()));
+		}
 		// The range may have changed between sessions; scan on the next tick.
 		lastRange = -1;
 		cooldown = 0;
+	}
+
+	@Override
+	public void saveConfig(JsonObject json) {
+		super.saveConfig(json);
+		for (Map.Entry<StorageKind, ColorSetting> entry : colors.entrySet()) {
+			json.addProperty(entry.getKey().settingKey(), entry.getValue().argb());
+		}
 	}
 }

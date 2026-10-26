@@ -10,6 +10,7 @@ import com.capy.client.module.modules.antiadmin.AdminAlert;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
 import com.capy.client.module.modules.antiadmin.AlertRenderer;
 import com.capy.client.module.modules.esp.PlayerEspModule;
+import com.capy.client.module.modules.esp.StorageEspModule;
 import com.capy.client.module.modules.hud.HudElements;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -59,11 +60,13 @@ public final class Preview {
 		modules.register(new CustomKnifeModule());
 		modules.register(new WeatherNotifierModule());
 		modules.register(new AntiAdminModule());
-		// Only the player overlay: the other two resolve block tags, which needs
-		// the game's registries to be bootstrapped and this renderer runs without
-		// them. The card, the settings and the layout are shared, so one overlay
-		// is enough to review the whole group.
+		// Only the player and storage overlays: Block ESP resolves its filter
+		// through the block registry, which needs the game's registries to be
+		// bootstrapped and this renderer runs without them. Storage only looks
+		// at block states while scanning, so its card - six colour rows, one
+		// per kind - can be reviewed here.
 		modules.register(new PlayerEspModule());
+		modules.register(new StorageEspModule());
 		HudElements.register(modules);
 
 		SwingType type = new SwingType();
@@ -80,7 +83,7 @@ public final class Preview {
 		saveExpanded(out.resolve("07-world-weather.png"), type, 1600, 900,
 				Category.WORLD.ordinal(), 0);
 		// A world overlay with its settings open: colour, range, the two layers
-		// and the through-walls switch all belong to the shared ESP base.
+		// and the tracer switch all belong to the shared ESP base.
 		saveExpanded(out.resolve("08-donutsmp-player-esp.png"), type, 1600, 900,
 				Category.DONUT_SMP.ordinal(), 0);
 
@@ -122,6 +125,14 @@ public final class Preview {
 		// to its content and scrolls, so this is the shot that shows whether
 		// the list and its rail behave when there is more than one card.
 		saveRadial(out.resolve("29-radial-hud-960x540.png"), type, 960, 540, Category.HUD.ordinal());
+
+		// The storage overlay with its six colour rows open, and the Anti Admin
+		// card with its whole setting list open - the two cards whose rows this
+		// build changed.
+		saveExpanded(out.resolve("30-donutsmp-storage-esp.png"), type, 1600, 900,
+				Category.DONUT_SMP.ordinal(), 1);
+		saveExpanded(out.resolve("31-misc-anti-admin.png"), type, 1600, 900,
+				Category.MISC.ordinal(), 0);
 
 		// The alert at the points of its timeline that matter: the face in,
 		// the peak, the bottom of the travel, the hand over to the wording,
