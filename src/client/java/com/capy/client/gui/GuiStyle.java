@@ -8,34 +8,29 @@ package com.capy.client.gui;
  * testing are the same in every style, so a new entry only has to answer
  * "what does the shell look like" and costs no changes anywhere else.
  *
- * Three entries exist today:
+ * Two entries exist today:
  *
  *   <ul>
  *     <li>{@link #NORMAL} - the decorated window: petals behind the frame, a
  *         drifting specular band, a lit top edge;</li>
- *     <li>{@link #MINIMAL} - the same layout with every moving decoration
- *         removed. It is both calmer to look at and cheaper to draw, which is
- *         what makes it useful on a low end machine;</li>
  *     <li>{@link #RADIAL} - the Sakura ring: a large accent disc carrying the
  *         wordmark, a category ring around it and a module sheet beside the
  *         ring. It has its own accent colour, separate from the window.</li>
  *   </ul>
  *
- * Further styles can be added here without touching the layout code.
+ * Both styles draw their moving decoration, so nothing in the frame is gated
+ * on the style: the window styles differ only in where the content lives.
  */
 public enum GuiStyle {
-	NORMAL("normal", "Normal", true),
-	MINIMAL("minimal", "Minimal", false),
-	RADIAL("radial", "Radial", true);
+	NORMAL("normal", "Normal"),
+	RADIAL("radial", "Radial");
 
 	private final String id;
 	private final String label;
-	private final boolean decorated;
 
-	GuiStyle(String id, String label, boolean decorated) {
+	GuiStyle(String id, String label) {
 		this.id = id;
 		this.label = label;
-		this.decorated = decorated;
 	}
 
 	public String id() {
@@ -44,11 +39,6 @@ public enum GuiStyle {
 
 	public String label() {
 		return label;
-	}
-
-	/** True when the frame draws its moving decoration (petals, sheen, glow). */
-	public boolean decorated() {
-		return decorated;
 	}
 
 	/** The style stored in the config, or {@link #NORMAL} if it is unknown. */
@@ -63,7 +53,13 @@ public enum GuiStyle {
 		return NORMAL;
 	}
 
-	/** The next style, wrapping around; what the header button applies. */
+	/**
+	 * The other style; what the header button applies.
+	 *
+	 * With two entries this is a toggle: NORMAL to RADIAL and back. The
+	 * modulo keeps the arithmetic correct if a third style is ever added, so
+	 * the button does not have to change with it.
+	 */
 	public GuiStyle next() {
 		GuiStyle[] all = values();
 		return all[(ordinal() + 1) % all.length];

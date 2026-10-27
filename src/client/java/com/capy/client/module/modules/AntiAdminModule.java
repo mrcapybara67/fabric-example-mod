@@ -88,6 +88,8 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private static final int SCAN_INTERVAL = 10;
 	/** The profile is re-resolved this often, in ticks. */
 	private static final int PROFILE_INTERVAL = 40;
+	/** Resolved once: a font lookup per frame is not free. */
+	private static final UiType TYPE = new McType();
 
 	private final WatchlistSetting watchlist = setting(new WatchlistSetting("watchlist"));
 	private final SliderSetting range = setting(new SliderSetting("range", DEFAULT_RANGE, MIN_RANGE, MAX_RANGE));
@@ -294,7 +296,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			float alpha = alert.alpha(System.currentTimeMillis());
 			if (alpha > 0.01f) {
 				UiCanvas canvas = McCanvas.of(graphics);
-				UiType type = new McType();
+				UiType type = TYPE;
 				if (faceAlert.value()) {
 					AlertRenderer.renderFaceAlert(canvas, type, graphics, screenW, screenH, alert);
 				}

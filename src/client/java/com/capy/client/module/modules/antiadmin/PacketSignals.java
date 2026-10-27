@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -46,7 +46,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * <p>Threading: vanilla runs these handlers on the client thread — the initial
  * read happens on Netty, then the work is re-scheduled onto the client thread —
  * and every entry point checks that before touching anything. The queue is a
- * {@link ConcurrentLinkedQueue} anyway, because it is drained from the tick and
+ * {@link ConcurrentLinkedDeque} anyway, because it is drained from the tick and
  * a future version of the game is free to change that assumption.</p>
  */
 public final class PacketSignals {
@@ -55,7 +55,7 @@ public final class PacketSignals {
 	/** Probe ids start far above vanilla's, so a reply can never be misread. */
 	private static final AtomicInteger PROBE_IDS = new AtomicInteger(Integer.MAX_VALUE - 1024);
 
-	private static final ConcurrentLinkedQueue<Event> EVENTS = new ConcurrentLinkedQueue<>();
+	private static final ConcurrentLinkedDeque<Event> EVENTS = new ConcurrentLinkedDeque<>();
 
 	private PacketSignals() {
 	}
@@ -335,7 +335,7 @@ public final class PacketSignals {
 		}
 		List<Event> out = new ArrayList<>(EVENTS.size());
 		Event event;
-		while ((event = EVENTS.poll()) != null) {
+		while ((event = EVENTS.pollFirst()) != null) {
 			out.add(event);
 		}
 		return out;
@@ -349,10 +349,12 @@ public final class PacketSignals {
 	// --------------------------------------------------------------- internals
 
 	private static void push(Event event) {
+		// Oldest out first, so the queue holds the most recent evidence rather
+		// than the first evidence of the session.
 		while (EVENTS.size() >= MAX_EVENTS) {
-			EVENTS.poll();
+			EVENTS.pollFirst();
 		}
-		EVENTS.add(event);
+		EVENTS.addLast(event);
 	}
 
 	private static boolean clientThread() {

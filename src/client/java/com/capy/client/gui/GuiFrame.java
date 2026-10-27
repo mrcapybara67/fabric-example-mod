@@ -384,13 +384,11 @@ public final class GuiFrame {
 			windowHeight.snap(targetWindowHeight());
 		}
 
-		// The decorations are the only part of the frame a style is allowed to
-		// drop. Skipping them here (rather than inside UiPetals) is what makes
-		// the plain style cheaper: nothing is updated and nothing is submitted.
-		if (style.decorated()) {
-			petals.update(delta, width, height);
-			petals.render(c, UiPetals.Layer.BACK, fade);
-		}
+		// The decorations belong to the window styles. The ring draws its own
+		// scene and returned above, so everything below this line is only ever
+		// reached with a window on screen.
+		petals.update(delta, width, height);
+		petals.render(c, UiPetals.Layer.BACK, fade);
 
 		// The window pops into place: it grows out of 88% with a small
 		// overshoot, drops in from above and fades up. The overshoot is what
@@ -405,11 +403,9 @@ public final class GuiFrame {
 
 		Ui.shadow(c, wx, wy, ww, wh, r);
 		Ui.surface(c, wx, wy, ww, wh, r, UiTheme.SHELL_TOP, UiTheme.SHELL_BOTTOM);
-		if (style.decorated()) {
-			// A soft light from above: the top of the window catches the light.
-			Ui.glow(c, wx + 2, wy + 2, ww - 4, Math.min(wh, 90), UiTheme.PALE_CHERRY, 0.05f);
-			Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());
-		}
+		// A soft light from above: the top of the window catches the light.
+		Ui.glow(c, wx + 2, wy + 2, ww - 4, Math.min(wh, 90), UiTheme.PALE_CHERRY, 0.05f);
+		Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());
 		Ui.outline(c, wx, wy, ww, wh, r, UiTheme.BORDER);
 		Ui.innerBevel(c, wx, wy, ww, wh, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 		// One accent hairline along the top edge. It is the only place the shell
@@ -419,7 +415,7 @@ public final class GuiFrame {
 
 		// The accent reveal: a soft pink light sweeps down over the window
 		// while it opens.
-		if (fade < 1f && style.decorated()) {
+		if (fade < 1f) {
 			int sweepH = Math.round(wh * 0.55f);
 			int sweepY = wy + Math.round((1f - ease) * (wh - sweepH));
 			Ui.glow(c, wx, wy, ww, sweepH, UiTheme.ACCENT_2, (1f - fade) * 0.16f);
@@ -445,9 +441,7 @@ public final class GuiFrame {
 
 		// A few petals pass in front of the window for depth. They are very
 		// faint so they never compete with the content.
-		if (style.decorated()) {
-			petals.render(c, UiPetals.Layer.FRONT, fade * 0.7f);
-		}
+		petals.render(c, UiPetals.Layer.FRONT, fade * 0.7f);
 
 		if (footerFitted()) {
 			themePicker.renderOverlay(c, type.regular(), mouseX, mouseY, delta);
@@ -500,7 +494,9 @@ public final class GuiFrame {
 		UiText pageFont = type.medium();
 		int nameX = markX + mark + UiTheme.SP_4;
 		int nameY = Ui.centerTextY(wy, UiTheme.HEADER_H, display);
-		display.draw(c, "Capy Client", nameX, nameY, UiTheme.TEXT);
+		// The wordmark is the client's own name, so it wears the accent rather
+		// than the body text colour: it is branding, not content.
+		display.draw(c, "Capy Client", nameX, nameY, UiTheme.ACCENT);
 
 		// The current page, separated from the wordmark by a hairline.
 		int pageX = nameX + display.width("Capy Client") + UiTheme.SP_4;
@@ -616,8 +612,8 @@ public final class GuiFrame {
 
 		if (compactHeader()) {
 			// The initial of the style name says more in 28 pixels than the
-			// layout glyph did: the chip still cycles, but "N", "M" and "R"
-			// tell the user which of the three they are looking at.
+			// layout glyph did: the chip still cycles, but "N" and "R" tell
+			// the user which of the two they are looking at.
 			UiText small = type.medium();
 			String initial = style.label().substring(0, 1);
 			Ui.drawCentered(c, small, initial, x + w / 2,
@@ -651,8 +647,11 @@ public final class GuiFrame {
 		int rowH = categoryRowHeight();
 		int rowPitch = rowH + UiTheme.SP_1;
 
-		Ui.drawEllipsized(c, type.regular(), "CATEGORIES", sx0 + UiTheme.SP_3, py + UiTheme.SP_5,
-				sw - UiTheme.SP_5, UiTheme.TEXT_3);
+		// The caption shares the row labels' inset rather than the content
+		// header's: in the sidebar the rows are the alignment reference, and a
+		// caption a couple of pixels off them reads as a mistake.
+		Ui.drawEllipsized(c, type.regular(), "CATEGORIES", sx0 + UiTheme.SP_5, py + UiTheme.SP_5,
+				sw - UiTheme.SP_6, UiTheme.TEXT_3);
 
 		for (int i = 0; i < CATEGORIES.length; i++) {
 			Category category = CATEGORIES[i];
@@ -675,8 +674,10 @@ public final class GuiFrame {
 						Ui.withAlpha(UiTheme.PANEL_TOP, 0x90));
 			}
 
-			// The category rows are typographic: no symbol on every entry.
-			int textX = sx0 + UiTheme.SP_4;
+			// The category rows are typographic: no symbol on every entry. The
+			// label is inset past the accent bar of the selected row, so the bar
+			// never sits under the text.
+			int textX = sx0 + UiTheme.SP_5;
 			UiText medium = type.medium();
 			int textY = Ui.centerTextY(y, rowH, medium);
 			int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(sel * 0.9f, hovered ? 0.7f : 0f));
@@ -707,8 +708,8 @@ public final class GuiFrame {
 		// the bottom of its own band, so it can never sit on top of the button.
 		int pickerY = py + ph - UiTheme.SP_8 - THEME_PICKER_H;
 		int captionY = pickerY - UiTheme.SP_2 - type.regular().lineHeight();
-		Ui.drawEllipsized(c, type.regular(), "THEME", sx0 + UiTheme.SP_3, captionY,
-				sw - UiTheme.SP_5, UiTheme.TEXT_3);
+		Ui.drawEllipsized(c, type.regular(), "THEME", sx0 + UiTheme.SP_5, captionY,
+				sw - UiTheme.SP_6, UiTheme.TEXT_3);
 		themePicker.bind(sx0 + UiTheme.SP_2, pickerY, sw - UiTheme.SP_4, THEME_PICKER_H, true);
 		themePicker.render(c, type.regular(), mouseX, mouseY, delta);
 
@@ -759,8 +760,11 @@ public final class GuiFrame {
 		int pillW = meta.width(countLabel) + 14;
 		int pillX = cx + cw - pillW;
 		int pillY = top + (headerH - pillH) / 2 - 2;
-		int titleRoom = Math.max(0, pillX - cx - UiTheme.SP_4);
-		Ui.drawEllipsized(c, bold, title, cx, Ui.centerTextY(top, headerH, bold), titleRoom, UiTheme.TEXT);
+		// The section header is padded by the panel radius, so its first glyph
+		// starts on the same curve the cards below it are cornered to.
+		int titleX = cx + UiTheme.RADIUS_LG;
+		int titleRoom = Math.max(0, pillX - titleX - UiTheme.SP_4);
+		Ui.drawEllipsized(c, bold, title, titleX, Ui.centerTextY(top, headerH, bold), titleRoom, UiTheme.TEXT);
 		Ui.surface(c, pillX, pillY, pillW, pillH, pillH / 2,
 				Ui.withAlpha(UiTheme.PANEL_ALT, 0xB8), Ui.withAlpha(UiTheme.PANEL_TOP, 0x94));
 		Ui.outline(c, pillX, pillY, pillW, pillH, pillH / 2, Ui.withAlpha(UiTheme.BORDER, 0x8C));
