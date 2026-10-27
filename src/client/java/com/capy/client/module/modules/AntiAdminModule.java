@@ -106,6 +106,10 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 
 	private final List<SignalDetector> detectors = new ArrayList<>();
 	private final Set<UUID> npcs = new HashSet<>();
+	/** Watched accounts already announced this session, so a join says it once. */
+	private final Set<UUID> joined = new HashSet<>();
+	/** Tab tells already reported this session, keyed by account and tell. */
+	private final Set<String> toldTells = new HashSet<>();
 
 	private final SignalBuffer buffer = new SignalBuffer();
 	private final AlertManager alerts = new AlertManager();
@@ -191,6 +195,8 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		alerts.reset();
 		hud.clear();
 		npcs.clear();
+		joined.clear();
+		toldTells.clear();
 		PacketSignals.clear();
 		tick = 0L;
 		scanCountdown = 0;
@@ -239,17 +245,59 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		}
 	}
 
-	/** Reports every watched player the client can see inside the range. */
+	/**
+	 * Reports every watched player the client can still see.
+	 *
+	 * Three sources, because no one of them sees everything:
+	 * <ul>
+	 *   <li>the world, which is the only one that carries a real distance;</li>
+	 *   <li>the player list, which still holds an account whose entity the
+	 *       server stopped sending - a vanish that removed the body, or a
+	 *       spectator the client is never told to draw;</li>
+	 *   <li>the two tells a listed entry carries: spectator mode, and a team
+	 *       that hides nametags.</li>
+	 * </ul>
+	 *
+	 * The world scan alone is what a vanished administrator walks past: their
+	 * entity is gone, so there is nothing in {@code mc.level.players()} left to
+	 * match, and the player list is the only place the server still admits the
+	 * account exists.
+	 */
 	private void scanWatchlist(Minecraft mc) {
 		for (AdminDetector.Match match : AdminDetector.scan(mc, watchlist)) {
 			if (match.distance() > detectionRange()) {
 				continue;
 			}
-			AlertRecord record = new AlertRecord(match.uuid(), match.username(), Confidence.HIGH,
-					List.<Observation>of(), System.currentTimeMillis(),
-					positionOf(mc, match.uuid()), match.distance(), host, AdminAlert.Kind.NEARBY);
-			alerts.raise(record);
+			raise(match, AdminAlert.Kind.NEARBY, positionOf(mc, match.uuid()), match.distance());
 		}
+		for (AdminDetector.Match match : AdminDetector.scanJoins(mc, watchlist, joined)) {
+			raise(match, AdminAlert.Kind.JOINED, null, -1.0);
+		}
+		for (AdminDetector.TabTell tell : AdminDetector.scanTells(mc, watchlist)) {
+			AdminAlert.Kind kind = tell.tell() == AdminDetector.Tell.SPECTATOR
+					? AdminAlert.Kind.SPECTATOR
+					: AdminAlert.Kind.HIDDEN_TAG;
+			// A tell is a state, not an event: without this it would be
+			// re-raised every time the manager's dedup window lapses, and the
+			// guardian face would replay for as long as they stay in spectator.
+			if (!toldTells.add(tell.match().uuid() + ":" + kind)) {
+				continue;
+			}
+			raise(tell.match(), kind, null, -1.0);
+		}
+	}
+
+	/**
+	 * Raises one watchlist sighting.
+	 *
+	 * A sighting is reported at {@link Confidence#HIGH}: whether the account is
+	 * there is not in doubt, only where it is - hence the {@code -1} distance
+	 * when the client never had a position for it.
+	 */
+	private void raise(AdminDetector.Match match, AdminAlert.Kind kind, BlockPos position, double distance) {
+		AlertRecord record = new AlertRecord(match.uuid(), match.username(), Confidence.HIGH,
+				List.<Observation>of(), System.currentTimeMillis(), position, distance, host, kind);
+		alerts.raise(record);
 	}
 
 	/** Where a watched player is standing right now, or null when gone. */
