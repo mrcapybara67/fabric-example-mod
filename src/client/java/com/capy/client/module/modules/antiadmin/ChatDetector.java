@@ -11,9 +11,13 @@ import net.minecraft.client.Minecraft;
  * Two chat signals that point in opposite directions.
  *
  * {@code HEADLESS_CHAT} is a signed message from an account the client has no
- * entity for. The server accepted the message because the account is really
- * connected; the client has no body to attach it to. That is not a guess about
- * proximity, it is proof the session and the world disagree.
+ * entity for <em>and</em> that the tab list does not draw. Both halves are
+ * needed. Chat is broadcast to every player on the server while entities are
+ * only sent within tracking range, so "no entity" on its own describes every
+ * person talking from across the map - reporting that made a busy server fire
+ * the loudest alert in the module at a stranger's chatter. No entity and no
+ * tab entry together are the actual contradiction: the server is relaying a
+ * signed message from a session it will not admit exists.
  *
  * {@code VANISH_TEXT} is the opposite: a line that announces a vanish. It comes
  * from the server, from a plugin, or from another player typing it, so it is
@@ -63,9 +67,11 @@ public final class ChatDetector extends AbstractDetector {
 			return;
 		}
 		String quote = quote(chat.text());
-		if (mc.level.getPlayerByUUID(chat.sender()) == null) {
+		// Being out of entity range is normal for somebody on the other side of
+		// the server; being out of entity range *and* unlisted is not.
+		if (mc.level.getPlayerByUUID(chat.sender()) == null && !TabList.listed(mc, chat.sender())) {
 			emitAs(DetectionKind.HEADLESS_CHAT, chat.sender(), null,
-					"chat from an account with no entity: \"" + quote + "\"");
+					"chat from an account with no entity and no tab entry: \"" + quote + "\"");
 		}
 		scanForVanish(chat.sender(), chat.text());
 	}

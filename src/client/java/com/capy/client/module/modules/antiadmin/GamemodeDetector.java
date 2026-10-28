@@ -16,6 +16,13 @@ import net.minecraft.world.level.GameType;
  * A switched game mode is only reported once per account per session, and only
  * when it changes to spectator from something else: a staff member hopping in
  * and out of spectator all evening must not produce a card each time.
+ *
+ * "From something else" is why the first mode a name is seen with is never
+ * reported. Joining a server sends the game mode of every listed player, so
+ * every staff member already spectating arrived as a spectator change and the
+ * module announced a switch that never happened - once for each of them, in
+ * the first second of the session. A mode only counts as a switch when a
+ * different mode was seen before it.
  */
 public final class GamemodeDetector extends AbstractDetector {
 	private static final int SPECTATOR = GameType.SPECTATOR.getId();
@@ -53,11 +60,14 @@ public final class GamemodeDetector extends AbstractDetector {
 		if (mode != SPECTATOR || reported.contains(update.uuid())) {
 			return;
 		}
-		if (previous != null && previous == SPECTATOR) {
+		// The first mode seen for an account is where it started, not a
+		// change: a join reports the mode of everybody, including the staff
+		// member who was already in spectator before the client arrived.
+		if (previous == null || previous == SPECTATOR) {
 			return;
 		}
 		reported.add(update.uuid());
 		emit(update.uuid(), null, "switched to spectator while listed and connected"
-				+ (previous == null ? "" : " (from mode " + previous + ")"));
+				+ " (from mode " + previous + ")");
 	}
 }

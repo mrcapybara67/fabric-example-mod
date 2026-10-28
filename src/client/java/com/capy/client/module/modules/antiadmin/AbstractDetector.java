@@ -63,11 +63,43 @@ abstract class AbstractDetector implements SignalDetector {
 	}
 
 	/**
-	 * Blocks from a point to the closest other player, or infinity.
+	 * Blocks from a point to the closest player, or infinity.
 	 *
-	 * The local player is excluded: every one of these signals is about
-	 * somebody else, and counting ourselves would make the whole module blind
-	 * to a hidden player standing next to us.
+	 * The local player counts. The question these detectors ask is "was there a
+	 * player here who could have caused this", and the client is told about its
+	 * own actions with the same packet everyone else gets: the server confirms
+	 * the door the user just opened and the crystal the user just placed. A
+	 * check that only counted <em>other</em> players therefore reported the
+	 * user's own door as opened by nobody and their own crystal as placed by
+	 * nobody - which is what made the module shout "someone is here and unseen"
+	 * at a player standing alone in their base.
+	 */
+	protected static double nearestPlayer(Minecraft mc, BlockPos pos) {
+		if (mc == null || mc.level == null || pos == null) {
+			return Double.POSITIVE_INFINITY;
+		}
+		double x = pos.getX() + 0.5;
+		double y = pos.getY() + 0.5;
+		double z = pos.getZ() + 0.5;
+		double best = Double.POSITIVE_INFINITY;
+		for (AbstractClientPlayer player : mc.level.players()) {
+			if (player == null || player.isRemoved()) {
+				continue;
+			}
+			best = Math.min(best, player.distanceToSqr(x, y, z));
+		}
+		return Math.sqrt(best);
+	}
+
+	/**
+	 * Blocks from a point to the closest <em>other</em> player, or infinity.
+	 *
+	 * Only the sound detector uses this, and only because it can: the client
+	 * plays its own footsteps, armour, pickups and eating locally and is never
+	 * sent those sounds by the server, so a footstep that arrived as a packet
+	 * really cannot be the local player's. Every other "nobody was near" check
+	 * uses {@link #nearestPlayer}, because there the local player's own action
+	 * arrives as a packet too.
 	 */
 	protected static double nearestOtherPlayer(Minecraft mc, BlockPos pos) {
 		if (mc == null || mc.level == null || pos == null) {

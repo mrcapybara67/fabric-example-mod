@@ -123,16 +123,23 @@ public final class AdminDetector {
 	/**
 	 * Collects watched players that have just appeared in the player list.
 	 *
-	 * Every listed player is added to {@code seen} the first time it is seen,
-	 * so a single arrival is reported exactly once. That is also what keeps a
-	 * server that rebuilds its tab list - or a player who moves between worlds
-	 * and briefly drops out - from re-reporting the same person: once a UUID
-	 * is in the set it is never reported again for the rest of the session.
+	 * A watched account is added to {@code seen} the first time it is matched
+	 * and then never reported again, which keeps a server that rebuilds its tab
+	 * list - or a player who moves between worlds and briefly drops out - from
+	 * re-reporting the same person all session.
+	 *
+	 * An account that is <em>not</em> watched is deliberately left out of
+	 * {@code seen}. Remembering those was the reason a name typed into the
+	 * watchlist did nothing until the server restarted: the account was already
+	 * listed, so it had been marked as announced before anybody asked about it,
+	 * and the join that mattered - the one after the name was added - was
+	 * swallowed. Now the first scan after a name is typed announces the account
+	 * once, and only once.
 	 *
 	 * This is a join announcement, not evidence of proximity. The distance is
 	 * therefore unknown and reported as such.
 	 *
-	 * @param seen UUIDs already listed this session; new arrivals are added
+	 * @param seen UUIDs already announced this session; new matches are added
 	 * @return the watched arrivals, in player list order
 	 */
 	public static List<Match> scanJoins(Minecraft mc, WatchlistSetting watchlist, Set<UUID> seen) {
@@ -145,13 +152,16 @@ public final class AdminDetector {
 				continue;
 			}
 			UUID id = info.getProfile().id();
-			if (!seen.add(id)) {
+			if (seen.contains(id)) {
 				continue;
 			}
 			String identity = matchIdentity(info, watchlist);
 			if (identity == null) {
 				continue;
 			}
+			// Remembered only now that it matched, so an account nobody was
+			// watching is still unannounced when it is added to the list.
+			seen.add(id);
 			out.add(toMatch(info, identity));
 		}
 		return out;

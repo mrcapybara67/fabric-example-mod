@@ -14,6 +14,11 @@ import net.minecraft.core.BlockPos;
  * see — the quietest, most reliable signal in the module, and the reason it is
  * worth a full UI card on its own.
  *
+ * The local player is one of those players. The server confirms the door the
+ * user just opened with the same block update everyone else receives, so a
+ * check that only counted other players reported every door, button and gate
+ * the user touched as "changed with no player nearby".
+ *
  * Glass and iron doors are included through the tag: only a player can open one
  * of those, and a plugin-driven open is still a player-driven open.
  */
@@ -54,7 +59,7 @@ public final class BlockInteractDetector extends AbstractDetector {
 			return;
 		}
 		Minecraft mc = Minecraft.getInstance();
-		if (nearestOtherPlayer(mc, change.pos()) <= VISIBLE_RADIUS) {
+		if (nearestPlayer(mc, change.pos()) <= VISIBLE_RADIUS) {
 			return;
 		}
 		lastReport.put(change.pos(), now);

@@ -16,6 +16,11 @@ import net.minecraft.core.BlockPos;
  * One particle is not enough: a pearl, a dispenser or a lingering cloud can
  * produce a stray effect with nobody in sight. Two inside five ticks inside two
  * blocks is a player-sized event.
+ *
+ * The local player counts as a player here for the same reason it does in the
+ * explosion check: the splash of a potion the user threw themselves is sent
+ * back to their own client, and with the local player left out of the radius it
+ * read as a potion thrown by somebody invisible.
  */
 public final class ParticleDetector extends AbstractDetector {
 	private static final int WINDOW_TICKS = 5;
@@ -62,7 +67,7 @@ public final class ParticleDetector extends AbstractDetector {
 			return;
 		}
 		Minecraft mc = Minecraft.getInstance();
-		if (nearestOtherPlayer(mc, particle.pos()) <= VISIBLE_RADIUS) {
+		if (nearestPlayer(mc, particle.pos()) <= VISIBLE_RADIUS) {
 			return;
 		}
 		long now = buffer.tick();

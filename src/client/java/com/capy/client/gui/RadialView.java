@@ -509,7 +509,6 @@ public final class RadialView {
 		int accentLight = Ui.lighten(accent, 0.34f);
 		int accentDeep = Ui.darken(accent, 0.30f);
 		int ink = Ui.luminance(accent) > 0.62f ? 0xFF35101F : 0xFFFFFFFF;
-		int inkSoft = Ui.withAlpha(ink, 0xC0);
 
 		c.fill(0, 0, width, height, Ui.lerpColor(0x00000000, UiTheme.SCRIM, fade));
 		drawVignette(c, fade);
@@ -520,7 +519,7 @@ public final class RadialView {
 
 		if (hubVisible) {
 			drawOrbit(c, fade, accent);
-			drawHub(c, type, fade, ease, accent, accentLight, accentDeep, ink, inkSoft, r);
+			drawHub(c, type, fade, ease, accent, accentLight, accentDeep, ink, r);
 			renderRing(c, type, fade, accent);
 		}
 
@@ -585,7 +584,7 @@ public final class RadialView {
 	 * read as machining rather than as a spinner.
 	 */
 	private void drawHub(UiCanvas c, UiType type, float fade, float ease,
-			int accent, int accentLight, int accentDeep, int ink, int inkSoft, int r) {
+			int accent, int accentLight, int accentDeep, int ink, int r) {
 		// A soft halo behind the disc, so the disc reads as the light source of
 		// the whole style rather than as a flat pink circle.
 		Ui.discGlow(c, centerX, centerY, r + scaled(14), UiTheme.ACCENT_GLOW, 0.18f * fade);
@@ -629,16 +628,18 @@ public final class RadialView {
 					Ui.withAlpha(0xFFFFFFFF, Math.round(0x3C * fade)));
 		}
 
-		// Wordmark group, measured as one block so the mark and the two lines
-		// share a centre instead of each being nudged by eye.
+		// Wordmark group, measured as one block so the mark and the line share a
+		// centre instead of each being nudged by eye. The hub names no second
+		// line: the caption that used to sit under the wordmark either repeated
+		// the style's own name or repeated the category the sheet header already
+		// shows, and on the disc it only crowded the mark.
 		UiText logo = type.headline();
 		if (logo.width("Capy Client") > r * 1.55f) {
 			logo = type.display();
 		}
-		UiText caption = type.regular();
 		int mark = Math.max(22, Math.min(44, Math.round(r * 0.22f)));
 		int gap = Math.max(5, Math.round(mark * 0.22f));
-		int groupH = mark + gap + logo.lineHeight() + 4 + caption.lineHeight();
+		int groupH = mark + gap + logo.lineHeight();
 		int groupTop = centerY - groupH / 2 - Math.round((1f - ease) * 10f);
 
 		// The seal, not a bare flower: the ring around the blossom is what makes
@@ -647,28 +648,26 @@ public final class RadialView {
 				Ui.withAlpha(ink, Math.round(0xF0 * fade)));
 		int logoY = groupTop + mark + gap;
 		Ui.drawCentered(c, logo, "Capy Client", centerX, logoY, Ui.withAlpha(ink, Math.round(255 * fade)));
-		String sub = selected >= 0 ? CATEGORIES[selected].title.toUpperCase() : "SAKURA CLIENT";
-		Ui.drawCentered(c, caption, sub, centerX, logoY + logo.lineHeight() + 3, inkSoft);
 	}
 
 	/**
-	 * One arc of the hub ring, drawn as a chain of short chords.
+	 * One arc of the hub ring, drawn as overlapping blocks along the curve.
 	 *
-	 * The chord count follows the radius, so a segment is smooth at any size
-	 * instead of turning into a polygon on a large canvas.
+	 * The samples are spaced at a pixel and a half, so consecutive blocks touch
+	 * and the band has no gap, and the block count follows the radius so a
+	 * segment is smooth at any size. Each chord used to be handed to
+	 * {@link Ui#line}, which interpolated every pixel of it: at this radius that
+	 * drew the same band three times over, and the eight segments were the most
+	 * expensive decoration in the style.
 	 */
 	private static void drawArc(UiCanvas c, int cx, int cy, int radius,
 			double from, double to, int thickness, int color) {
-		int steps = Math.max(2, (int) Math.round((to - from) * Math.max(6, radius) * 0.5));
-		for (int i = 0; i < steps; i++) {
-			double a0 = from + (to - from) * i / steps;
-			double a1 = from + (to - from) * (i + 1) / steps;
-			Ui.line(c,
-					cx + (int) Math.round(Math.cos(a0) * radius),
-					cy + (int) Math.round(Math.sin(a0) * radius),
-					cx + (int) Math.round(Math.cos(a1) * radius),
-					cy + (int) Math.round(Math.sin(a1) * radius),
-					thickness, color);
+		int steps = Math.max(2, (int) Math.round((to - from) * Math.max(6, radius) / 1.5));
+		for (int i = 0; i <= steps; i++) {
+			double angle = from + (to - from) * i / steps;
+			int x = cx + (int) Math.round(Math.cos(angle) * radius);
+			int y = cy + (int) Math.round(Math.sin(angle) * radius);
+			c.fill(x, y, x + thickness, y + thickness, color);
 		}
 	}
 
@@ -690,10 +689,12 @@ public final class RadialView {
 	}
 
 	private void renderRing(UiCanvas c, UiType type, float fade, int accent) {
-		// The category ring is the signature of the style, so it keeps the
-		// smooth edge pass; the decorative rims inside the disc can afford the
-		// faster path.
-		Ui.ring(c, centerX, centerY, ringR, 2, Ui.withAlpha(accent, Math.round(0x80 * fade)));
+		// The ring is a 2 pixel band on a three hundred pixel circle: at that
+		// radius the per row edge blending of ring() costs around six fills a
+		// row - two thousand of the frame's submissions for one hairline - and
+		// the stair it removes is smaller than a pixel. The fast path snaps the
+		// band to whole pixels instead.
+		Ui.ringFast(c, centerX, centerY, ringR, 2, Ui.withAlpha(accent, Math.round(0x80 * fade)));
 
 		UiText label = type.medium();
 		for (int i = 0; i < CATEGORIES.length; i++) {
@@ -732,7 +733,9 @@ public final class RadialView {
 			Ui.circleGradient(c, nx, ny, radius,
 					Ui.lerpColor(UiTheme.PANEL_ALT, category.accent, 0.10f + 0.16f * emphasis + 0.26f * sv),
 					Ui.lerpColor(UiTheme.PANEL_TOP, category.accent, 0.03f + 0.14f * sv));
-			Ui.ring(c, nx, ny, radius, 2,
+			// Same trade as the category ring: six of these are drawn every
+			// frame, and the smooth pass was costing more than the node itself.
+			Ui.ringFast(c, nx, ny, radius, 2,
 					Ui.withAlpha(Ui.lerpColor(category.accent, 0xFFFFFFFF, Math.max(hv, sv) * 0.25f),
 							Math.round(0xB0 * fade)));
 

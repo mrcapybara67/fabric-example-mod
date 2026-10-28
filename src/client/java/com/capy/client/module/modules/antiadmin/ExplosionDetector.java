@@ -11,6 +11,13 @@ import net.minecraft.client.Minecraft;
  * dispenser produces the same packet with no player present, which is why this
  * is a weak signal: only repetition or a second kind makes it a finding.
  *
+ * The local player counts as a player. The crystal the user places and the TNT
+ * the user lights arrive as the same spawn packet anybody else's would, so a
+ * check that only looked at other players reported every one of them as
+ * "spawned with no player nearby" - the exact false alarm of a player blowing
+ * up a crystal in their own base. Placing is limited to arm's reach, so a
+ * crystal somebody else placed still always has its placer within the radius.
+ *
  * A player standing more than six blocks away and shooting the crystal is
  * still missed on purpose — guessing at owners would turn every bow fight into
  * an alert.
@@ -38,7 +45,7 @@ public final class ExplosionDetector extends AbstractDetector {
 			return;
 		}
 		Minecraft mc = Minecraft.getInstance();
-		if (nearestOtherPlayer(mc, spawn.pos()) <= VISIBLE_RADIUS) {
+		if (nearestPlayer(mc, spawn.pos()) <= VISIBLE_RADIUS) {
 			return;
 		}
 		String what = spawn.type() == net.minecraft.world.entity.EntityType.END_CRYSTAL ? "end crystal" : "TNT";
