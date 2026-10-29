@@ -616,8 +616,9 @@ public class ModuleCard {
 	}
 
 	private String sliderValueText(SliderSetting slider) {
+		String value = slider.display();
 		String unit = sliderUnits.get(slider);
-		return unit == null || unit.isEmpty() ? String.valueOf(slider.get()) : slider.get() + " " + unit;
+		return unit == null || unit.isEmpty() ? value : value + " " + unit;
 	}
 
 	private String unitFor(SliderSetting slider) {

@@ -10,7 +10,14 @@ import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.AntiAdminModule;
+import com.capy.client.module.modules.BlockAnimationModule;
+import com.capy.client.module.modules.BlockOverlayModule;
+import com.capy.client.module.modules.CustomFOVModule;
 import com.capy.client.module.modules.CustomKnifeModule;
+import com.capy.client.module.modules.CustomSkyModule;
+import com.capy.client.module.modules.FullbrightModule;
+import com.capy.client.module.modules.HandAuraModule;
+import com.capy.client.module.modules.SmoothCameraModule;
 import com.capy.client.module.modules.SwingSpeedModule;
 import com.capy.client.module.modules.WeatherNotifierModule;
 import com.capy.client.module.modules.esp.BlockEspModule;
@@ -52,6 +59,15 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(new PlayerEspModule());
 		modules.register(new StorageEspModule());
 		modules.register(new BlockEspModule());
+		// The visual set: the sky, the light level, the camera, the field of
+		// view, and the two overlays that frame what the player is looking at.
+		modules.register(new CustomSkyModule());
+		modules.register(new FullbrightModule());
+		modules.register(new SmoothCameraModule());
+		modules.register(new CustomFOVModule());
+		modules.register(new BlockOverlayModule());
+		modules.register(new HandAuraModule());
+		modules.register(new BlockAnimationModule());
 		// The HUD is a set of independent elements, not one panel.
 		HudElements.register(modules);
 

@@ -7,7 +7,13 @@
 		"ClientPacketListenerMixin",
 		"ItemModelResolverMixin",
 		"ItemInHandRendererMixin",
-		"RenderTypeAccessor"
+		"RenderTypeAccessor",
+		"LightTextureMixin",
+		"CustomFovMixin",
+		"SmoothCameraMixin",
+		"FogRendererAccessor",
+		"MouseHandlerAccessor",
+		"GameRendererAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1
