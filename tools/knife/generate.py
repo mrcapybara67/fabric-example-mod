@@ -460,34 +460,6 @@ def blade_tip(parts, x, y, half, depth, angle=0.0, flip=False):
 def styles():
     table = {}
 
-    # ---- butterfly: a balisong, open, two handle bars either side of a pivot
-    butterfly = []
-    blade_path(butterfly, [(8.0, 5.30), (8.0, 9.90), (8.0, 12.30)],
-               [0.86, 0.78, 0.58], 0.95)
-    blade_tip(butterfly, 8.0, 12.30, 0.58, 0.95)
-    butterfly += [
-        seg("accent", 6.90, 4.45, 9.10, 5.32, 1.85),
-        seg("grip", 6.72, 0.20, 7.70, 4.72, 1.90),
-        seg("grip", 8.30, 0.20, 9.28, 4.72, 1.90),
-        seg("accent", 6.62, -0.28, 7.62, 0.22, 2.00),
-        seg("accent", 8.38, -0.28, 9.38, 0.22, 2.00),
-        seg("accent", 7.05, 1.00, 7.33, 1.24, 1.96),
-        seg("accent", 8.67, 1.00, 8.95, 1.24, 1.96),
-        # The pivot boss: the pin the whole knife turns on, and the reason a
-        # balisong is recognisable even as a still picture.
-        seg("guard", 7.55, 4.30, 8.45, 5.20, 2.06),
-        seg("hole", 7.88, 4.64, 8.12, 4.88, 2.12),
-        # The latch ends at the base of the two handles.
-        seg("accent", 6.92, -0.60, 7.44, -0.24, 2.06),
-        seg("accent", 8.56, -0.60, 9.08, -0.24, 2.06),
-    ]
-    # Leather wrap across both handle bars. A balisong's handles are wrapped,
-    # and two bare bars read as a hinge rather than as a knife.
-    for band_y in (1.30, 2.05, 2.80, 3.55):
-        butterfly.append(seg("wrap", 6.70, band_y, 7.72, band_y + 0.20, 1.96))
-        butterfly.append(seg("wrap", 8.28, band_y, 9.30, band_y + 0.20, 1.96))
-    table["butterfly"] = butterfly
-
     # ---- karambit: hook blade, finger ring where the pommel would be
     # The ring is a ten sided polygon rather than a hexagon: at item scale the
     # difference between a ring and a nut is exactly the number of sides, and
@@ -568,28 +540,6 @@ def styles():
                       (0.02, 0.20)))
     table["dagger"] = dagger
 
-    # ---- tanto: straight single edged blade, wrapped grip, small tsuba
-    tanto = [
-        seg("accent", 6.95, -0.22, 9.05, 0.36, 1.60),
-        seg("grip", 7.30, 0.32, 8.70, 4.05, 1.32),
-        seg("wrap", 7.22, 0.72, 8.78, 1.08, 1.38),
-        seg("wrap", 7.22, 1.52, 8.78, 1.88, 1.38),
-        seg("wrap", 7.22, 2.32, 8.78, 2.68, 1.38),
-        seg("wrap", 7.22, 3.12, 8.78, 3.48, 1.38),
-        seg("guard", 6.75, 4.02, 9.25, 4.48, 0.95),
-        seg("guard", 7.65, 3.96, 8.35, 4.56, 1.32),
-        # Kashira: the metal cap on the butt of a wrapped Japanese grip.
-        seg("accent", 7.28, -0.52, 8.72, -0.18, 1.46),
-        # Habaki: the collar that locks the blade into the handle.
-        seg("accent", 7.44, 4.30, 8.56, 4.74, 1.44),
-        # Mekugi pin through the tang.
-        seg("accent", 7.68, 2.60, 7.92, 2.84, 1.42),
-    ]
-    blade_path(tanto, [(8.0, 4.52), (8.0, 9.60), (8.0, 12.10)],
-               [0.94, 0.86, 0.62], 0.95)
-    blade_tip(tanto, 8.0, 12.10, 0.62, 0.95)
-    table["tanto"] = tanto
-
     # ---- kukri: forward curved heavy blade, flared butt
     kukri = [
         seg("grip", 6.62, -0.38, 8.72, 0.38, 1.70),
@@ -610,38 +560,6 @@ def styles():
     blade_tip(kukri, last[0], last[1], 1.22, 1.00,
               math.degrees(math.atan2(last[1] - curve[-2][1], last[0] - curve[-2][0])) - 90.0)
     table["kukri"] = kukri
-
-    # ---- machete: long chopping blade, heavy spine slab, riveted full tang
-    machete = [
-        seg("accent", 6.85, -0.60, 9.15, 0.14, 1.85),
-        seg("grip", 7.02, 0.00, 8.98, 4.75, 1.60),
-        seg("guard", 6.78, 4.68, 9.22, 5.16, 1.52),
-    ]
-    for rivet_y in (0.95, 2.30, 3.65):
-        machete.append(seg("accent", 7.30, rivet_y, 7.58, rivet_y + 0.26, 1.74))
-    # Jimping on the spine, just forward of the grip: the notches a hand braces
-    # against when the blade is pushed through something heavy.
-    for jimp_y in (5.18, 5.50, 5.82, 6.14):
-        machete.append(seg("accent", 7.08, jimp_y, 7.30, jimp_y + 0.18, 1.26))
-    # Lanyard hole through the butt.
-    machete.append(seg("hole", 7.82, 0.20, 8.10, 0.48, 1.92))
-    # A machete is a long broad blade with a heavy spine.  It is built from one
-    # long plate tilted a few degrees off the grip axis, a proud edge strip on
-    # the same line and a thick spine slab, so every blade surface stays a
-    # single flat face.  A curve here would read as a row of steps, not a blade.
-    tilt = -5.0
-    root = (7.10, 4.95)
-    machete += [
-        seg("blade", 7.10, 4.95, 9.90, 14.70, 1.02, tilt, root),
-        seg("edge", 9.74, 5.20, 10.06, 14.55, 1.16, tilt, root, (0.88, 1.0)),
-        seg("blade", 6.96, 5.05, 7.30, 14.40, 1.20, tilt, root, (0.0, 0.34)),
-    ]
-    tip_x, tip_y = rotate(8.50, 14.70, root[0], root[1], tilt)
-    blade_tip(machete, tip_x, tip_y, 1.40, 1.02, tilt)
-    # The fuller: a shallow groove down the middle of the blade, darker than
-    # the steel around it, which is what stops a long blade reading as a plank.
-    machete.append(seg("blade", 8.02, 5.30, 8.44, 13.90, 1.09, tilt, root, (0.02, 0.24)))
-    table["machete"] = machete
 
     # ---- stiletto: needle blade, slim crossguard, tapered grip
     stiletto = [
@@ -844,9 +762,8 @@ def main():
 
     # ---- models
     grip_points = {
-        "butterfly": (8.0, 2.5), "karambit": (7.7, 2.1), "cleaver": (8.0, 3.3),
-        "dagger": (8.0, 2.2), "tanto": (8.0, 2.2), "kukri": (7.75, 2.2),
-        "machete": (8.0, 2.6), "stiletto": (8.0, 2.0), "katana": (8.0, 2.2),
+        "karambit": (7.7, 2.1), "cleaver": (8.0, 3.3), "dagger": (8.0, 2.2),
+        "kukri": (7.75, 2.2), "stiletto": (8.0, 2.0), "katana": (8.0, 2.2),
     }
     for style in order:
         placed = solve(table[style], grip_points[style])

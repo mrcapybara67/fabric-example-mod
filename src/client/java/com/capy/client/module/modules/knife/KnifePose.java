@@ -32,9 +32,9 @@ import net.minecraft.world.item.ItemStack;
  *      points forward. This is the layer that makes each knife feel held
  *      rather than merely rendered.
  *   2. <b>swing</b> - the attack animation, driven by vanilla's own
- *      {@code attackAnim} so it starts and ends exactly when the arm does.
- *      Every style has its own motion: a balisong fans, a cleaver is dropped
- *      through the cut, a stiletto snaps straight forward.
+ *      {@code attackAnim} so it starts and ends exactly when the arm does.	 *      Every style has its own motion: a cleaver is dropped through the cut,
+	 *      a karambit is hooked through the target, a stiletto snaps straight
+	 *      forward.
  *   3. <b>inspect</b> - the on demand flourish, unchanged in intent.
  *
  * The swing and the flourish are both multiplied by an envelope that is zero on
@@ -107,13 +107,10 @@ public final class KnifePose {
 	/** How long one style takes. Heavier knives are given more time. */
 	private static long durationFor(String styleId) {
 		return switch (styleId) {
-			case "butterfly" -> 1_250_000_000L; // a fan needs a beat
 			case "karambit" -> 1_150_000_000L;
 			case "cleaver" -> 1_350_000_000L;   // heavy, so slow
 			case "dagger" -> 1_000_000_000L;    // quick and precise
-			case "tanto" -> 1_050_000_000L;     // one clean draw
 			case "kukri" -> 1_300_000_000L;     // two turns
-			case "machete" -> 1_250_000_000L;   // one heavy chop
 			case "stiletto" -> 950_000_000L;    // the fastest of the set
 			case "katana" -> 1_250_000_000L;    // a long blade needs a long beat
 			default -> DEFAULT_DURATION_NS;
@@ -250,17 +247,9 @@ public final class KnifePose {
 				pose.translate(0.0f, -0.030f, 0.0f);
 				pose.mulPose(Axis.ZP.rotationDegrees(m * -8.0f));
 			}
-			case "machete" -> {
-				pose.translate(0.0f, -0.025f, 0.0f);
-				pose.mulPose(Axis.ZP.rotationDegrees(m * -6.0f));
-			}
 			case "kukri" -> {
 				pose.translate(0.0f, -0.018f, -0.008f);
 				pose.mulPose(Axis.ZP.rotationDegrees(m * -10.0f));
-			}
-			case "tanto" -> {
-				pose.translate(0.0f, -0.004f, 0.0f);
-				pose.mulPose(Axis.ZP.rotationDegrees(m * -12.0f));
 			}
 			case "dagger" -> {
 				pose.translate(0.0f, 0.010f, -0.010f);
@@ -269,10 +258,6 @@ public final class KnifePose {
 			case "stiletto" -> {
 				pose.translate(0.0f, 0.014f, -0.020f);
 				pose.mulPose(Axis.ZP.rotationDegrees(m * 7.0f));
-			}
-			case "butterfly" -> {
-				pose.translate(0.0f, 0.004f, -0.010f);
-				pose.mulPose(Axis.ZP.rotationDegrees(m * 3.0f));
 			}
 			case "katana" -> {
 				// Carried blade up and slightly across the body: a katana is not
@@ -303,7 +288,7 @@ public final class KnifePose {
 		pose.translate(m * 0.0016f * sway, 0.0022f * breathe, 0.0f);
 		pose.mulPose(Axis.ZP.rotationDegrees(m * 0.9f * sway));
 		switch (style) {
-			case "cleaver", "machete" -> pose.mulPose(Axis.XP.rotationDegrees(1.9f * breathe));
+			case "cleaver" -> pose.mulPose(Axis.XP.rotationDegrees(1.9f * breathe));
 			case "karambit" -> pose.mulPose(Axis.XP.rotationDegrees(1.5f * breathe));
 			case "kukri" -> pose.mulPose(Axis.XP.rotationDegrees(1.7f * breathe));
 			case "stiletto", "dagger" -> pose.mulPose(Axis.XP.rotationDegrees(0.9f * breathe));
@@ -337,14 +322,6 @@ public final class KnifePose {
 		float slam = arc * arc;
 
 		switch (style) {
-			case "butterfly" -> {
-				// The fan: the handle pivots in the palm and the blade whips
-				// around it, twice, because a balisong is never still.
-				pose.translate(m * 0.014f * arc, 0.012f * arc, 0.0f);
-				pose.mulPose(Axis.YP.rotationDegrees(m * 26.0f * back));
-				pose.mulPose(Axis.ZP.rotationDegrees(m * 46.0f * back));
-				pose.mulPose(Axis.XP.rotationDegrees(14.0f * arc));
-			}
 			case "karambit" -> {
 				// The hook: pulled in towards the body and rolled over, which is
 				// how the curved blade is driven through a target.
@@ -365,25 +342,12 @@ public final class KnifePose {
 				pose.mulPose(Axis.ZP.rotationDegrees(m * -9.0f * arc));
 				pose.mulPose(Axis.XP.rotationDegrees(12.0f * arc));
 			}
-			case "tanto" -> {
-				// A draw and a cut: the blade is pulled back along the body,
-				// then swept across.
-				pose.translate(m * 0.026f * back, 0.0f, 0.055f * arc - 0.030f * slam);
-				pose.mulPose(Axis.YP.rotationDegrees(m * 34.0f * back));
-				pose.mulPose(Axis.ZP.rotationDegrees(m * -20.0f * arc));
-			}
 			case "kukri" -> {
 				// The wide, forward-weighted arc the heavy belly is made for.
 				pose.translate(m * 0.030f * arc, 0.020f * arc, -0.010f * arc);
 				pose.mulPose(Axis.YP.rotationDegrees(m * 44.0f * arc));
 				pose.mulPose(Axis.ZP.rotationDegrees(m * -16.0f * arc));
 				pose.mulPose(Axis.XP.rotationDegrees(8.0f * arc));
-			}
-			case "machete" -> {
-				// Overhead chop: up, then down hard, with the wrist rolling.
-				pose.translate(0.0f, 0.075f * arc - 0.085f * slam, 0.010f * arc);
-				pose.mulPose(Axis.ZP.rotationDegrees(m * 38.0f * arc - m * 12.0f * slam));
-				pose.mulPose(Axis.XP.rotationDegrees(12.0f * arc));
 			}
 			case "stiletto" -> {
 				// The fastest of the set: a needle straight forward.
@@ -431,15 +395,6 @@ public final class KnifePose {
 		pose.translate(0.0f, 0.02f * arc, -0.10f * arc);
 
 		switch (style) {
-			case "butterfly" -> {
-				// A balisong fan: the handle pivots in the palm and the blade
-				// sweeps most of a turn around it, with a small wobble so it
-				// feels held rather than spun by a machine.
-				pose.translate(m * 0.10f * arc, 0.05f * arc, -0.02f * arc);
-				pose.mulPose(Axis.YP.rotationDegrees(m * 18.0f * arc));
-				pose.mulPose(Axis.XP.rotationDegrees(m * 12.0f * arc));
-				pose.mulPose(Axis.ZP.rotationDegrees(m * (360.0f * t + 22.0f * sway)));
-			}
 			case "karambit" -> {
 				// The hook comes up and over: a roll about the blade's own axis
 				// combined with a hook turn, so the ring leads and the curve
@@ -465,14 +420,6 @@ public final class KnifePose {
 				pose.mulPose(Axis.XP.rotationDegrees(10.0f * arc));
 				pose.mulPose(Axis.YP.rotationDegrees(m * 360.0f * t));
 			}
-			case "tanto" -> {
-				// A short draw and slash: pushed forward, swept across the body,
-				// then pulled back into the grip.
-				pose.translate(0.0f, 0.015f * arc, -0.26f * arc);
-				pose.mulPose(Axis.XP.rotationDegrees(-18.0f * arc));
-				pose.mulPose(Axis.YP.rotationDegrees(m * (28.0f * arc + 10.0f * sway)));
-				pose.mulPose(Axis.ZP.rotationDegrees(m * -70.0f * arc));
-			}
 			case "kukri" -> {
 				// Two turns with the blade riding high, which is how the heavy
 				// forward curve of a kukri is actually shown off.
@@ -480,14 +427,6 @@ public final class KnifePose {
 				pose.mulPose(Axis.XP.rotationDegrees(18.0f * arc));
 				pose.mulPose(Axis.YP.rotationDegrees(m * 10.0f * sway));
 				pose.mulPose(Axis.ZP.rotationDegrees(m * 720.0f * t));
-			}
-			case "machete" -> {
-				// One heavy chop: the blade goes up and across, then falls
-				// through the swing, and comes back to rest.
-				pose.translate(0.0f, 0.10f * arc, -0.16f * arc);
-				pose.mulPose(Axis.XP.rotationDegrees(14.0f * arc));
-				pose.mulPose(Axis.YP.rotationDegrees(m * 38.0f * arc));
-				pose.mulPose(Axis.ZP.rotationDegrees(m * -150.0f * arc));
 			}
 			case "stiletto" -> {
 				// Fastest of the set: a straight thrust and a snap roll, which is

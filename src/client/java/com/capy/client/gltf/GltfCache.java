@@ -1,5 +1,6 @@
 package com.capy.client.gltf;
 
+import com.capy.client.module.modules.CustomKnifeModule;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
@@ -112,13 +113,10 @@ public final class GltfCache {
 		if (resourceManager == null) {
 			return;
 		}
-		for (String style : STYLES) {
+		// The module owns the roster. A style removed from there must not be
+		// preloaded here, and a second list is how the two drift apart.
+		for (String style : CustomKnifeModule.STYLES) {
 			get(style, resourceManager);
 		}
 	}
-
-	/** Mirrors the style list in the module; kept here so preload needs no module. */
-	private static final String[] STYLES = {
-			"butterfly", "karambit", "cleaver", "dagger", "tanto", "kukri", "machete", "stiletto", "katana"
-	};
 }

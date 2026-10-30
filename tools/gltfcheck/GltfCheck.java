@@ -11,8 +11,7 @@ import java.util.List;
  */
 public final class GltfCheck {
 	private static final String[] STYLES = {
-			"butterfly", "karambit", "cleaver", "dagger", "tanto",
-			"kukri", "machete", "stiletto", "katana"
+			"karambit", "cleaver", "dagger", "kukri", "stiletto", "katana"
 	};
 
 	public static void main(String[] args) throws Exception {

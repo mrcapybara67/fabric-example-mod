@@ -26,8 +26,7 @@ MESHES = os.path.join(ASSETS, "models", "item", "knife", "gltf")
 TEXTURES = os.path.join(ASSETS, "textures", "item", "knife")
 OUT = os.path.join(ROOT, "build", "knife3d_gltf")
 
-STYLES = ["butterfly", "karambit", "cleaver", "dagger", "tanto",
-          "kukri", "machete", "stiletto", "katana"]
+STYLES = ["karambit", "cleaver", "dagger", "kukri", "stiletto", "katana"]
 
 TEXTURE_FOR_PART = {
     0: "blade_iron", 1: "grip_wrapped", 2: "guard",

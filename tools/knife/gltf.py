@@ -44,8 +44,7 @@ OUT = os.path.join(ASSETS, "models", "item", "knife", "gltf")
 
 DIAGONAL = -45.0   # the direction a vanilla sword sprite runs in
 TARGET = 15.2      # fitted height, matching tools/knife/generate.py
-STYLES = ["butterfly", "karambit", "cleaver", "dagger", "tanto",
-          "kukri", "machete", "stiletto", "katana"]
+STYLES = ["karambit", "cleaver", "dagger", "kukri", "stiletto", "katana"]
 
 PART_BLADE, PART_GRIP, PART_GUARD, PART_ACCENT, PART_EDGE, PART_WRAP = range(6)
 
@@ -381,27 +380,6 @@ def wrap_bands(builder, x0, y0, x1, y1, radius, thick, count, part=PART_GRIP,
 
 
 # ------------------------------------------------------------------- the knives
-def style_butterfly(b):
-    # Two handle bars, a pivot and a latch: the silhouette of an opened balisong.
-    # The bars are separate geometry with a gap between them, because that gap
-    # is what a balisong is; merged, it is just a fat grip.
-    for side in (-1, 1):
-        x0, x1 = 8.0 + side * 1.3, 8.0 + side * 1.12
-        handle(b, x0, 0.5, x1, 5.0, 0.56, 0.42, rings=8, taper_to=0.96)
-        wrap_bands(b, x0, 0.5, x1, 5.0, 0.56, 0.42, 3, width=0.17)
-        # Brass liner in the gap between the bar and the blade. This is the
-        # detail that makes the two handles read as two handles once the knife
-        # is small in the hand.
-        liner = [(8.0 + side * 0.74, y, 0.1, 0.3) for y in (0.7, 2.1, 3.5, 4.9)]
-        sweep(b, PART_ACCENT, liner, round_section(8), cap_start=True, cap_end=True,
-              u_from_angle=True)
-    plate(b, 8.0, 0.32, 1.55, 0.34, 0.4, PART_ACCENT, roundness=0.5)
-    cylinder(b, 8.0, 5.0, -0.68, 0.68, 0.24, PART_ACCENT, sides=12)
-    plate(b, 8.0, 5.12, 0.86, 0.22, 0.36, PART_GUARD, roundness=0.6)
-    blade(b, [(8.0, 5.1), (8.0, 9.9), (8.0, 14.3)],
-          taper(0.76, 0.8, 0.16), 0.075)
-
-
 def style_karambit(b):
     # The ring is the identifier: a real torus, not a hoop of boxes.
     torus(b, (8.0, 0.25, 0.0), 0.92, 0.24, PART_GUARD, segs=26, sides=9, axis="z")
@@ -437,18 +415,6 @@ def style_dagger(b):
           taper(0.58, 0.54, 0.16), 0.07, section=double_edge_section())
 
 
-def style_tanto(b):
-    handle(b, 8.0, 0.5, 8.0, 4.0, 0.74, 0.54, rings=8, taper_to=0.9)
-    wrap_bands(b, 8.0, 0.5, 8.0, 4.0, 0.74, 0.54, 4, width=0.14)
-    plate(b, 8.0, 0.26, 0.88, 0.22, 0.5, PART_ACCENT, roundness=0.5)
-    plate(b, 8.0, 4.1, 1.1, 0.2, 0.5, PART_GUARD, roundness=0.55)
-    plate(b, 8.0, 4.38, 0.62, 0.22, 0.46, PART_ACCENT, roundness=0.4)
-    # A straight edge with an angled kissaki: the tanto's defining break.
-    blade(b, [(8.0, 4.35), (8.0, 11.9), (8.0, 13.8)],
-          lambda t, _: 0.72 if t < 0.86 else lerp(0.72, 0.2, (t - 0.86) / 0.14), 0.085,
-          samples=12)
-
-
 def style_kukri(b):
     handle(b, 7.9, 0.5, 7.95, 4.4, 0.82, 0.58, rings=8, taper_to=1.04)
     for rivet_y in (1.4, 2.5, 3.6):
@@ -457,16 +423,6 @@ def style_kukri(b):
     # The forward belly is the kukri: it leads the edge and carries the weight.
     blade(b, [(7.95, 4.45), (8.2, 8.0), (9.6, 11.1), (12.4, 12.6)],
           taper(0.72, 1.15, 0.2), 0.11, samples=13)
-
-
-def style_machete(b):
-    handle(b, 8.0, 0.5, 8.0, 4.9, 0.86, 0.56, rings=8, taper_to=0.95)
-    for rivet_y in (1.3, 2.7, 4.1):
-        cylinder(b, 8.0, rivet_y, -0.34, 0.34, 0.12)
-    plate(b, 8.0, 5.02, 1.45, 0.24, 0.6, PART_GUARD, roundness=0.45)
-    blade(b, [(8.0, 5.1), (8.3, 10.4), (8.55, 15.0)],
-          lambda t, _: lerp(1.25, 0.55, (t - 0.78) / 0.22) if t > 0.78 else lerp(1.1, 1.25, t / 0.78),
-          0.11, samples=11)
 
 
 def style_stiletto(b):
@@ -482,7 +438,7 @@ def style_katana(b):
     # Proportions are the whole thing: five units of grip under twelve of blade,
     # with a shallow curve (sori) along the entire run and a point that is a
     # point. A katana that is not visibly longer than the other knives is just
-    # a tanto with a bigger guard.
+    # a long dagger.
     handle(b, 8.0, 0.5, 8.0, 5.0, 0.78, 0.52, rings=9, taper_to=0.92)
     for i in range(5):
         t = (i + 0.5) / 5
@@ -498,21 +454,17 @@ def style_katana(b):
 
 
 STYLE_BUILDERS = {
-    "butterfly": style_butterfly,
     "karambit": style_karambit,
     "cleaver": style_cleaver,
     "dagger": style_dagger,
-    "tanto": style_tanto,
     "kukri": style_kukri,
-    "machete": style_machete,
     "stiletto": style_stiletto,
     "katana": style_katana,
 }
 
 GRIP_POINTS = {
-    "butterfly": (8.0, 2.5), "karambit": (7.7, 2.1), "cleaver": (8.0, 3.3),
-    "dagger": (8.0, 2.2), "tanto": (8.0, 2.2), "kukri": (7.75, 2.2),
-    "machete": (8.0, 2.6), "stiletto": (8.0, 2.0), "katana": (8.0, 2.2),
+    "karambit": (7.7, 2.1), "cleaver": (8.0, 3.3), "dagger": (8.0, 2.2),
+    "kukri": (7.75, 2.2), "stiletto": (8.0, 2.0), "katana": (8.0, 2.2),
 }
 
 

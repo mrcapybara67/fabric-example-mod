@@ -57,9 +57,21 @@ import java.util.List;
  * rendered for the entity that owns them, not for the player).
  */
 public class CustomKnifeModule extends Module implements Configurable {
-	/** The knife styles that ship with the client, in menu order. */
+	/**
+	 * The knife styles that ship with the client, in menu order.
+	 *
+	 * Six, not nine. Each remaining style has a silhouette nothing else covers:
+	 * the karambit's ring and hook, the cleaver's square slab, the dagger's
+	 * double edge, the kukri's forward belly, the stiletto's needle and the
+	 * katana's long sori. The balisong's twin bars never read at item scale, and
+	 * the tanto and the machete were plain rectangles the dagger and the cleaver
+	 * already answer, so those three are gone rather than shipped as filler.
+	 *
+	 * The first entry is the default for a fresh install, and for a stored config
+	 * that names a style that no longer exists.
+	 */
 	public static final String[] STYLES = {
-			"butterfly", "karambit", "cleaver", "dagger", "tanto", "kukri", "machete", "stiletto", "katana"
+			"karambit", "cleaver", "dagger", "kukri", "stiletto", "katana"
 	};
 
 	/** Sword materials, in the order of {@link #MODELS}' second dimension. */

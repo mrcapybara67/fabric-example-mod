@@ -4,7 +4,7 @@ package com.capy.client.module;
  * A setting that picks one of a small, fixed list of named options.
  *
  * The value stored in the config is the option <em>id</em> (for example
- * {@code "butterfly"}), never its position: reordering or inserting an option
+ * {@code "katana"}), never its position: reordering or inserting an option
  * later must not silently turn every existing choice into a different one.
  * {@link #select(String)} does that lookup and reports whether the stored id is
  * still known, so a module can fall back to its default instead of guessing.
