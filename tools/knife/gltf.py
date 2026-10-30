@@ -238,7 +238,7 @@ def blade(builder, path_points, widths, thickness, part=PART_BLADE,
         px, py = line[-2]
         step = math.hypot(x - px, y - py) or 1.0
         dx, dy = (x - px) / step, (y - py) / step
-        stations.append((x + dx * step * 1.8, y + dy * step * 1.8,
+        stations.append((x + dx * step, y + dy * step,
                          0.03, thickness * 0.15))
     sweep(builder, part, stations, section, cap_start=True, cap_end=True,
           uv_v_range=uv_v)
@@ -387,13 +387,19 @@ def style_butterfly(b):
     # is what a balisong is; merged, it is just a fat grip.
     for side in (-1, 1):
         x0, x1 = 8.0 + side * 1.3, 8.0 + side * 1.12
-        handle(b, x0, 0.5, x1, 5.0, 0.52, 0.4, rings=8, taper_to=0.96)
-        wrap_bands(b, x0, 0.5, x1, 5.0, 0.52, 0.4, 3, width=0.17)
+        handle(b, x0, 0.5, x1, 5.0, 0.56, 0.42, rings=8, taper_to=0.96)
+        wrap_bands(b, x0, 0.5, x1, 5.0, 0.56, 0.42, 3, width=0.17)
+        # Brass liner in the gap between the bar and the blade. This is the
+        # detail that makes the two handles read as two handles once the knife
+        # is small in the hand.
+        liner = [(8.0 + side * 0.74, y, 0.1, 0.3) for y in (0.7, 2.1, 3.5, 4.9)]
+        sweep(b, PART_ACCENT, liner, round_section(8), cap_start=True, cap_end=True,
+              u_from_angle=True)
     plate(b, 8.0, 0.32, 1.55, 0.34, 0.4, PART_ACCENT, roundness=0.5)
     cylinder(b, 8.0, 5.0, -0.68, 0.68, 0.24, PART_ACCENT, sides=12)
     plate(b, 8.0, 5.12, 0.86, 0.22, 0.36, PART_GUARD, roundness=0.6)
     blade(b, [(8.0, 5.1), (8.0, 9.9), (8.0, 14.3)],
-          taper(0.76, 0.8, 0.24), 0.075)
+          taper(0.76, 0.8, 0.16), 0.075)
 
 
 def style_karambit(b):
@@ -402,8 +408,8 @@ def style_karambit(b):
     handle(b, 8.0, 1.15, 7.95, 4.5, 0.68, 0.5, rings=8, taper_to=0.9)
     wrap_bands(b, 8.0, 1.15, 7.95, 4.5, 0.68, 0.5, 4, width=0.14)
     plate(b, 7.95, 4.55, 0.82, 0.22, 0.5, PART_ACCENT, roundness=0.55)
-    blade(b, [(7.95, 4.55), (8.4, 7.7), (10.2, 10.3), (12.9, 11.3)],
-          taper(0.7, 0.92, 0.26), 0.085, samples=13)
+    blade(b, [(7.95, 4.55), (8.5, 7.9), (10.5, 10.7), (13.6, 11.8)],
+          taper(0.7, 0.95, 0.2), 0.085, samples=14)
 
 
 def style_cleaver(b):
@@ -417,8 +423,8 @@ def style_cleaver(b):
     # which is what separates a cleaver from a paddle.
     # A cleaver ends in a square corner, not a point: `point=False` keeps the
     # full width all the way to the cap, which is the whole read of the shape.
-    blade(b, [(8.0, 6.78), (8.0, 10.6), (8.0, 14.4)],
-          lambda t, _: lerp(1.2, 1.4, t), 0.1, samples=8, point=False)
+    blade(b, [(8.0, 6.78), (8.0, 10.9), (8.0, 14.9)],
+          lambda t, _: lerp(1.6, 1.85, t), 0.11, samples=9, point=False)
     # The hanging hole, inside the blade rather than off its corner.
     torus(b, (9.05, 12.6, 0.0), 0.4, 0.09, PART_ACCENT, segs=18, sides=7, axis="z")
 
@@ -428,7 +434,7 @@ def style_dagger(b):
     sphere(b, (8.0, 0.3, 0.0), 0.55, PART_ACCENT)
     plate(b, 8.0, 4.05, 1.45, 0.22, 0.56, PART_GUARD, roundness=0.5)
     blade(b, [(8.0, 4.1), (8.0, 8.6), (8.0, 12.6)],
-          taper(0.58, 0.54, 0.24), 0.07, section=double_edge_section())
+          taper(0.58, 0.54, 0.16), 0.07, section=double_edge_section())
 
 
 def style_tanto(b):
@@ -438,9 +444,9 @@ def style_tanto(b):
     plate(b, 8.0, 4.1, 1.1, 0.2, 0.5, PART_GUARD, roundness=0.55)
     plate(b, 8.0, 4.38, 0.62, 0.22, 0.46, PART_ACCENT, roundness=0.4)
     # A straight edge with an angled kissaki: the tanto's defining break.
-    blade(b, [(8.0, 4.35), (8.0, 11.6), (8.0, 13.4)],
-          lambda t, _: 0.72 if t < 0.9 else lerp(0.72, 0.38, (t - 0.9) / 0.1), 0.085,
-          samples=11)
+    blade(b, [(8.0, 4.35), (8.0, 11.9), (8.0, 13.8)],
+          lambda t, _: 0.72 if t < 0.86 else lerp(0.72, 0.2, (t - 0.86) / 0.14), 0.085,
+          samples=12)
 
 
 def style_kukri(b):
@@ -450,7 +456,7 @@ def style_kukri(b):
     plate(b, 7.95, 4.5, 0.95, 0.26, 0.66, PART_ACCENT, roundness=0.5)
     # The forward belly is the kukri: it leads the edge and carries the weight.
     blade(b, [(7.95, 4.45), (8.2, 8.0), (9.6, 11.1), (12.4, 12.6)],
-          taper(0.72, 1.15, 0.28), 0.11, samples=13)
+          taper(0.72, 1.15, 0.2), 0.11, samples=13)
 
 
 def style_machete(b):
@@ -458,9 +464,9 @@ def style_machete(b):
     for rivet_y in (1.3, 2.7, 4.1):
         cylinder(b, 8.0, rivet_y, -0.34, 0.34, 0.12)
     plate(b, 8.0, 5.02, 1.45, 0.24, 0.6, PART_GUARD, roundness=0.45)
-    blade(b, [(8.0, 5.1), (8.3, 10.2), (8.55, 14.6)],
-          lambda t, _: lerp(1.02, 0.72, (t - 0.78) / 0.22) if t > 0.78 else lerp(0.95, 1.02, t / 0.78),
-          0.1, samples=11)
+    blade(b, [(8.0, 5.1), (8.3, 10.4), (8.55, 15.0)],
+          lambda t, _: lerp(1.25, 0.55, (t - 0.78) / 0.22) if t > 0.78 else lerp(1.1, 1.25, t / 0.78),
+          0.11, samples=11)
 
 
 def style_stiletto(b):
@@ -469,7 +475,7 @@ def style_stiletto(b):
     plate(b, 8.0, 3.75, 1.85, 0.17, 0.46, PART_GUARD, roundness=0.5)
     # A needle: very narrow, double edged, tapering the whole way.
     blade(b, [(8.0, 3.8), (8.0, 8.6), (8.0, 12.8)],
-          taper(0.36, 0.32, 0.07), 0.06, section=double_edge_section(), samples=10)
+          taper(0.36, 0.32, 0.06), 0.06, section=double_edge_section(), samples=10)
 
 
 def style_katana(b):
@@ -484,10 +490,10 @@ def style_katana(b):
     plate(b, 8.0, 0.28, 0.78, 0.2, 0.54, PART_ACCENT, roundness=0.5)   # kashira
     torus(b, (8.0, 5.1, 0.0), 1.1, 0.2, PART_GUARD, segs=30, sides=9, axis="y")
     plate(b, 8.0, 5.36, 0.54, 0.24, 0.52, PART_ACCENT, roundness=0.35)   # habaki
-    # Sori is subtle: a katana is very nearly straight, and a curve this shallow
-    # is what separates it from a scimitar.
-    blade(b, [(8.0, 5.3), (8.15, 9.0), (8.55, 12.9), (8.9, 16.2)],
-          lambda t, _: 0.68 if t < 0.92 else lerp(0.68, 0.36, (t - 0.92) / 0.08),
+    # Sori: the whole blade leans, and it is the lean, not the length, that
+    # makes the silhouette unmistakably a katana.
+    blade(b, [(8.0, 5.3), (8.4, 9.0), (9.3, 12.9), (10.1, 16.2)],
+          lambda t, _: 0.72 if t < 0.9 else lerp(0.72, 0.2, (t - 0.9) / 0.1),
           0.08, samples=18)
 
 

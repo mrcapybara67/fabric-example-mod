@@ -113,11 +113,13 @@ def rotate_y(p, degrees):
     return (p[0] * cos + p[2] * sin, p[1], -p[0] * sin + p[2] * cos)
 
 
-def render(triangles, textures, yaw=0.0, zoom=0.94):
+def render(triangles, textures, yaw=0.0, zoom=1.0):
     image = Image.new("RGB", (SIZE, SIZE), (26, 27, 32))
     pixels = image.load()
     depth = [[-1e9] * SIZE for _ in range(SIZE)]
-    scale = SIZE / 19.0 * zoom
+    # 17 units across the frame, the same projection tools/knife/preview3d.py
+    # uses, so a render from each can be put side by side without rescaling.
+    scale = SIZE / 17.0 * zoom
     cx = cy = 8.0
     light = (LIGHT[0], LIGHT[1], LIGHT[2])
 
