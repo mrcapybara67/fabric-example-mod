@@ -46,6 +46,9 @@ public class CustomFOVModule extends Module implements Configurable {
 
 	private float currentFov = 70f;
 	private long lastNanos;
+	/** Combat state and when it was last read. */
+	private boolean inCombat;
+	private long lastCombatCheck;
 
 	public CustomFOVModule() {
 		super(Category.VISUAL, "custom_fov");
@@ -96,10 +99,29 @@ public class CustomFOVModule extends Module implements Configurable {
 		if (player.isSprinting()) {
 			return sprintFov.get();
 		}
-		if (inCombat(mc, player)) {
+		if (combat(mc, player)) {
 			return combatFov.get();
 		}
 		return defaultFov.get();
+	}
+
+	/**
+	 * Combat state, re-read ten times a second.
+	 *
+	 * {@code getFov} runs once per frame, and early in the frame: an entity
+	 * query over a twenty block cube at 240 fps is a scan the frame does not
+	 * need, because whether something is within ten blocks cannot change between
+	 * one frame and the next. Ten checks a second is far finer than the quarter
+	 * of a second the view takes to ease anyway.
+	 */
+	private boolean combat(Minecraft mc, LocalPlayer player) {
+		long now = System.nanoTime();
+		if (now - lastCombatCheck < 100_000_000L) {
+			return inCombat;
+		}
+		lastCombatCheck = now;
+		inCombat = inCombat(mc, player);
+		return inCombat;
 	}
 
 	/** A weapon in the main hand and a living target inside ten blocks. */

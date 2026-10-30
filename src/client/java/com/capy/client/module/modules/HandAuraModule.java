@@ -13,7 +13,6 @@ import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.google.gson.JsonObject;
-import java.util.Random;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -58,7 +57,6 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 	private final ChoiceSetting pulseStyle = setting(new ChoiceSetting("pulse_style", 0,
 			"sine", "breath", "flicker"));
 
-	private final Random random = new Random();
 	/** Pulse clock in ticks. */
 	private float time;
 	private int mainFlash;
@@ -191,9 +189,26 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 	private float pulse() {
 		return switch (pulseStyle.option()) {
 			case "breath" -> (float) Math.pow((Math.sin(time * Math.PI / 20.0) + 1.0) * 0.5, 2.2);
-			case "flicker" -> random.nextFloat() < 0.04f ? 0.35f : 1f;
+			case "flicker" -> flicker();
 			default -> (float) (Math.sin(time * Math.PI / 10.0) * 0.3 + 0.7);
 		};
+	}
+
+	/**
+	 * A flicker that belongs to the tick rather than to the frame rate.
+	 *
+	 * Drawing straight from {@code Random} once per frame made the brackets
+	 * flicker faster on a faster machine — nine times a second at 240 fps and
+	 * twice at 60. The tick number is hashed instead, so the same second looks
+	 * the same whatever the frame rate is.
+	 */
+	private float flicker() {
+		int tick = (int) time;
+		int hash = tick * 0x9E3779B9 ^ 0x7F4A7C15;
+		hash ^= hash >>> 13;
+		hash *= 0x85EBCA6B;
+		hash ^= hash >>> 16;
+		return (hash & 0xFF) < 26 ? 0.35f : 1f;
 	}
 
 	private static int withAlpha(int argb, float factor) {

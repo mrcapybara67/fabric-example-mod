@@ -85,7 +85,10 @@ public class BlockOverlayModule extends Module implements Configurable {
 			return;
 		}
 		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null || mc.player == null || !(mc.hitResult instanceof BlockHitResult hit)) {
+		// The F1 key hides vanilla's own block outline; an overlay that kept
+		// drawing through it would be the one thing left on a clean screen.
+		if (mc.level == null || mc.player == null || mc.options.hideGui
+				|| !(mc.hitResult instanceof BlockHitResult hit)) {
 			return;
 		}
 		BlockPos pos = hit.getBlockPos();

@@ -25,6 +25,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -79,7 +80,6 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 	private boolean listening;
 	private BlockPos pendingPos;
 	private Direction pendingFace = Direction.UP;
-	private long pendingAt;
 	private boolean pending;
 
 	/** Camera position of the frame being drawn, shared by the geometry helpers. */
@@ -115,6 +115,13 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 		if (!isEnabled() || hand != InteractionHand.MAIN_HAND || player != Minecraft.getInstance().player) {
 			return InteractionResult.PASS;
 		}
+		// Only a block item can place a block. Without this, every right click
+		// near a wall — a sword swing, a loaf of bread, an empty hand — would be
+		// recorded, and the next tick would see the occupied space beside the
+		// click and play an animation for a block that was never placed.
+		if (!(player.getMainHandItem().getItem() instanceof BlockItem)) {
+			return InteractionResult.PASS;
+		}
 		BlockPos clicked = hit.getBlockPos();
 		// A block is placed into the clicked space when that space can be
 		// replaced (grass, snow, water), and against its face otherwise.
@@ -122,7 +129,6 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 				? clicked
 				: clicked.relative(hit.getDirection());
 		pendingFace = hit.getDirection();
-		pendingAt = System.currentTimeMillis();
 		pending = true;
 		return InteractionResult.PASS;
 	}
@@ -140,7 +146,11 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 		if (state.isAir()) {
 			return;
 		}
-		activeAnimations.add(new BlockAnimation(pendingPos, pendingAt, duration.get(), pendingFace));
+		// The clock starts here, when the block is confirmed, not when the click
+		// was recorded: a placement confirmed a frame or two later would
+		// otherwise open part way through its own animation.
+		activeAnimations.add(new BlockAnimation(pendingPos, System.currentTimeMillis(),
+				duration.get(), pendingFace));
 	}
 
 	// ---------------------------------------------------------------- render

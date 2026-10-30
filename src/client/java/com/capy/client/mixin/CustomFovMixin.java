@@ -34,6 +34,10 @@ public class CustomFovMixin {
 		// The panoramic screenshot uses a fixed 90 degree lens of its own, and
 		// the player's field of view has no meaning without a player.
 		if (module == null || !module.isEnabled()
+				// false means "do not read the option": vanilla uses it for the
+				// fixed 70 degree view, and an override there would leak into
+				// renders that never asked for a field of view setting.
+				|| !useFovSetting
 				|| ((GameRenderer) (Object) this).isPanoramicMode()
 				|| Minecraft.getInstance().player == null) {
 			return;

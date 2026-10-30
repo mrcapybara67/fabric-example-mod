@@ -27,6 +27,11 @@ import org.spongepowered.asm.mixin.injection.Slice;
  * The slice starts at the {@code gamma()} call, which is what keeps the
  * redirect on the gamma read and not on the darkness or lightning-flash options
  * the same method also reads.
+ *
+ * The read being replaced is typed {@code OptionInstance<Double>} at the call
+ * site, so the value handed back has to be a {@code Double}: the bytecode after
+ * the call is a checkcast to Double, and an Integer there is a
+ * ClassCastException on the first frame the module is switched on.
  */
 @Mixin(LightTexture.class)
 public class LightTextureMixin {
@@ -38,7 +43,11 @@ public class LightTextureMixin {
 	private Object capy$fullbrightGamma(OptionInstance<?> option) {
 		FullbrightModule module = ModuleManager.get().get(FullbrightModule.class);
 		if (module != null && module.isEnabled()) {
-			return module.gamma();
+			// The option is an OptionInstance<Double>: the bytecode after the
+			// replaced call is a checkcast to Double followed by doubleValue(),
+			// so anything else here is a ClassCastException on the very first
+			// frame the module is switched on.
+			return Double.valueOf(module.gamma());
 		}
 		return option.get();
 	}
