@@ -45,7 +45,7 @@ JAVA_MODULE = os.path.join(
     "CustomKnifeModule.java",
 )
 
-TEX = 32          # texture edge, in pixels
+TEX = 64          # texture edge, in pixels (64 keeps the grind crisp at 2K)
 UV = 16.0         # vanilla model uv space
 DIAGONAL = -45.0  # the direction a vanilla sword sprite runs in
 
@@ -101,61 +101,84 @@ def rotate(x, y, ox, oy, degrees):
 
 # --------------------------------------------------------------------- textures
 def blade_texture(material):
-    """Brushed steel: dark spine, bright grind, lighter cutting side."""
+    """Brushed steel: dark spine, fuller, grind and a honed edge.
+
+    Four zones across the blade, each with its own slope, because that is what
+    a forged blade has: a shadowed spine, the flat of the blade, the grind and
+    the hone. Painted as one continuous smoothstep the blade reads as a
+    printed gradient at any resolution.
+    """
     base, light, dark, edge = (rgb(v) for v in MATERIALS[material])
     image = Image.new("RGB", (TEX, TEX))
     pixels = image.load()
     for y in range(TEX):
-        wave = 0.5 + 0.5 * math.sin(y * 0.55 + 0.4)
+        # Two frequencies of grain: a slow one for the brush, a fine one for
+        # the scratches. One alone reads as corduroy.
+        wave = 0.5 + 0.5 * math.sin(y * 0.42 + 0.4)
+        scratch = 0.5 + 0.5 * math.sin(y * 11.3 + 0.7)
         for x in range(TEX):
             t = x / (TEX - 1)
-            if t < 0.20:                       # spine bevel
-                colour = mix(dark, base, smooth(t / 0.20))
-            elif t < 0.66:                     # body
-                colour = mix(base, light, smooth((t - 0.20) / 0.46) * 0.80)
-            else:                              # grind towards the edge
-                colour = mix(light, edge, smooth((t - 0.66) / 0.34) * 0.90)
-            brushed = (wave - 0.5) * 0.09 + math.sin(y * 3.1 + x * 0.9) * 0.02
+            if t < 0.16:                       # spine bevel, in shadow
+                colour = mix(dark, base, smooth(t / 0.16) * 0.85)
+            elif t < 0.58:                     # the flat of the blade
+                colour = mix(base, light, smooth((t - 0.16) / 0.42) * 0.85)
+            elif t < 0.74:                     # the grind
+                colour = mix(light, edge, smooth((t - 0.58) / 0.16) * 0.55)
+            else:                              # the hone
+                colour = mix(edge, (255, 255, 255), smooth((t - 0.74) / 0.26) * 0.75)
+            brushed = (wave - 0.5) * 0.10 + (scratch - 0.5) * 0.035
             pixels[x, y] = shade(colour, 1.0 + brushed)
-        # a fuller down the length: a blade that is forged, not printed
-        pixels[11, y] = shade(pixels[11, y], 0.92)
-        pixels[12, y] = shade(pixels[12, y], 0.95)
+    # The fuller: a groove with a shadowed wall and a lit lip, so it reads as
+    # forged steel and not as a painted stripe.
+    for y in range(TEX):
+        pixels[24, y] = shade(pixels[24, y], 0.84)
+        pixels[25, y] = shade(pixels[25, y], 0.90)
+        pixels[26, y] = shade(pixels[26, y], 1.09)
     return image
 
 
 def edge_texture(material):
+    """The hone: hot white at the very edge, cooling back into the steel."""
     _, _, _, edge = (rgb(v) for v in MATERIALS[material])
     image = Image.new("RGB", (TEX, TEX))
     pixels = image.load()
     for y in range(TEX):
         for x in range(TEX):
             t = x / (TEX - 1)
-            colour = mix(edge, (255, 255, 255), smooth(t) * 0.60)
-            pixels[x, y] = shade(colour, 1.0 + math.sin(y * 2.3) * 0.015)
+            colour = mix(edge, (255, 255, 255), smooth(t * 1.15) * 0.78)
+            pixels[x, y] = shade(colour, 1.0 + math.sin(y * 2.3) * 0.015
+                                 + math.sin(y * 9.7 + x * 0.6) * 0.012)
     return image
 
 
 def wood_grip_texture():
+    """Wood: grain along the handle, plus the slower rings of a sawn billet."""
     base, light, dark = (rgb(v) for v in WOOD_HANDLE)
     image = Image.new("RGB", (TEX, TEX))
     pixels = image.load()
     for y in range(TEX):
         for x in range(TEX):
-            grain = 0.5 + 0.5 * math.sin(x * 1.35 + math.sin(y * 0.30) * 2.2)
-            colour = mix(dark, light, smooth(grain) * 0.85)
+            grain = 0.5 + 0.5 * math.sin(x * 0.92 + math.sin(y * 0.18) * 2.6)
+            rings = 0.5 + 0.5 * math.sin(x * 0.21 + 1.3)
+            colour = mix(dark, light, smooth(grain) * 0.80)
+            colour = mix(colour, base, rings * 0.20)
             pixels[x, y] = shade(colour, 1.0 + math.sin(y * 1.7) * 0.03)
     return image
 
 
 def wrapped_grip_texture():
+    """Leather wrap: diagonal bands, a dashed stitch line down the seam."""
     base, light, dark = (rgb(v) for v in LEATHER)
     image = Image.new("RGB", (TEX, TEX))
     pixels = image.load()
     for y in range(TEX):
         for x in range(TEX):
             band = math.sin((x * 1.0 + y * 1.6) * 0.55) * 0.5 + 0.5
-            colour = mix(dark, light, smooth(band) * 0.22)
-            pixels[x, y] = shade(colour, 0.97 + band * 0.04)
+            colour = mix(dark, light, smooth(band) * 0.26)
+            # The seam: two dashed stitch columns, darker than the leather.
+            if x in (2, 3) or x in (46, 47):
+                colour = mix(colour, light, 0.42 if (y // 4) % 2 == 0 else 0.08)
+            pixels[x, y] = shade(colour, 0.97 + band * 0.05)
     return image
 
 
@@ -351,6 +374,14 @@ def blade_path(parts, points, widths, depth, edge=1, overlap=None,
                           length + overlap + 0.05,
                           depth * 1.14 * jitter, angle, (0.88, 1.0),
                           flip=edge < 0))
+        # The grind: a band of the lighter steel between the flat and the hone,
+        # a hair proud of both. In silhouette this is the bevel - without it a
+        # blade is a flat card whatever is painted on it.
+        bevel_w = max(0.10, 0.22 * half)
+        off_g = edge * (half - edge_w - bevel_w / 2.0)
+        parts.append(Part("blade", cx + off_g * ca, cy + off_g * sa, bevel_w,
+                          length + overlap, depth * 1.06 * jitter, angle,
+                          (0.56, 0.84), flip=edge < 0))
         # The spine: a thin, proud strip of the darkest part of the steel, so
         # the back of the blade catches a highlight instead of disappearing.
         # Straight blades only: on a curve, consecutive strips would step in
@@ -446,13 +477,22 @@ def styles():
         seg("accent", 6.92, -0.60, 7.44, -0.24, 2.06),
         seg("accent", 8.56, -0.60, 9.08, -0.24, 2.06),
     ]
+    # Leather wrap across both handle bars. A balisong's handles are wrapped,
+    # and two bare bars read as a hinge rather than as a knife.
+    for band_y in (1.30, 2.05, 2.80, 3.55):
+        butterfly.append(seg("wrap", 6.70, band_y, 7.72, band_y + 0.20, 1.96))
+        butterfly.append(seg("wrap", 8.28, band_y, 9.30, band_y + 0.20, 1.96))
     table["butterfly"] = butterfly
 
     # ---- karambit: hook blade, finger ring where the pommel would be
     # The ring is a ten sided polygon rather than a hexagon: at item scale the
     # difference between a ring and a nut is exactly the number of sides, and
     # the ring is the one feature that identifies a karambit at a glance.
-    karambit = ring("guard", 7.55, -1.35, 1.32, 0.46, 1.12, 10, 18.0)
+    # Eighteen sides, not ten. A ring built from tangent cuboids only reads as
+    # a ring if each segment is short compared with the radius; at ten sides
+    # the corners stick out and it renders as a gear, which is the opposite of
+    # the one feature that identifies a karambit.
+    karambit = ring("guard", 7.55, -1.35, 1.32, 0.42, 1.12, 18, 18.0)
     karambit += [
         # The backspacer runs from the ring into the handle, which is what
         # makes the ring part of the knife instead of a hoop behind it.
@@ -464,6 +504,10 @@ def styles():
         seg("accent", 6.82, 3.90, 7.10, 4.08, 1.62),
         seg("accent", 6.88, 4.18, 7.16, 4.36, 1.62),
     ]
+    # Grip wrap: the bands are what catch the light as the knife turns in the
+    # hand, and what make the handle read as wrapped rather than as plastic.
+    for band_y in (0.75, 1.55, 2.35, 3.15):
+        karambit.append(seg("wrap", 7.04, band_y, 8.36, band_y + 0.18, 1.50))
     hook = [(7.95, 4.15), (8.30, 7.10), (9.15, 9.20), (10.45, 10.55), (11.75, 11.05)]
     blade_path(karambit, hook, [0.94, 0.99, 1.02, 0.88, 0.62], 0.92)
     last = hook[-1]
@@ -493,6 +537,8 @@ def styles():
         seg("hole", 10.60, 12.55, 11.45, 13.40, 1.24, uv=(0.0, 1.0)),
         # Thumb notch on the spine, where a butcher braces the blade.
         seg("hole", 9.05, 13.55, 9.45, 13.95, 1.22, uv=(0.0, 1.0)),
+        # Lanyard hole through the butt of the tang.
+        seg("hole", 7.86, 0.66, 8.14, 0.94, 1.72),
     ]
     table["cleaver"] = cleaver
 
@@ -512,6 +558,10 @@ def styles():
     blade_double(dagger, [(8.0, 4.52), (8.0, 8.80), (8.0, 11.60)],
                  [0.68, 0.60, 0.44], 0.95)
     blade_tip(dagger, 8.0, 11.60, 0.44, 0.95)
+    # A fuller down the centre: one narrow, slightly proud strip of the darker
+    # steel, which gives a long double edged blade a line to catch the light.
+    dagger.append(seg("blade", 7.93, 4.80, 8.07, 11.10, 0.96, 0.0, (8.0, 8.0),
+                      (0.02, 0.20)))
     table["dagger"] = dagger
 
     # ---- tanto: straight single edged blade, wrapped grip, small tsuba
@@ -545,6 +595,11 @@ def styles():
         seg("accent", 6.82, 4.02, 8.90, 4.42, 1.82),
         seg("hole", 7.74, 4.08, 7.96, 4.30, 1.88),
     ]
+    # Three rivets through the handle and a lanyard hole at the butt: the
+    # hardware a working khukuri actually carries.
+    for rivet_y in (1.00, 2.00, 3.00):
+        kukri.append(seg("hole", 7.50, rivet_y, 7.74, rivet_y + 0.24, 1.80))
+    kukri.append(seg("hole", 7.48, -0.32, 7.74, -0.06, 1.86))
     curve = [(7.95, 4.35), (8.35, 7.20), (9.35, 9.55), (11.05, 11.35), (13.05, 12.55)]
     blade_path(kukri, curve, [0.90, 1.00, 1.12, 1.26, 1.22], 1.00)
     last = curve[-1]
@@ -564,6 +619,8 @@ def styles():
     # against when the blade is pushed through something heavy.
     for jimp_y in (5.18, 5.50, 5.82, 6.14):
         machete.append(seg("accent", 7.08, jimp_y, 7.30, jimp_y + 0.18, 1.26))
+    # Lanyard hole through the butt.
+    machete.append(seg("hole", 7.82, 0.20, 8.10, 0.48, 1.92))
     # A machete is a long broad blade with a heavy spine.  It is built from one
     # long plate tilted a few degrees off the grip axis, a proud edge strip on
     # the same line and a thick spine slab, so every blade surface stays a
@@ -600,6 +657,8 @@ def styles():
     blade_double(stiletto, [(8.0, 4.00), (8.0, 8.40), (8.0, 12.20)],
                  [0.58, 0.50, 0.34], 0.88)
     blade_tip(stiletto, 8.0, 12.20, 0.34, 0.88)
+    stiletto.append(seg("blade", 7.94, 4.30, 8.06, 11.60, 0.90, 0.0, (8.0, 8.0),
+                        (0.02, 0.20)))
     table["stiletto"] = stiletto
 
     return table

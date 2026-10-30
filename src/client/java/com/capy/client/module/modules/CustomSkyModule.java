@@ -115,6 +115,11 @@ public class CustomSkyModule extends Module implements Configurable {
 	private float time;
 	/** Rotation of the turning themes, in radians, already scaled by speed. */
 	private float spin;
+	/** The eased speed, so moving the slider is a throttle rather than a step. */
+	private float easedSpeed = -1f;
+	/** The viewport of the last frame, which the shared star drift is scaled by. */
+	private float frameW = 1920f;
+	private float frameH = 1080f;
 	private long lastNanos;
 	/** Clock value at which the next shooting star is allowed to appear. */
 	private float nextShootingStar = 4f;
@@ -177,7 +182,16 @@ public class CustomSkyModule extends Module implements Configurable {
 		float dt = lastNanos == 0L ? 0f : (now - lastNanos) / 1.0e9f;
 		lastNanos = now;
 		dt = Math.max(0f, Math.min(0.1f, dt));
-		float speedValue = (float) speed.real();
+		// The slider is eased rather than applied raw. A raw value jumps every
+		// motion in the theme by a whole step between two frames, which reads as
+		// a stutter; a single lerp turns the slider into a throttle and makes a
+		// speed change a swell instead of a jolt.
+		float target = (float) speed.real();
+		if (easedSpeed < 0f) {
+			easedSpeed = target;
+		}
+		easedSpeed += (target - easedSpeed) * Math.min(1f, dt * 2.2f);
+		float speedValue = easedSpeed;
 		time += dt * speedValue;
 		spin += dt * speedValue;
 		wrapClock();
@@ -189,6 +203,8 @@ public class CustomSkyModule extends Module implements Configurable {
 		if (w < 8f || h < 8f) {
 			return;
 		}
+		frameW = w;
+		frameH = h;
 		float alpha = (float) opacity.real();
 		if (alpha <= 0f) {
 			return;
@@ -576,6 +592,12 @@ public class CustomSkyModule extends Module implements Configurable {
 	 * and the twinkle rate belongs to the star rather than to the frame.
 	 */
 	private void star(Canvas c, int seed, float x, float y, float alpha, float u) {
+		// One wind for the whole sky: every star field drifts on the same slow
+		// curve, so the sky reads as one place instead of as layers sliding
+		// past each other. A few pixels over a minute is all it takes to stop
+		// a star field looking like a still image.
+		x += (float) Math.sin(time * 0.045f) * frameW * 0.004f;
+		y += (float) Math.cos(time * 0.031f) * frameH * 0.004f;
 		float magnitude = noise(seed, 207);
 		float size = Math.max(1f, u * (0.7f + magnitude * magnitude * 4.0f));
 		float twinkle = 0.55f + 0.45f
@@ -693,7 +715,7 @@ public class CustomSkyModule extends Module implements Configurable {
 				// Three rates of shimmer: a fine one per ray, a slower one along the
 				// curtain, and a fixed offset per slice so neighbouring rays differ.
 				float ray = 0.5f + 0.5f
-						* (float) Math.sin(x * 0.16f + time * 2.6f + band * 1.7f);
+						* (float) Math.sin(x * 0.16f + time * 1.7f + band * 1.7f);
 				float swell = 0.5f + 0.5f
 						* (float) Math.sin(x * 0.055f - time * 1.1f + band * 2.2f);
 				float grain = noise(slice, 430 + band);
@@ -1065,7 +1087,7 @@ public class CustomSkyModule extends Module implements Configurable {
 		}
 		// Cut stripes, only below the middle, scrolling down and out of the disc.
 		int cut = a(0xFF1A0033, alpha);
-		float scroll = (time * u * 16f) % (u * 14f);
+		float scroll = (time * u * 11f) % (u * 14f);
 		for (int i = 0; i < 8; i++) {
 			float t = i / 8f;
 			float offset = sunR * (0.06f + 0.94f * t);
@@ -1106,7 +1128,7 @@ public class CustomSkyModule extends Module implements Configurable {
 		// Grid: rows scroll towards the viewer with perspective spacing.
 		float span = h - horizon;
 		for (int i = 0; i < 16; i++) {
-			float t = (i * 20f + (time * 24f) % 20f) / (16f * 20f);
+			float t = (i * 20f + (time * 15f) % 20f) / (16f * 20f);
 			float y = horizon + span * t * t;
 			float fade = 0.10f + 0.62f * t;
 			c.seg(0f, y, w, y, Math.max(2f, u * 4f), a(0xFF20F0FF, alpha * fade * 0.32f));
