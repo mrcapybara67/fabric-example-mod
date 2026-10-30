@@ -2,6 +2,7 @@ package com.capy.client.mixin;
 
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.CustomKnifeModule;
+import com.capy.client.util.Guard;
 import net.minecraft.client.renderer.item.ItemModelResolver;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.world.entity.ItemOwner;
@@ -34,15 +35,22 @@ public class ItemModelResolverMixin {
 	@Inject(method = "appendItemLayers", at = @At("HEAD"), cancellable = true)
 	private void capy$customKnife(ItemStackRenderState state, ItemStack stack, ItemDisplayContext context,
 			Level level, ItemOwner owner, int seed, CallbackInfo ci) {
-		CustomKnifeModule module = ModuleManager.get().get(CustomKnifeModule.class);
-		if (module == null) {
-			return;
+		// Runs for every visible item, every frame. A resource pack with an odd
+		// stack in it must not take the frame down with it, so the whole hook is
+		// guarded: on a failure the item is simply drawn as the vanilla one.
+		try {
+			CustomKnifeModule module = ModuleManager.get().get(CustomKnifeModule.class);
+			if (module == null) {
+				return;
+			}
+			ItemStack swapped = module.swapFor(stack, owner);
+			if (swapped == stack) {
+				return;
+			}
+			((ItemModelResolver) (Object) this).appendItemLayers(state, swapped, context, level, owner, seed);
+			ci.cancel();
+		} catch (Throwable failure) {
+			Guard.report("custom knife model", failure);
 		}
-		ItemStack swapped = module.swapFor(stack, owner);
-		if (swapped == stack) {
-			return;
-		}
-		((ItemModelResolver) (Object) this).appendItemLayers(state, swapped, context, level, owner, seed);
-		ci.cancel();
 	}
 }

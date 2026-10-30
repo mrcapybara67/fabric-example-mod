@@ -2,6 +2,7 @@ package com.capy.client.mixin;
 
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.FullbrightModule;
+import com.capy.client.util.Guard;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.renderer.LightTexture;
 import org.spongepowered.asm.mixin.Mixin;
@@ -41,13 +42,20 @@ public class LightTextureMixin {
 			at = @At(value = "INVOKE",
 					target = "Lnet/minecraft/client/OptionInstance;get()Ljava/lang/Object;"))
 	private Object capy$fullbrightGamma(OptionInstance<?> option) {
-		FullbrightModule module = ModuleManager.get().get(FullbrightModule.class);
-		if (module != null && module.isEnabled()) {
-			// The option is an OptionInstance<Double>: the bytecode after the
-			// replaced call is a checkcast to Double followed by doubleValue(),
-			// so anything else here is a ClassCastException on the very first
-			// frame the module is switched on.
-			return Double.valueOf(module.gamma());
+		// Called once per frame from the lightmap. Anything thrown here is a
+		// crash on the first frame in a world, so vanilla's own value is the
+		// fallback if the module cannot answer.
+		try {
+			FullbrightModule module = ModuleManager.get().get(FullbrightModule.class);
+			if (module != null && module.isEnabled()) {
+				// The option is an OptionInstance<Double>: the bytecode after the
+				// replaced call is a checkcast to Double followed by doubleValue(),
+				// so anything else here is a ClassCastException on the very first
+				// frame the module is switched on.
+				return Double.valueOf(module.gamma());
+			}
+		} catch (Throwable failure) {
+			Guard.report("fullbright", failure);
 		}
 		return option.get();
 	}

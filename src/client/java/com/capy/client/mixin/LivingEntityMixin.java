@@ -3,6 +3,7 @@ package com.capy.client.mixin;
 import com.capy.client.MinecraftAccessorHolder;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.SwingSpeedModule;
+import com.capy.client.util.Guard;
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -41,14 +42,21 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
 public abstract class LivingEntityMixin {
 	@ModifyVariable(method = "updateSwingTime", at = @At("STORE"), ordinal = 0)
 	private int capy$scaleSwingDuration(int duration) {
-		SwingSpeedModule module = ModuleManager.get().get(SwingSpeedModule.class);
-		if (module == null || !module.isEnabled()) {
+		// Runs for every living entity, every tick. A module that throws here
+		// would take the world down, so the vanilla value is the fallback.
+		try {
+			SwingSpeedModule module = ModuleManager.get().get(SwingSpeedModule.class);
+			if (module == null || !module.isEnabled()) {
+				return duration;
+			}
+			// Only our own arm is affected; other players keep the vanilla rhythm.
+			if (MinecraftAccessorHolder.player() != (Object) this) {
+				return duration;
+			}
+			return module.scaleSwingDuration(duration);
+		} catch (Throwable failure) {
+			Guard.report("swing speed", failure);
 			return duration;
 		}
-		// Only our own arm is affected; other players keep the vanilla rhythm.
-		if (MinecraftAccessorHolder.player() != (Object) this) {
-			return duration;
-		}
-		return module.scaleSwingDuration(duration);
 	}
 }

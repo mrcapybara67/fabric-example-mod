@@ -2,6 +2,7 @@ package com.capy.client.mixin;
 
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.SmoothCameraModule;
+import com.capy.client.util.Guard;
 import net.minecraft.client.MouseHandler;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -27,10 +28,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class SmoothCameraMixin {
 	@Inject(method = "handleAccumulatedMovement", at = @At("HEAD"))
 	private void capy$smoothCamera(CallbackInfo ci) {
-		SmoothCameraModule module = ModuleManager.get().get(SmoothCameraModule.class);
-		if (module == null || !module.isEnabled()) {
-			return;
+		// Once per frame, on the input path: a failure here would leave the mouse
+		// unusable, so it costs the smoothing rather than the game.
+		try {
+			SmoothCameraModule module = ModuleManager.get().get(SmoothCameraModule.class);
+			if (module == null || !module.isEnabled()) {
+				return;
+			}
+			module.applyTo((MouseHandler) (Object) this);
+		} catch (Throwable failure) {
+			Guard.report("smooth camera", failure);
 		}
-		module.applyTo((MouseHandler) (Object) this);
 	}
 }

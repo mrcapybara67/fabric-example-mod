@@ -212,19 +212,19 @@ public class CustomSkyModule extends Module implements Configurable {
 		double aspect = w / (double) Math.max(1f, h);
 		double halfW = halfH * aspect;
 
-		PoseStack stack = context.matrices();
-		if (stack == null) {
-			stack = new PoseStack();
-		}
-		boolean pushed = false;
 		try {
-			// Cancels the camera rotation the vertex shader would otherwise
-			// apply, which is what pins the painting to the view instead of to
-			// the world.
+			// A fresh stack, deliberately not the world's.
+			//
+			// The pose stack handed to this event already carries whatever the
+			// pass and everything submitted before us put on it. Inheriting it
+			// applied the view twice, and the painting came out rotated by the
+			// pass and pinned to one heading instead of filling the viewport - on
+			// screen that is "the theme sits on the crosshair and the rest of the
+			// sky is black". Starting from identity and cancelling only the model
+			// view puts the vertices in camera space, which is what a sky wants.
 			Matrix4f inverse = new Matrix4f(RenderSystem.getModelViewMatrix()).invert();
-			stack.pushPose();
-			pushed = true;
-			stack.mulPose(inverse);
+			PoseStack stack = new PoseStack();
+			stack.last().pose().mul(inverse);
 
 			VertexConsumer vc = batch().getBuffer(RenderTypes.debugQuads());
 			Canvas canvas = new Canvas(vc, stack.last(), w, h, halfW, halfH, depth);
@@ -233,10 +233,6 @@ public class CustomSkyModule extends Module implements Configurable {
 		} catch (RuntimeException e) {
 			// A broken theme must cost the sky, never the frame.
 			dropBatch();
-		} finally {
-			if (pushed) {
-				stack.popPose();
-			}
 		}
 	}
 
@@ -263,7 +259,13 @@ public class CustomSkyModule extends Module implements Configurable {
 	 * exactly where the player left it.
 	 */
 	private void applyFog() {
-		if (fog.value()) {
+		if (!fog.value()) {
+			releaseFog();
+			return;
+		}
+		// The accessor lives in a mixin: if it ever fails to apply, holding fog
+		// down is not worth a crash on every frame of the sky.
+		try {
 			if (!fogHeld) {
 				fogWasEnabled = FogRendererAccessor.capy$fogEnabled();
 				fogHeld = true;
@@ -271,8 +273,8 @@ public class CustomSkyModule extends Module implements Configurable {
 			if (FogRendererAccessor.capy$fogEnabled()) {
 				FogRendererAccessor.capy$setFogEnabled(false);
 			}
-		} else {
-			releaseFog();
+		} catch (RuntimeException | LinkageError e) {
+			fogHeld = false;
 		}
 	}
 
@@ -280,8 +282,12 @@ public class CustomSkyModule extends Module implements Configurable {
 		if (!fogHeld) {
 			return;
 		}
-		FogRendererAccessor.capy$setFogEnabled(fogWasEnabled);
 		fogHeld = false;
+		try {
+			FogRendererAccessor.capy$setFogEnabled(fogWasEnabled);
+		} catch (RuntimeException | LinkageError e) {
+			// Nothing to restore through; vanilla keeps whatever state it has.
+		}
 	}
 
 	private void draw(Canvas c, int index, float w, float h, float alpha) {
@@ -358,86 +364,119 @@ public class CustomSkyModule extends Module implements Configurable {
 				float twinkle = 0.55f + 0.45f
 						* (float) Math.sin(time * (0.5f + noise(i, 204) * 1.6f) + noise(i, 205) * TWO_PI);
 				int tint = mix(starTint(i), 0xFFFFB07A, lens * 0.60f);
-				if (lens > 0.30f && distance < base * 0.52f) {
-					float angle = (float) Math.atan2(dy, dx);
-					float span = 0.09f + lens * 0.30f;
-					c.arc(cx, cy, distance, distance * 0.97f, Math.max(1f, size * 1.5f),
-							a(tint, alpha * 0.22f * twinkle), angle - span, angle + span);
-					continue;
-				}
+				// The stars are reddened and stretched thin, never drawn as arcs.
+				// An arc at a star's radius is a quarter circle of hairlines; a
+				// dozen of them read as scratches on the lens, not as lensing.
 				c.quad(x, y, x + size, y + size,
 						a(tint, alpha * 0.70f * twinkle), a(tint, alpha * 0.70f * twinkle));
 			}
 		}
 
-		// The disc: an annulus, white hot at the inner edge and fading to nothing
-		// at the rim. A glow would be brightest at the centre, and the centre is
-		// exactly where the shadow has to be: only a ring of light can be a disc
-		// around a hole. Three stages let the colour turn white -> gold -> iron
-		// without a single visible step.
+		// The disc: one whole tilted annulus, the direct image.
+		//
+		// Whole, not half. A half annulus ends on a horizontal chord across the
+		// sky, and that chord is unmistakable - it reads as a semicircle pasted
+		// on to the background rather than as a disc seen at an angle. The parts
+		// that belong in front of the shadow are drawn later, after the shadow.
 		float breathe = 0.5f + 0.5f * (float) Math.sin(time * 0.45f);
-		c.annulusGradient(cx, cy, inner * 0.97f, inner * 0.97f * tilt,
-				inner * 1.55f, inner * 1.55f * tilt,
-				a(0xFFFFF8E6, alpha), a(0xFFFFD08A, alpha * 0.90f), 5);
-		c.annulusGradient(cx, cy, inner * 1.55f, inner * 1.55f * tilt,
-				inner * 2.70f, inner * 2.70f * tilt,
-				a(0xFFFFD08A, alpha * 0.90f), a(0xFFFF8A2A, alpha * 0.58f), 6);
-		c.annulusGradient(cx, cy, inner * 2.70f, inner * 2.70f * tilt,
-				outer, outer * tilt,
-				a(0xFFFF8A2A, alpha * 0.58f), a(0xFF5E1201, alpha * 0.10f), 8);
+		discHalf(c, cx, cy, inner, outer, tilt, 0f, TWO_PI, alpha, 1f);
+		// The white hot inner edge, bleeding a little into the space above it.
+		c.glow(cx, cy, inner * 1.20f, inner * 1.20f * tilt,
+				a(0xFFFFF4DE, alpha * 0.11f), 6, 26);
+		// The second image: the far side of the disc bent up over the crown of
+		// the shadow. This arc is what says the light has been round the hole;
+		// without it the shadow is a ball with a ring behind it.
+		c.annulusArc(cx, cy, hole * 1.055f, hole * 1.30f, 0.94f,
+				(float) Math.PI * 0.92f, (float) Math.PI * 2.08f,
+				a(0xFFFFE9C4, alpha * 0.42f), a(0xFFFFB25A, alpha * 0.05f), 4);
+		c.annulusArc(cx, cy, hole * 1.040f, hole * 1.105f, 0.98f,
+				(float) Math.PI * 0.96f, (float) Math.PI * 2.04f,
+				a(0xFFFFFFFF, alpha * 0.75f), a(0xFFFFD79A, alpha * 0.22f), 2);
 		// Beaming: the side turning towards the camera is brighter and whiter.
 		// A soft glow over that half of the disc, not a second annulus: an
 		// annulus drawn off centre leaves crescents where its edges do not meet.
 		c.glow(cx - outer * 0.18f, cy, outer * 0.58f, outer * 0.58f * tilt,
 				a(0xFFFFC27A, alpha * 0.24f), 8, 22);
+		// Doppler beaming, the other half of the effect: the limb turning away
+		// from the camera is reddened and dimmed, so the disc reads as spinning
+		// instead of as a painted ellipse.
+		c.glow(cx + outer * 0.42f, cy, outer * 0.52f, outer * 0.52f * tilt,
+				a(0xFF160300, alpha * 0.42f), 6, 22);
 		// The haze the disc throws into the dust around it.
 		c.glow(cx, cy, base * 0.92f, base * 0.70f,
 				a(0xFF43167E, alpha * (0.040f + 0.018f * breathe)), 16, 22);
 
-		// Wisps of hotter gas riding round the disc: soft blobs at a handful of
-		// radii, not rings. A ring of any width leaves a stripe across the disc,
-		// and thirty of them read as the grooves of a record rather than as gas.
-		for (int i = 0; i < 14; i++) {
-			float t = 0.08f + noise(i, 270) * 0.88f;
+		// Hot gas riding round the disc: soft blobs at a handful of radii, each
+		// at its own orbital rate. Blobs, not arcs: an arc of even a few pixels
+		// width lying across the disc reads as a scratch on the lens.
+		for (int i = 0; i < 16; i++) {
+			float t = 0.06f + noise(i, 270) * 0.90f;
 			float r = inner + (outer - inner) * t;
-			float speed = 0.55f + 1.0f * (1f - t);
+			float speed = 0.55f + 1.1f * (1f - t);
 			float angle = flow * speed + noise(i, 271) * TWO_PI;
 			float sx = cx + (float) Math.cos(angle) * r;
 			float sy = cy + (float) Math.sin(angle) * r * tilt;
-			float sr = base * (0.028f + noise(i, 272) * 0.045f) * (1.10f - t * 0.30f);
-			int tint = mix(0xFFFFF2D8, 0xFFFF8A30, t);
+			float sr = base * (0.022f + noise(i, 272) * 0.040f) * (1.10f - t * 0.30f);
+			int tint = mix(0xFFFFFFFF, 0xFFFF8A30, t);
 			float twinkle = 0.55f + 0.45f * (float) Math.sin(time * 1.9f + noise(i, 273) * TWO_PI);
-			c.glow(sx, sy, sr, sr * 0.55f, a(tint, alpha * (0.06f + 0.10f * twinkle)), 4, 18);
-		}
-		// No ring is drawn between the shadow and the disc's inner edge: an
-		// ellipse that spans that gap is a very flat annulus, and on screen it
-		// reads as two pale slabs either side of the hole rather than as light.
-
-		// Hot knots riding round inside the disc, each at its own orbital rate.
-		for (int i = 0; i < 11; i++) {
-			float r = inner + (outer - inner) * (0.05f + noise(i, 260) * 0.90f);
-			float speed = 0.6f + 1.1f * (1f - (r - inner) / (outer - inner));
-			float angle = flow * speed + noise(i, 261) * TWO_PI;
-			float span = 0.10f + noise(i, 262) * 0.24f;
-			float bright = 0.55f + 0.45f * (float) Math.sin(time * 1.7f + noise(i, 263) * TWO_PI);
-			int tint = mix(0xFFFFF0D2, 0xFFFF8A2A, noise(i, 264));
-			c.arc(cx, cy, r, r * tilt, Math.max(1.5f, base * 0.007f),
-					a(tint, alpha * (0.08f + 0.18f * bright)), angle, angle + span);
+			c.glow(sx, sy, sr, sr * 0.62f, a(tint, alpha * (0.10f + 0.16f * twinkle)), 4, 20);
 		}
 
-		// The thin, nearly round ring of light bent around the shadow.
-		float ringR = hole * 1.075f;
-		c.ellipseRing(cx, cy, ringR * 1.10f, ringR * 1.10f * 0.86f, ringR * 1.050f, ringR * 1.050f * 0.86f,
-				a(0xFFFF9E4E, alpha * 0.14f));
-		c.ellipseRing(cx, cy, ringR * 1.048f, ringR * 1.048f * 0.86f, ringR * 1.008f, ringR * 1.008f * 0.86f,
-				a(0xFFFFF2E0, alpha * 0.42f));
+		// The event horizon. Everything drawn before this is behind it and
+		// everything drawn after is in front of it - that ordering is the whole
+		// illusion.
+		c.annulusGradient(cx, cy, hole * 0.97f, hole * 0.97f * 0.99f,
+				hole * 1.03f, hole * 1.03f * 0.99f, a(0xFF000000, alpha), a(0xFF000000, 0f), 2);
+		c.disc(cx, cy, hole * 0.985f, hole * 0.985f, a(0xFF000000, alpha));
 
-		// The shadow, with its edge feathered by a few percent so it is not a
-		// cut-out circle. No black halo: a wide dark glow over the inner disc
-		// greys it down either side of the hole and reads as a lens, not a shadow.
-		c.annulusGradient(cx, cy, hole * 0.98f, hole * 0.98f * 0.97f,
-				hole * 1.06f, hole * 1.06f * 0.97f, a(0xFF000000, alpha), a(0xFF000000, 0f), 3);
-		c.disc(cx, cy, hole, hole * 0.97f, a(0xFF000000, alpha));
+		// The near side of the disc, passing in front of the bottom of the
+		// shadow. A band and not a half disc: what crosses the shadow is the
+		// front of the disc, and drawing the whole near half buries the hole in
+		// its own light instead of showing it in silhouette.
+		// A thin arc just outside the rim at the bottom, not a band across its
+		// middle: an inner radius inside the rim paints a white crescent over the
+		// hole itself, which is the one thing a black hole must never show.
+		// tilt 1.0, not less: a flatter arc dips inside the rim at the bottom and
+		// paints a bright whisker across the middle of the shadow.
+		c.annulusArc(cx, cy, hole * 1.00f, hole * 1.26f, 1.0f,
+				(float) Math.PI * 0.16f, (float) Math.PI * 0.84f,
+				a(0xFFFFFDF4, alpha * 0.80f), a(0xFFFFB45A, alpha * 0.06f), 3);
+		c.glow(cx, cy + hole * 0.78f, hole * 1.30f, hole * 0.22f,
+				a(0xFFFFDCA8, alpha * 0.22f), 6, 22);
+
+		// The photon ring: the last light that can still orbit, a hair of it
+		// wrapped round the shadow, brightest at the front.
+		c.ellipseRing(cx, cy, hole * 1.036f, hole * 1.036f * 0.99f,
+				hole * 1.004f, hole * 1.004f * 0.99f, a(0xFFFFEFD2, alpha * 0.55f));
+		c.arc(cx, cy, hole * 1.040f, hole * 1.040f * 0.99f, hole * 0.012f,
+				a(0xFFFFFFFF, alpha * 0.65f), (float) Math.PI * 0.10f, (float) Math.PI * 0.90f);
+	}
+
+	/**
+	 * Half of an accretion disc: annular bands from the shadow's edge out to the
+	 * rim, white hot inside and dull iron outside, over half the circle so the
+	 * two halves can be drawn on either side of the shadow.
+	 *
+	 * @param hole   the radius the bands are measured in multiples of
+	 * @param outer  the outer limit, in pixels
+	 * @param tiltY  how flat the disc is: 1 is round, 0.3 is seen from above
+	 * @param beam   brightness of this half (the near side is beamed towards us)
+	 */
+	private void discHalf(Canvas c, float cx, float cy, float hole, float outer, float tiltY,
+			float from, float to, float alpha, float beam) {
+		float[] radius = {1.02f, 1.30f, 1.85f, 3.00f, 5.20f, 9.00f};
+		int[] tint = {0xFFFFFFFF, 0xFFFFF2D4, 0xFFFFD08A, 0xFFFF9A38, 0xFFB83A06, 0xFF2A0500};
+		float[] weight = {1.00f, 0.97f, 0.86f, 0.62f, 0.34f, 0.08f};
+		for (int i = 0; i < radius.length - 1; i++) {
+			float r0 = hole * radius[i];
+			float r1 = Math.min(outer, hole * radius[i + 1]);
+			if (r1 <= r0) {
+				continue;
+			}
+			c.annulusArc(cx, cy, r0, r1, tiltY, from, to,
+					a(tint[i], alpha * weight[i] * beam),
+					a(tint[i + 1], alpha * weight[i + 1] * beam), 5);
+		}
 	}
 
 	/**
@@ -1603,6 +1642,42 @@ public class CustomSkyModule extends Module implements Configurable {
 						innerRx + (outerRx - innerRx) * t0, innerRy + (outerRy - innerRy) * t0,
 						innerRx + (outerRx - innerRx) * t1, innerRy + (outerRy - innerRy) * t1,
 						c0, c1, segments);
+			}
+		}
+
+		/**
+		 * A turned slice of an annulus: bands from {@code r0} to {@code r1}, from
+		 * one angle to another, flattened by {@code tiltY} to read as a disc seen
+		 * at an angle. This is what lets the two halves of a black hole's disc be
+		 * drawn either side of its shadow.
+		 */
+		void annulusArc(float cx, float cy, float r0, float r1, float tiltY, float from, float to,
+				int innerColor, int outerColor, int bands) {
+			float span = to - from;
+			if (r1 <= r0 || r0 <= 0f || Math.abs(span) < 1.0e-4f) {
+				return;
+			}
+			int count = Math.max(1, bands);
+			int segments = Math.max(4, Math.min(120, Math.round(Math.abs(span) / 0.075f)));
+			for (int b = 0; b < count; b++) {
+				float t0 = b / (float) count;
+				float t1 = (b + 1f) / count;
+				float ra = r0 + (r1 - r0) * t0;
+				float rb = r0 + (r1 - r0) * t1;
+				int ca = b == 0 ? innerColor : mix(innerColor, outerColor, t0);
+				int cb = mix(innerColor, outerColor, t1);
+				for (int i = 0; i < segments; i++) {
+					float f0 = from + span * i / segments;
+					float f1 = from + span * (i + 1) / segments;
+					float c0 = (float) Math.cos(f0);
+					float s0 = (float) Math.sin(f0);
+					float c1 = (float) Math.cos(f1);
+					float s1 = (float) Math.sin(f1);
+					vertex(cx + c0 * ra, cy + s0 * ra * tiltY, ca);
+					vertex(cx + c0 * rb, cy + s0 * rb * tiltY, cb);
+					vertex(cx + c1 * rb, cy + s1 * rb * tiltY, cb);
+					vertex(cx + c1 * ra, cy + s1 * ra * tiltY, ca);
+				}
 			}
 		}
 

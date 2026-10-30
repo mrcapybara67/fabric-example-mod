@@ -1,6 +1,7 @@
 package com.capy.client.mixin;
 
 import com.capy.client.module.modules.knife.KnifePose;
+import com.capy.client.util.Guard;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.ItemInHandRenderer;
@@ -40,20 +41,23 @@ public class ItemInHandRendererMixin {
 	@Inject(method = "renderHandsWithItems", at = @At("HEAD"))
 	private void capy$knifeFrame(float partialTick, PoseStack pose, SubmitNodeCollector collector,
 			LocalPlayer player, int light, CallbackInfo ci) {
-		KnifePose.frame(player, partialTick);
+		Guard.run("knife frame", () -> KnifePose.frame(player, partialTick));
 	}
 
 	@Inject(method = "renderItem", at = @At("HEAD"))
 	private void capy$knifeBegin(LivingEntity entity, ItemStack stack,
 			ItemDisplayContext context, PoseStack pose, SubmitNodeCollector collector,
 			int light, CallbackInfo ci) {
-		KnifePose.begin(pose, entity, stack, context);
+		Guard.run("knife pose begin", () -> KnifePose.begin(pose, entity, stack, context));
 	}
 
 	@Inject(method = "renderItem", at = @At("RETURN"))
 	private void capy$knifeEnd(LivingEntity entity, ItemStack stack,
 			ItemDisplayContext context, PoseStack pose, SubmitNodeCollector collector,
 			int light, CallbackInfo ci) {
-		KnifePose.end(pose);
+		// Never guarded through a lambda that skips the pop: a pose left pushed
+		// would corrupt every later draw of the frame. Guard.run still returns
+		// normally on failure, so the pop always happens.
+		Guard.run("knife pose end", () -> KnifePose.end(pose));
 	}
 }

@@ -26,6 +26,7 @@ import com.capy.client.module.modules.esp.PlayerEspModule;
 import com.capy.client.module.modules.esp.StorageEspModule;
 import com.capy.client.module.modules.hud.HudElements;
 import com.capy.client.module.modules.hud.HudRenderer;
+import com.capy.client.util.Guard;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
@@ -119,7 +120,10 @@ public class CapyClient implements ClientModInitializer {
 			}
 			for (Module module : modules.modules()) {
 				if (module instanceof Tickable tickable) {
-					tickable.onTick(client);
+					// One module throwing must not stop the other modules from
+					// ticking - and it must never reach vanilla's tick loop, where
+					// it would be a crash.
+					Guard.run("tick " + module.id(), () -> tickable.onTick(client));
 				}
 			}
 		});
@@ -138,28 +142,38 @@ public class CapyClient implements ClientModInitializer {
 		// depth buffer is complete by this point, the boxes ignore it, and they
 		// write no depth either, so nothing drawn later is clipped by an
 		// occluder that is not on screen.
-		WorldRenderEvents.AFTER_ENTITIES.register(EspRenderer::render);
+		// Guarded: this runs inside the world pass, where a thrown exception is a
+		// crash on the first frame in a world rather than a missing box.
+		WorldRenderEvents.AFTER_ENTITIES.register(context -> Guard.run("esp", () -> EspRenderer.render(context)));
 
 		// The HUD chips go first, so an alert is never hidden behind them.
+		// Every HUD element is guarded. The HUD is drawn on the first frame in a
+		// world, so an exception in one chip is otherwise a crash on join, and
+		// there is nothing a player can do about it.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "hud"),
-				(graphics, deltaTracker) -> HudRenderer.render(graphics, graphics.guiWidth(), graphics.guiHeight()));
+				(graphics, deltaTracker) -> Guard.run("hud",
+						() -> HudRenderer.render(graphics, graphics.guiWidth(), graphics.guiHeight())));
 
 		// The weather card is drawn over the HUD chips and under the alerts.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "weather_toast"),
-				(graphics, deltaTracker) -> weather.onHudRender(graphics, graphics.guiWidth()));
+				(graphics, deltaTracker) -> Guard.run("weather card",
+						() -> weather.onHudRender(graphics, graphics.guiWidth())));
 
 		// The Anti Admin alerts are drawn over the HUD.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anti_admin"),
-				(graphics, deltaTracker) -> antiAdmin.onHudRender(graphics, graphics.guiWidth(),
-						graphics.guiHeight()));
+				(graphics, deltaTracker) -> Guard.run("anti-admin alerts",
+						() -> antiAdmin.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight())));
 
 		// Transient detection state must not survive a world change or a
 		// disconnect: the players of the old world are gone.
-		ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register((before, after) -> antiAdmin.reset());
+		ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register((before, after) ->
+				Guard.run("anti-admin reset", antiAdmin::reset));
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-			antiAdmin.reset();
-			// Leaving a server is a good moment to store the settings.
-			ClientConfig.get().save(FabricLoader.getInstance().getConfigDir());
+			Guard.run("anti-admin disconnect", () -> {
+				antiAdmin.reset();
+				// Leaving a server is a good moment to store the settings.
+				ClientConfig.get().save(FabricLoader.getInstance().getConfigDir());
+			});
 		});
 	}
 }

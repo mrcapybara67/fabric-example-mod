@@ -54,6 +54,10 @@ public final class KnifePose {
 
 	/** The attack progress vanilla computed for this frame, 0..1. */
 	private static float attack;
+	/** Real seconds, for the idle sway. Wrapped so a float stays exact. */
+	private static float clock;
+	/** {@link System#nanoTime()} of the previous frame; 0 until the first one. */
+	private static long clockNanos;
 
 	private static long startedAt;
 	private static long durationNanos = DEFAULT_DURATION_NS;
@@ -84,6 +88,16 @@ public final class KnifePose {
 	 * sample the interpolated animation mid-frame.
 	 */
 	public static void frame(LocalPlayer player, float partialTick) {
+		// The idle clock: real elapsed time rather than the tick count, so the
+		// sway is the same at 60 and at 600 frames per second.
+		long now = System.nanoTime();
+		if (clockNanos != 0L) {
+			clock += (now - clockNanos) / 1.0e9f;
+			if (clock > 900f) {
+				clock -= 900f;
+			}
+		}
+		clockNanos = now;
 		attack = player == null ? 0f : clamp01(player.getAttackAnim(partialTick));
 		if (running && progress() >= 1f) {
 			running = false;
@@ -149,6 +163,7 @@ public final class KnifePose {
 			String styleId = module.styleId();
 			boolean left = context == ItemDisplayContext.FIRST_PERSON_LEFT_HAND;
 			stance(pose, styleId, left);
+			idle(pose, styleId, left);
 			if (attack > 0.001f && attack < 0.999f) {
 				swing(pose, styleId, attack, left);
 			}
@@ -260,6 +275,31 @@ public final class KnifePose {
 			}
 			default -> {
 			}
+		}
+	}
+
+	/**
+	 * The idle motion: what a held knife does when nothing is happening.
+	 *
+	 * A knife that is perfectly still in the hand reads as a prop pasted on to
+	 * the arm, which is the difference between "a model" and "an item I am
+	 * holding". The whole motion is a millimetre of travel and about a degree of
+	 * turn - small enough that it never fights the swing, large enough that the
+	 * blade catches the light as the player breathes. Each style breathes a
+	 * little differently: a heavy cleaver rocks more than a stiletto.
+	 */
+	private static void idle(PoseStack pose, String style, boolean left) {
+		float m = left ? -1.0f : 1.0f;
+		float breathe = (float) Math.sin(clock * 1.30f);
+		float sway = (float) Math.sin(clock * 0.61f + 1.1f);
+		pose.translate(m * 0.0016f * sway, 0.0022f * breathe, 0.0f);
+		pose.mulPose(Axis.ZP.rotationDegrees(m * 0.9f * sway));
+		switch (style) {
+			case "cleaver", "machete" -> pose.mulPose(Axis.XP.rotationDegrees(1.9f * breathe));
+			case "karambit" -> pose.mulPose(Axis.XP.rotationDegrees(1.5f * breathe));
+			case "kukri" -> pose.mulPose(Axis.XP.rotationDegrees(1.7f * breathe));
+			case "stiletto", "dagger" -> pose.mulPose(Axis.XP.rotationDegrees(0.9f * breathe));
+			default -> pose.mulPose(Axis.XP.rotationDegrees(1.2f * breathe));
 		}
 	}
 

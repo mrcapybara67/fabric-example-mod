@@ -1,6 +1,7 @@
 package com.capy.client.mixin;
 
 import com.capy.client.module.modules.antiadmin.PacketSignals;
+import com.capy.client.util.Guard;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
@@ -32,84 +33,88 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * itself, it arrives exactly once, and reading it at HEAD is what makes the
  * about-to-be-removed player info entry still readable.
  *
- * Every hook is one call and nothing else: the normalising, the filtering and
- * the decisions all live in {@code PacketSignals}, so this class never needs to
- * change when a detector does.
+ * <p>Every hook is one guarded call and nothing else. The guard matters more
+ * here than anywhere else in the client: {@code ClientPacketListener} is the
+ * class that is loaded when the player first connects, so an exception in one
+ * of these fifteen handlers is exactly "the game crashes the moment I join a
+ * server", and a single unparseable suggestion reply would take the whole
+ * client down with it. A swallowed, logged failure costs one detection; a
+ * thrown one costs the session.</p>
  */
 @Mixin(ClientPacketListener.class)
 public class ClientPacketListenerMixin {
 	@Inject(method = "handlePlayerInfoUpdate", at = @At("HEAD"))
 	private void capy$onPlayerInfoUpdate(ClientboundPlayerInfoUpdatePacket packet, CallbackInfo ci) {
-		PacketSignals.onPlayerInfoUpdate(packet);
+		Guard.run("anti-admin player info update", () -> PacketSignals.onPlayerInfoUpdate(packet));
 	}
 
 	@Inject(method = "handlePlayerInfoRemove", at = @At("HEAD"))
 	private void capy$onPlayerInfoRemove(ClientboundPlayerInfoRemovePacket packet, CallbackInfo ci) {
-		PacketSignals.onPlayerInfoRemove(packet);
+		Guard.run("anti-admin player info remove", () -> PacketSignals.onPlayerInfoRemove(packet));
 	}
 
 	@Inject(method = "handleCommandSuggestions", at = @At("HEAD"))
 	private void capy$onCommandSuggestions(ClientboundCommandSuggestionsPacket packet, CallbackInfo ci) {
-		PacketSignals.onSuggestions(packet);
+		Guard.run("anti-admin suggestions", () -> PacketSignals.onSuggestions(packet));
 	}
 
 	@Inject(method = "handleParticleEvent", at = @At("HEAD"))
 	private void capy$onParticle(ClientboundLevelParticlesPacket packet, CallbackInfo ci) {
-		PacketSignals.onParticle(packet);
+		Guard.run("anti-admin particles", () -> PacketSignals.onParticle(packet));
 	}
 
 	@Inject(method = "handleSoundEvent", at = @At("HEAD"))
 	private void capy$onSound(ClientboundSoundPacket packet, CallbackInfo ci) {
-		PacketSignals.onSound(packet);
+		Guard.run("anti-admin sound", () -> PacketSignals.onSound(packet));
 	}
 
 	@Inject(method = "handleAddEntity", at = @At("HEAD"))
 	private void capy$onAddEntity(ClientboundAddEntityPacket packet, CallbackInfo ci) {
-		PacketSignals.onEntitySpawn(packet);
+		Guard.run("anti-admin entity spawn", () -> PacketSignals.onEntitySpawn(packet));
 	}
 
 	@Inject(method = "handleBlockUpdate", at = @At("HEAD"))
 	private void capy$onBlockUpdate(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
-		PacketSignals.onBlockUpdate(packet);
+		Guard.run("anti-admin block update", () -> PacketSignals.onBlockUpdate(packet));
 	}
 
 	@Inject(method = "handleSetPlayerTeamPacket", at = @At("HEAD"))
 	private void capy$onTeam(ClientboundSetPlayerTeamPacket packet, CallbackInfo ci) {
-		PacketSignals.onTeam(packet);
+		Guard.run("anti-admin team", () -> PacketSignals.onTeam(packet));
 	}
 
 	@Inject(method = "handlePlayerChat", at = @At("HEAD"))
 	private void capy$onPlayerChat(ClientboundPlayerChatPacket packet, CallbackInfo ci) {
-		PacketSignals.onPlayerChat(packet);
+		Guard.run("anti-admin chat", () -> PacketSignals.onPlayerChat(packet));
 	}
 
 	@Inject(method = "handleSystemChat", at = @At("HEAD"))
 	private void capy$onSystemChat(ClientboundSystemChatPacket packet, CallbackInfo ci) {
-		PacketSignals.onSystemChat(packet);
+		Guard.run("anti-admin system chat", () -> PacketSignals.onSystemChat(packet));
 	}
 
 	@Inject(method = "handleOpenScreen", at = @At("HEAD"))
 	private void capy$onOpenScreen(ClientboundOpenScreenPacket packet, CallbackInfo ci) {
-		PacketSignals.onOpenScreen(packet);
+		Guard.run("anti-admin open screen", () -> PacketSignals.onOpenScreen(packet));
 	}
 
 	@Inject(method = "handleOpenSignEditor", at = @At("HEAD"))
 	private void capy$onOpenSign(ClientboundOpenSignEditorPacket packet, CallbackInfo ci) {
-		PacketSignals.onOpenSign(packet);
+		Guard.run("anti-admin open sign", () -> PacketSignals.onOpenSign(packet));
 	}
 
 	@Inject(method = "handleOpenBook", at = @At("HEAD"))
 	private void capy$onOpenBook(ClientboundOpenBookPacket packet, CallbackInfo ci) {
-		PacketSignals.onOpenBook(packet);
+		Guard.run("anti-admin open book", () -> PacketSignals.onOpenBook(packet));
 	}
 
 	@Inject(method = "handleContainerSetSlot", at = @At("HEAD"))
 	private void capy$onContainerSlot(ClientboundContainerSetSlotPacket packet, CallbackInfo ci) {
-		PacketSignals.onContainerSlot(packet);
+		Guard.run("anti-admin container slot", () -> PacketSignals.onContainerSlot(packet));
 	}
 
 	@Inject(method = "handleRemoveEntities", at = @At("HEAD"))
 	private void capy$onRemoveEntities(ClientboundRemoveEntitiesPacket packet, CallbackInfo ci) {
-		PacketSignals.onRemoveEntities(packet);
+		Guard.run("anti-admin remove entities", () -> PacketSignals.onRemoveEntities(packet));
 	}
 }

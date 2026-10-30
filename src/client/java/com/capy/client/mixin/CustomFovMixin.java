@@ -2,6 +2,7 @@ package com.capy.client.mixin;
 
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.CustomFOVModule;
+import com.capy.client.util.Guard;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
@@ -30,31 +31,40 @@ public class CustomFovMixin {
 	@Inject(method = "getFov", at = @At("HEAD"), cancellable = true)
 	private void capy$customFov(Camera camera, float partialTick, boolean useFovSetting,
 			CallbackInfoReturnable<Float> cir) {
-		CustomFOVModule module = ModuleManager.get().get(CustomFOVModule.class);
-		// The panoramic screenshot uses a fixed 90 degree lens of its own, and
-		// the player's field of view has no meaning without a player.
-		if (module == null || !module.isEnabled()
-				// false means "do not read the option": vanilla uses it for the
-				// fixed 70 degree view, and an override there would leak into
-				// renders that never asked for a field of view setting.
-				|| !useFovSetting
-				|| ((GameRenderer) (Object) this).isPanoramicMode()
-				|| Minecraft.getInstance().player == null) {
-			return;
+		// Once per frame, in the middle of building the projection: a failure
+		// here is a crash before the first frame is even drawn, so vanilla's own
+		// field of view is the fallback.
+		try {
+			CustomFOVModule module = ModuleManager.get().get(CustomFOVModule.class);
+			// The panoramic screenshot uses a fixed 90 degree lens of its own, and
+			// the player's field of view has no meaning without a player.
+			if (module == null || !module.isEnabled()
+					// false means "do not read the option": vanilla uses it for the
+					// fixed 70 degree view, and an override there would leak into
+					// renders that never asked for a field of view setting.
+					|| !useFovSetting
+					|| ((GameRenderer) (Object) this).isPanoramicMode()
+					|| Minecraft.getInstance().player == null) {
+				return;
+			}
+			float fov = module.frameFov();
+			if (!module.overridesEffects()) {
+				// Vanilla's own multiplier, so speed and potion effects still widen
+				// the view while the base value comes from the module.
+				fov *= ((GameRendererAccessor) (Object) this).capy$fovModifier();
+			}
+			CustomFOVModule.recordFov(fov);
+			cir.setReturnValue(fov);
+		} catch (Throwable failure) {
+			Guard.report("custom fov", failure);
 		}
-		float fov = module.frameFov();
-		if (!module.overridesEffects()) {
-			// Vanilla's own multiplier, so speed and potion effects still widen
-			// the view while the base value comes from the module.
-			fov *= ((GameRendererAccessor) (Object) this).capy$fovModifier();
-		}
-		CustomFOVModule.recordFov(fov);
-		cir.setReturnValue(fov);
 	}
 
 	@Inject(method = "getFov", at = @At("RETURN"))
 	private void capy$recordFov(Camera camera, float partialTick, boolean useFovSetting,
 			CallbackInfoReturnable<Float> cir) {
-		CustomFOVModule.recordFov(cir.getReturnValueF());
+		Guard.run("fov record", () -> {
+			CustomFOVModule.recordFov(cir.getReturnValueF());
+		});
 	}
 }
