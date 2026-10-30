@@ -45,7 +45,8 @@ JAVA_MODULE = os.path.join(
     "CustomKnifeModule.java",
 )
 
-TEX = 64          # texture edge, in pixels (64 keeps the grind crisp at 2K)
+TEX = 128         # texture edge, in pixels: enough for the spine, the flat,
+                  # the grind and the hone to be four real zones, not a smear
 UV = 16.0         # vanilla model uv space
 DIAGONAL = -45.0  # the direction a vanilla sword sprite runs in
 
@@ -129,11 +130,13 @@ def blade_texture(material):
             brushed = (wave - 0.5) * 0.10 + (scratch - 0.5) * 0.035
             pixels[x, y] = shade(colour, 1.0 + brushed)
     # The fuller: a groove with a shadowed wall and a lit lip, so it reads as
-    # forged steel and not as a painted stripe.
+    # forged steel and not as a painted stripe. Its column is a fraction of the
+    # sheet, so raising the resolution can never move it off the blade.
+    groove = int(TEX * 0.375)
     for y in range(TEX):
-        pixels[24, y] = shade(pixels[24, y], 0.84)
-        pixels[25, y] = shade(pixels[25, y], 0.90)
-        pixels[26, y] = shade(pixels[26, y], 1.09)
+        pixels[groove, y] = shade(pixels[groove, y], 0.84)
+        pixels[groove + 1, y] = shade(pixels[groove + 1, y], 0.90)
+        pixels[groove + 2, y] = shade(pixels[groove + 2, y], 1.09)
     return image
 
 
@@ -171,12 +174,13 @@ def wrapped_grip_texture():
     base, light, dark = (rgb(v) for v in LEATHER)
     image = Image.new("RGB", (TEX, TEX))
     pixels = image.load()
+    seam = TEX // 24
     for y in range(TEX):
         for x in range(TEX):
             band = math.sin((x * 1.0 + y * 1.6) * 0.55) * 0.5 + 0.5
             colour = mix(dark, light, smooth(band) * 0.26)
             # The seam: two dashed stitch columns, darker than the leather.
-            if x in (2, 3) or x in (46, 47):
+            if x in (seam, seam + 1) or x in (TEX - 6, TEX - 5):
                 colour = mix(colour, light, 0.42 if (y // 4) % 2 == 0 else 0.08)
             pixels[x, y] = shade(colour, 0.97 + band * 0.05)
     return image
@@ -334,12 +338,12 @@ def blade_path(parts, points, widths, depth, edge=1, overlap=None,
         # curve, and the error at each joint is what shows as a tooth on the
         # silhouette. Ten slices per span pushes that error below a pixel at
         # the size a held knife is actually drawn.
-        points, widths = resample(points, widths, 10)
+        points, widths = resample(points, widths, 14)
     if overlap is None:
         # A curved blade is a chain of short segments; the overlap is what
         # hides the joint between them. On a straight blade there is no joint
         # to hide, and the overlap would only make the ends uneven.
-        overlap = 0.18 if curved else 0.0
+        overlap = 0.26 if curved else 0.0
     for i in range(len(points) - 1):
         (x0, y0), (x1, y1) = points[i], points[i + 1]
         dx, dy = x1 - x0, y1 - y0
@@ -661,6 +665,38 @@ def styles():
                         (0.02, 0.20)))
     table["stiletto"] = stiletto
 
+    # ---- katana: a long single edged blade, a round tsuba, a wrapped tsuka
+    #
+    # The one thing that makes a katana a katana is proportion: a blade three
+    # times the length of the grip, with a shallow curve along its whole run.
+    # Built that way here - 5 units of grip under 12 of blade - and then fitted
+    # by the same uniform scale as every other style, so it stays long and thin
+    # while ending up the same overall size in the hand.
+    katana = [
+        seg("grip", 7.46, 0.12, 8.54, 4.30, 1.22),
+    ]
+    for band_y in (0.35, 1.15, 1.95, 2.75, 3.55):
+        katana.append(seg("wrap", 7.36, band_y, 8.64, band_y + 0.32, 1.32))
+    katana += [
+        # Kashira: the metal cap on the butt of the tsuka.
+        seg("accent", 7.38, -0.50, 8.62, -0.06, 1.36),
+        # Fuchi: the collar where the wrap meets the guard.
+        seg("accent", 7.36, 4.26, 8.64, 4.58, 1.34),
+    ]
+    # Tsuba: a round guard, which is what a katana has and a sword does not.
+    katana += ring("guard", 8.0, 4.90, 1.35, 0.22, 0.54, 20, 0.0)
+    katana += [
+        # Habaki: the blade collar that seats against the guard.
+        seg("accent", 7.58, 4.84, 8.42, 5.22, 0.64),
+    ]
+    katana_curve = [(7.98, 5.22), (7.94, 8.60), (7.78, 11.90), (7.50, 15.00), (7.12, 17.60)]
+    blade_path(katana, katana_curve, [0.70, 0.68, 0.64, 0.58, 0.46], 0.84)
+    tip = katana_curve[-1]
+    blade_tip(katana, tip[0], tip[1], 0.46, 0.84,
+              math.degrees(math.atan2(tip[1] - katana_curve[-2][1],
+                                      tip[0] - katana_curve[-2][0])) - 90.0)
+    table["katana"] = katana
+
     return table
 
 
@@ -810,7 +846,7 @@ def main():
     grip_points = {
         "butterfly": (8.0, 2.5), "karambit": (7.7, 2.1), "cleaver": (8.0, 3.3),
         "dagger": (8.0, 2.2), "tanto": (8.0, 2.2), "kukri": (7.75, 2.2),
-        "machete": (8.0, 2.6), "stiletto": (8.0, 2.0),
+        "machete": (8.0, 2.6), "stiletto": (8.0, 2.0), "katana": (8.0, 2.2),
     }
     for style in order:
         placed = solve(table[style], grip_points[style])

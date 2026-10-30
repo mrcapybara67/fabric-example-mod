@@ -51,7 +51,7 @@ import net.minecraft.world.item.Items;
 public class CustomKnifeModule extends Module implements Configurable {
 	/** The knife styles that ship with the client, in menu order. */
 	public static final String[] STYLES = {
-			"butterfly", "karambit", "cleaver", "dagger", "tanto", "kukri", "machete", "stiletto"
+			"butterfly", "karambit", "cleaver", "dagger", "tanto", "kukri", "machete", "stiletto", "katana"
 	};
 
 	/** Sword materials, in the order of {@link #MODELS}' second dimension. */

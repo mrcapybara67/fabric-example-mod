@@ -27,7 +27,7 @@ MODELS = os.path.join(ASSETS, "models", "item", "knife")
 OUT = "/tmp/knife3d"
 
 MATERIALS = ["wooden", "stone", "iron", "golden", "diamond", "netherite"]
-STYLES = ["butterfly", "karambit", "cleaver", "dagger", "tanto", "kukri", "machete", "stiletto"]
+STYLES = ["butterfly", "karambit", "cleaver", "dagger", "tanto", "kukri", "machete", "stiletto", "katana"]
 
 LIGHT = (-0.42, 0.68, 0.60)
 

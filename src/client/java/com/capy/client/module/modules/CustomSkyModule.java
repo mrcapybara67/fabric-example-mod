@@ -120,6 +120,23 @@ public class CustomSkyModule extends Module implements Configurable {
 	/** The viewport of the last frame, which the shared star drift is scaled by. */
 	private float frameW = 1920f;
 	private float frameH = 1080f;
+	/** Where the view is pointing, in degrees, this frame. */
+	private float viewYaw;
+	private float viewPitch;
+	/**
+	 * The heading the current theme was switched on at.
+	 *
+	 * Sky bodies are placed relative to this, so a theme's subject appears
+	 * where the player is already looking and then stays in the sky as they
+	 * turn - instead of either following the crosshair or starting a hundred
+	 * and eighty degrees behind them.
+	 */
+	private float skyOriginYaw;
+	/** The theme the last frame drew, so a change can re-anchor. */
+	private int lastTheme = -1;
+	/** Pixels per degree of sky, from the frame's own field of view. */
+	private float pxPerDegree = 20f;
+	private float pyPerDegree = 12f;
 	private long lastNanos;
 	/** Clock value at which the next shooting star is allowed to appear. */
 	private float nextShootingStar = 4f;
@@ -148,6 +165,8 @@ public class CustomSkyModule extends Module implements Configurable {
 				listening = true;
 			}
 			lastNanos = 0L;
+			// Re-anchor on the next frame the theme draws.
+			lastTheme = -1;
 			shootingStarAt = -1f;
 			// Not on the very first frame after switching on: a star streaking
 			// across an empty sky the instant the theme appears reads as a glitch,
@@ -228,6 +247,22 @@ public class CustomSkyModule extends Module implements Configurable {
 		double aspect = w / (double) Math.max(1f, h);
 		double halfW = halfH * aspect;
 
+		// Where the sky is pointing. Every sky body is placed by compass azimuth
+		// and elevation, so turning the view slides it across the sky instead of
+		// dragging it along with the crosshair: look left, and the black hole
+		// leaves the screen the way the sun does.
+		viewYaw = mc.player.getYRot();
+		viewPitch = mc.player.getXRot();
+		if (index != lastTheme) {
+			// A new theme takes the current heading as its sky origin, so its
+			// subject is on screen the moment it is chosen.
+			lastTheme = index;
+			skyOriginYaw = viewYaw;
+		}
+		double horizontal = Math.toDegrees(2.0 * Math.atan(Math.tan(Math.toRadians(fov * 0.5)) * aspect));
+		pxPerDegree = (float) (w / Math.max(1.0, horizontal));
+		pyPerDegree = (float) (h / Math.max(1.0, fov));
+
 		try {
 			// A fresh stack, deliberately not the world's.
 			//
@@ -250,6 +285,27 @@ public class CustomSkyModule extends Module implements Configurable {
 			// A broken theme must cost the sky, never the frame.
 			dropBatch();
 		}
+	}
+
+	/** Screen X of a point on the sky, given its compass azimuth in degrees. */
+	private float skyX(float azimuth) {
+		return frameW * 0.5f - wrapDegrees(viewYaw - azimuth) * pxPerDegree;
+	}
+
+	/** Screen Y of a point on the sky, given its elevation in degrees. */
+	private float skyY(float elevation) {
+		return frameH * 0.5f - (elevation + viewPitch) * pyPerDegree;
+	}
+
+	/** Degrees folded into -180..180, so a sky body has one position per turn. */
+	private static float wrapDegrees(float degrees) {
+		float wrapped = degrees % 360f;
+		if (wrapped < -180f) {
+			wrapped += 360f;
+		} else if (wrapped > 180f) {
+			wrapped -= 360f;
+		}
+		return wrapped;
 	}
 
 	/** Keeps both clocks inside the range a float resolves exactly. */
@@ -339,8 +395,13 @@ public class CustomSkyModule extends Module implements Configurable {
 	private void blackHole(Canvas c, float w, float h, float alpha) {
 		float u = h / 1080f;
 		float base = Math.min(w, h);
-		float cx = w * 0.5f;
-		float cy = h * 0.52f;
+		// Fixed in the sky, at compass azimuth 0 and 26 degrees up: low enough to
+		// sit over the horizon, high enough to be looked up at.
+		float cx = skyX(skyOriginYaw);
+		// Fourteen degrees up: high enough to read as "in the sky", low enough
+		// that the disc is not clipped by the top of the frame at the default
+		// pitch, which is where a player sees it first.
+		float cy = skyY(14f);
 		float hole = base * 0.108f;
 		// The disc's inner edge sits close to the shadow: the gap between a round
 		// shadow and a disc this flat is a wedge, and the wider it is the more it
@@ -598,6 +659,14 @@ public class CustomSkyModule extends Module implements Configurable {
 		// a star field looking like a still image.
 		x += (float) Math.sin(time * 0.045f) * frameW * 0.004f;
 		y += (float) Math.cos(time * 0.031f) * frameH * 0.004f;
+		// And they pan with the view: a star field that ignores the camera is a
+		// decal, not a sky. A third of the true angular rate, so the field reads
+		// as distant rather than pasted on to the far plane.
+		x -= wrapDegrees(viewYaw) * pxPerDegree * 0.32f;
+		x = x % frameW;
+		if (x < 0f) {
+			x += frameW;
+		}
 		float magnitude = noise(seed, 207);
 		float size = Math.max(1f, u * (0.7f + magnitude * magnitude * 4.0f));
 		float twinkle = 0.55f + 0.45f
@@ -766,7 +835,9 @@ public class CustomSkyModule extends Module implements Configurable {
 				a(0xFFDE5F4A, alpha), a(0xFFF2854B, alpha), a(0xFFFFA952, alpha),
 				a(0xFFFFC97E, alpha), a(0xFFFFDCA0, alpha));
 
-		float sunX = w * 0.5f;
+		// The sun sets in the west. Only its azimuth is anchored: a sunset is
+		// tied to the horizon, so it may not climb when the player looks up.
+		float sunX = skyX(skyOriginYaw + 72f);
 		float sunY = horizon - h * 0.155f + (float) Math.sin(time * 0.18f) * h * 0.006f;
 		float sunR = base * 0.086f;
 
@@ -957,8 +1028,8 @@ public class CustomSkyModule extends Module implements Configurable {
 				a(0xFF63B6E8, alpha), a(0xFF9CD2F2, alpha), a(0xFFD9C6E6, alpha),
 				a(0xFFFFC4DC, alpha), a(0xFFFFB2C6, alpha));
 
-		float sunX = w * 0.76f;
-		float sunY = h * 0.18f;
+		float sunX = skyX(skyOriginYaw - 58f);
+		float sunY = skyY(62f);
 		float breathe = 0.5f + 0.5f * (float) Math.sin(time * 0.5f);
 		c.glow(sunX, sunY, base * 0.56f, base * 0.56f,
 				a(0xFFFFD0E4, alpha * (0.20f + 0.09f * breathe)), 5, 26);
@@ -1066,7 +1137,7 @@ public class CustomSkyModule extends Module implements Configurable {
 				a(0xFF9A0060, alpha), a(0xFFE0006A, alpha), a(0xFFFF006E, alpha));
 		c.quad(0f, horizon, w, h, a(0xFF1B0030, alpha), a(0xFF05000A, alpha));
 
-		float sunX = w * 0.5f;
+		float sunX = skyX(skyOriginYaw + 96f);
 		float sunY = horizon - h * 0.12f;
 		float sunR = base * 0.165f;
 
@@ -1239,8 +1310,10 @@ public class CustomSkyModule extends Module implements Configurable {
 	private void eclipse(Canvas c, float w, float h, float alpha) {
 		float base = Math.min(w, h);
 		float u = h / 1080f;
-		float mx = w * 0.5f;
-		float my = h * 0.44f;
+		// South, at 34 degrees up: the opposite half of the sky from the black
+		// hole, so the two themes cannot sit on top of each other.
+		float mx = skyX(skyOriginYaw + 180f);
+		float my = skyY(34f);
 		float moonR = base * 0.145f;
 
 		c.gradient(0f, 0f, w, h,

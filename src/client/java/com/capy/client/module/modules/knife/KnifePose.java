@@ -115,6 +115,7 @@ public final class KnifePose {
 			case "kukri" -> 1_300_000_000L;     // two turns
 			case "machete" -> 1_250_000_000L;   // one heavy chop
 			case "stiletto" -> 950_000_000L;    // the fastest of the set
+			case "katana" -> 1_250_000_000L;    // a long blade needs a long beat
 			default -> DEFAULT_DURATION_NS;
 		};
 	}
@@ -273,6 +274,13 @@ public final class KnifePose {
 				pose.translate(0.0f, 0.004f, -0.010f);
 				pose.mulPose(Axis.ZP.rotationDegrees(m * 3.0f));
 			}
+			case "katana" -> {
+				// Carried blade up and slightly across the body: a katana is not
+				// held like a short knife, and the length has to clear the arm.
+				pose.translate(m * 0.010f, 0.014f, -0.030f);
+				pose.mulPose(Axis.ZP.rotationDegrees(m * -9.0f));
+				pose.mulPose(Axis.XP.rotationDegrees(-4.0f));
+			}
 			default -> {
 			}
 		}
@@ -299,6 +307,7 @@ public final class KnifePose {
 			case "karambit" -> pose.mulPose(Axis.XP.rotationDegrees(1.5f * breathe));
 			case "kukri" -> pose.mulPose(Axis.XP.rotationDegrees(1.7f * breathe));
 			case "stiletto", "dagger" -> pose.mulPose(Axis.XP.rotationDegrees(0.9f * breathe));
+			case "katana" -> pose.mulPose(Axis.XP.rotationDegrees(1.3f * breathe));
 			default -> pose.mulPose(Axis.XP.rotationDegrees(1.2f * breathe));
 		}
 	}
@@ -381,6 +390,15 @@ public final class KnifePose {
 				pose.translate(m * 0.006f * arc, 0.006f * arc, -0.210f * slam);
 				pose.mulPose(Axis.ZP.rotationDegrees(m * -7.0f * arc));
 				pose.mulPose(Axis.XP.rotationDegrees(6.0f * arc));
+			}
+			case "katana" -> {
+				// A cut from the draw: the blade is pulled across and the point
+				// leads, which is the only way a blade this long can be swung in
+				// a space as small as the first person view.
+				pose.translate(m * 0.022f * arc, 0.032f * arc, -0.120f * slam - 0.012f * arc);
+				pose.mulPose(Axis.YP.rotationDegrees(m * 52.0f * back));
+				pose.mulPose(Axis.ZP.rotationDegrees(m * -34.0f * arc));
+				pose.mulPose(Axis.XP.rotationDegrees(10.0f * arc));
 			}
 			default -> pose.mulPose(Axis.ZP.rotationDegrees(m * 18.0f * back));
 		}
@@ -478,6 +496,13 @@ public final class KnifePose {
 				pose.mulPose(Axis.ZP.rotationDegrees(m * 14.0f * arc));
 				pose.mulPose(Axis.XP.rotationDegrees(88.0f * arc));
 				pose.mulPose(Axis.YP.rotationDegrees(m * 720.0f * t));
+			}
+			case "katana" -> {
+				// Presented overhead and turned once: a long blade is shown by
+				// letting the whole length travel, not by flicking the wrist.
+				pose.translate(0.0f, 0.10f * arc, -0.20f * arc);
+				pose.mulPose(Axis.XP.rotationDegrees(16.0f * arc));
+				pose.mulPose(Axis.ZP.rotationDegrees(m * 360.0f * t));
 			}
 			default -> pose.mulPose(Axis.ZP.rotationDegrees(m * 360.0f * t));
 		}
