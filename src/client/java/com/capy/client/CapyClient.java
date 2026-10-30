@@ -4,6 +4,7 @@ import com.capy.client.config.ClientConfig;
 import com.capy.client.gui.ClickGuiScreen;
 import com.capy.client.gui.GuiColors;
 import com.capy.client.gui.UiFonts;
+import com.capy.client.gltf.GltfReloadListener;
 import com.capy.client.gui.UiTheme;
 import com.capy.client.keybind.ClientKeybinds;
 import com.capy.client.module.Module;
@@ -33,8 +34,10 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.PackType;
 
 /**
  * Client entrypoint: registers the modules, restores the saved settings,
@@ -86,6 +89,12 @@ public class CapyClient implements ClientModInitializer {
 		GuiColors.load(config.guiAccent(), config.radialAccent());
 
 		ClientKeybinds.register();
+
+		// The knife meshes are data, so a resource pack that replaces one has to
+		// be able to change it without restarting the game. The listener drops
+		// the parsed meshes on every reload; the next draw reads them again.
+		ResourceManagerHelper.get(PackType.CLIENT_RESOURCES)
+				.registerReloadListener(new GltfReloadListener());
 
 		// One tick listener drives the keybind and every tickable module.
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {

@@ -1,6 +1,9 @@
 package com.capy.client.module.modules;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.gltf.GltfCache;
+import com.capy.client.gltf.GltfMesh;
+import com.capy.client.gltf.KnifeSpecialRenderer;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
 import com.capy.client.module.ChoiceSetting;
@@ -9,12 +12,17 @@ import com.capy.client.module.Module;
 import com.capy.client.module.modules.knife.KnifePose;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.ItemOwner;
+import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+
+import java.util.List;
 
 /**
  * Custom Knife - draws the local player's swords as a knife.
@@ -126,6 +134,63 @@ public class CustomKnifeModule extends Module implements Configurable {
 	}
 
 	/**
+	 * Attaches the style's glTF mesh to a render state, so the knife is drawn as
+	 * a smooth mesh instead of a cuboid item model.
+	 *
+	 * <p>Called from the item model resolver, for every visible item. Returns
+	 * false, having changed nothing, when there is nothing better to draw: not a
+	 * sword, not the local player's item, or no mesh for the selected style. In
+	 * that last case {@link #swapFor} still swaps in the cuboid model, so the
+	 * client keeps working with the meshes missing, half installed or simply not
+	 * yet parsed.
+	 */
+	public boolean attachGltf(ItemStackRenderState state, ItemStack stack,
+			ItemDisplayContext context, ItemOwner owner) {
+		if (!isEnabled() || stack == null || stack.isEmpty() || !stack.is(ItemTags.SWORDS)) {
+			return false;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null || (owner != null && owner != mc.player)) {
+			return false;
+		}
+		// The mesh does not depend on the material: one GLB per style, and the
+		// material only selects which blade sheet the mesh is drawn with. That
+		// is why there are nine files and not fifty-four.
+		String style = styleId();
+		List<GltfMesh> meshes = GltfCache.get(style, mc.getResourceManager());
+		if (meshes.isEmpty()) {
+			return false;
+		}
+		return KnifeSpecialRenderer.attach(state, context, style, materialOf(stack), meshes);
+	}
+
+	/**
+	 * Enabling reads the nine meshes ahead of time; disabling frees them.
+	 *
+	 * <p>The preload is on a daemon thread because a parse is file IO plus a few
+	 * thousand array reads, and doing it on the game thread when the switch is
+	 * flipped would be a visible hitch for no reason. Disabling clears the cache
+	 * rather than leaving nine meshes resident for a module that is off.
+	 */
+	@Override
+	protected void onToggle(boolean state) {
+		if (!state) {
+			GltfCache.invalidate();
+			return;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		ResourceManager manager = mc == null ? null : mc.getResourceManager();
+		if (manager == null) {
+			// Too early to know where the packs are; the first draw will load
+			// the selected style lazily instead.
+			return;
+		}
+		Thread preload = new Thread(() -> GltfCache.preloadAll(manager), "capy-gltf-preload");
+		preload.setDaemon(true);
+		preload.start();
+	}
+
+	/**
 	 * Plays the inspect flourish if the player is holding something we draw.
 	 *
 	 * The check happens here, not in the renderer, so pressing the key with an
@@ -203,6 +268,11 @@ public class CustomKnifeModule extends Module implements Configurable {
 				!= mc.getModelManager().getItemModel(MISSING_PROBE);
 		MODEL_READY[slot] = ready;
 		return ready;
+	}
+
+	/** Which sprite palette this sword uses, by name. */
+	public static String materialOf(ItemStack stack) {
+		return stack == null ? MATERIALS[2] : MATERIALS[materialIndex(stack)];
 	}
 
 	/** Which sprite palette this sword uses. Unknown swords fall back to steel. */

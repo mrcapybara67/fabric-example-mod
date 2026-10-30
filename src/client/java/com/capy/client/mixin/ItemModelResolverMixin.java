@@ -43,6 +43,13 @@ public class ItemModelResolverMixin {
 			if (module == null) {
 				return;
 			}
+			// A glTF mesh is submitted by the item pipeline itself, so it
+			// replaces the model swap rather than adding to it. When the style
+			// has no mesh the swap below still draws the cuboid model.
+			if (module.attachGltf(state, stack, context, owner)) {
+				ci.cancel();
+				return;
+			}
 			ItemStack swapped = module.swapFor(stack, owner);
 			if (swapped == stack) {
 				return;

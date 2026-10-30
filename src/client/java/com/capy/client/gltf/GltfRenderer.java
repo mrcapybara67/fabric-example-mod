@@ -1,0 +1,136 @@
+package com.capy.client.gltf;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.resources.Identifier;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Draws a loaded knife mesh through the frame's geometry collector.
+ *
+ * <p>There is no vertex buffer and no model class here on purpose: an item in
+ * 1.21.11 is drawn by submitting geometry into a node collector, which batches
+ * it with everything else in the same render layer and draws it once. So a mesh
+ * is re-emitted from its arrays every time it is drawn. For a knife that is a
+ * few hundred triangles, which costs less than resolving a model and a
+ * transformation per frame would, and it keeps the whole path allocation free
+ * apart from the lambda the collector stores.
+ *
+ * <p>One submission per part, because a part is the unit of texturing. The nine
+ * models therefore cost four or five submissions each, which is the same count
+ * a four-layer vanilla item model costs.
+ *
+ * <p>The transformation is the caller's: the item pipeline has already applied
+ * the display transform for the context being drawn (first person, GUI, ground),
+ * and the knife pose has already been applied on top of that in hand space. The
+ * renderer only projects, so there is exactly one place that decides where a
+ * knife is in the world and one place that decides what it looks like.
+ */
+public final class GltfRenderer {
+	/** Built render layers, keyed by texture. */
+	private static final Map<Identifier, RenderType> LAYERS = new ConcurrentHashMap<>();
+
+	private GltfRenderer() {
+	}
+
+	/**
+	 * Submits every part of the mesh, each with the texture its primitive index
+	 * selects.
+	 */
+	public static void render(List<GltfMesh> meshes, String material, PoseStack pose,
+			SubmitNodeCollector collector, int light, int overlay) {
+		for (GltfMesh mesh : meshes) {
+			Identifier texture = textureFor(mesh.part, material);
+			collector.submitCustomGeometry(pose, layer(texture),
+					(poseState, vertices) -> draw(poseState, vertices, mesh, light, overlay));
+		}
+	}
+
+	/** The sheet a primitive draws with. */
+	private static Identifier textureFor(int part, String material) {
+		return switch (part) {
+			case 1 -> KnifeTextures.grip();
+			case 2 -> KnifeTextures.guard();
+			case GltfLoader.PART_EDGE -> KnifeTextures.edge(material);
+			case 5 -> KnifeTextures.wrap();
+			case 0 -> KnifeTextures.blade(material);
+			// Everything past the edge slot is small hardware: collars, pins,
+			// pommels. Accent is the sheet painted for exactly that.
+			default -> KnifeTextures.accent();
+		};
+	}
+
+	/**
+	 * The render layer for a texture, created once.
+	 *
+	 * <p>Cutout rather than solid, so a model may use a transparent texel if it
+	 * wants to; no cull, because a hand authored blade is thin enough that a
+	 * single reversed normal would otherwise leave a hole in it.
+	 */
+	private static RenderType layer(Identifier texture) {
+		// computeIfAbsent would build a layer inside the map lock; the lookup
+		// plus put pattern is the same thing without that.
+		RenderType cached = LAYERS.get(texture);
+		if (cached != null) {
+			return cached;
+		}
+		RenderType created = RenderTypes.entityCutoutNoCull(texture);
+		RenderType raced = LAYERS.putIfAbsent(texture, created);
+		return raced != null ? raced : created;
+	}
+
+	private static void draw(PoseStack.Pose pose, VertexConsumer vertices, GltfMesh mesh,
+			int light, int overlay) {
+		float[] positions = mesh.positions;
+		float[] normals = mesh.normals;
+		float[] uvs = mesh.uvs;
+		int[] indices = mesh.indices;
+		int vertexCount = mesh.vertexCount();
+		int triangles = mesh.triangleCount();
+		int lightU = light & 0xFFFF;
+		int lightV = (light >>> 16) & 0xFFFF;
+
+		for (int triangle = 0; triangle < triangles; triangle++) {
+			int i0 = indices != null ? indices[triangle * 3] : triangle * 3;
+			int i1 = indices != null ? indices[triangle * 3 + 1] : triangle * 3 + 1;
+			int i2 = indices != null ? indices[triangle * 3 + 2] : triangle * 3 + 2;
+			if (i0 < 0 || i1 < 0 || i2 < 0
+					|| i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount) {
+				// One bad index in a hand edited file must cost a triangle, not
+				// the frame. Missing a triangle is visible; a crash is not
+				// fixable by the player.
+				continue;
+			}
+			emit(vertices, pose, positions, normals, uvs, i0, lightU, lightV, overlay);
+			emit(vertices, pose, positions, normals, uvs, i1, lightU, lightV, overlay);
+			emit(vertices, pose, positions, normals, uvs, i2, lightU, lightV, overlay);
+		}
+	}
+
+	private static void emit(VertexConsumer vertices, PoseStack.Pose pose, float[] positions,
+			float[] normals, float[] uvs, int index, int lightU, int lightV, int overlay) {
+		float x = positions[index * 3];
+		float y = positions[index * 3 + 1];
+		float z = positions[index * 3 + 2];
+		float u = uvs != null && uvs.length > index * 2 + 1 ? uvs[index * 2] : 0.0f;
+		float v = uvs != null && uvs.length > index * 2 + 1 ? uvs[index * 2 + 1] : 0.0f;
+		float nx = normals != null && normals.length > index * 3 + 2 ? normals[index * 3] : 0.0f;
+		float ny = normals != null && normals.length > index * 3 + 2 ? normals[index * 3 + 1] : 1.0f;
+		float nz = normals != null && normals.length > index * 3 + 2 ? normals[index * 3 + 2] : 0.0f;
+
+		vertices.addVertex(pose, x, y, z);
+		// White, so the sheet's own colours survive: item rendering in 1.21.11
+		// tints by vertex colour, not by a separate light pass.
+		vertices.setColor(255, 255, 255, 255);
+		vertices.setUv(u, v);
+		vertices.setUv2(lightU, lightV);
+		vertices.setOverlay(overlay);
+		vertices.setNormal(pose, nx, ny, nz);
+	}
+}
