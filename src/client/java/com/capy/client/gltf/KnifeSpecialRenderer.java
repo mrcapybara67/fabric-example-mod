@@ -56,7 +56,7 @@ public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpe
 		ItemStackRenderState.LayerRenderState layer = state.newLayer();
 		// The layer's submit applies the transform before calling us, so a null
 		// one would be a crash rather than a default.
-		layer.setTransform(transformFor(context));
+		layer.setTransform(transformFor(context, style));
 		layer.setUsesBlockLight(false);
 		layer.setupSpecialModel(INSTANCE, new Knife(style, material, meshes));
 		return true;
@@ -131,29 +131,66 @@ public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpe
 	 * <p>Kept in one switch rather than a map so an unknown context gets the
 	 * identity instead of a null.
 	 */
-	private static ItemTransform transformFor(ItemDisplayContext context) {
+	private static ItemTransform transformFor(ItemDisplayContext context, String style) {
+		float size = sizeOf(style);
 		return switch (context) {
 			case FIRST_PERSON_RIGHT_HAND ->
-					transform(0.0f, -90.0f, 25.0f, 1.13f, 3.2f, 1.13f, 0.68f);
+					transform(0.0f, -90.0f, 25.0f, 1.13f, 3.2f, 1.13f, 0.68f * size);
 			case FIRST_PERSON_LEFT_HAND ->
-					transform(0.0f, 90.0f, -25.0f, 1.13f, 3.2f, 1.13f, 0.68f);
+					transform(0.0f, 90.0f, -25.0f, 1.13f, 3.2f, 1.13f, 0.68f * size);
 			case THIRD_PERSON_RIGHT_HAND ->
-					transform(0.0f, -90.0f, 55.0f, 0.0f, 4.0f, 0.5f, 0.85f);
+					transform(0.0f, -90.0f, 55.0f, 0.0f, 4.0f, 0.5f, 0.85f * size);
 			case THIRD_PERSON_LEFT_HAND ->
-					transform(0.0f, 90.0f, -55.0f, 0.0f, 4.0f, 0.5f, 0.85f);
-			case GROUND -> transform(0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.5f);
-			case HEAD -> transform(0.0f, 180.0f, 0.0f, 0.0f, 13.0f, 7.0f, 1.0f);
-			case FIXED -> transform(0.0f, 180.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
-			case GUI -> transform(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+					transform(0.0f, 90.0f, -55.0f, 0.0f, 4.0f, 0.5f, 0.85f * size);
+			case GROUND -> transform(0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.5f * size);
+			case HEAD -> transform(0.0f, 180.0f, 0.0f, 0.0f, 13.0f, 7.0f, size);
+			case FIXED -> transform(0.0f, 180.0f, 0.0f, 0.0f, 0.0f, 0.0f, size);
+			case GUI -> transform(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, size);
 			default -> ItemTransform.NO_TRANSFORM;
 		};
 	}
 
+	/**
+	 * How large each style is drawn, relative to a sword.
+	 *
+	 * <p>A dagger and a katana are not the same object, and a fixed size for
+	 * both made the short knives look like toys and the long one look like a
+	 * cleaver. The values follow the blades: a needle and a dagger are small, a
+	 * cleaver is a slab, a katana is the one that is longer than the hand.
+	 */
+	private static float sizeOf(String style) {
+		if (style == null) {
+			return 1.0f;
+		}
+		return switch (style) {
+			case "karambit" -> 0.82f;
+			case "dagger" -> 0.78f;
+			case "stiletto" -> 0.74f;
+			case "kukri" -> 0.95f;
+			case "cleaver" -> 1.02f;
+			case "katana" -> 1.18f;
+			default -> 1.0f;
+		};
+	}
+
+	/**
+	 * One display transform, with the numbers written in the model file's own
+	 * units.
+	 *
+	 * <p>The translation is divided by sixteen here, and that is not a fudge:
+	 * {@code ItemTransform}'s JSON reader multiplies every translation by
+	 * {@code 0.0625} before storing it, because a model's display block is
+	 * written in item units (one unit = a sixteenth of a block) while the record
+	 * stores blocks. A transform built in code skips that reader, so handing it
+	 * the file's numbers put the knife three point two <em>blocks</em> in front
+	 * of the camera instead of three point two sixteenths - the blade sat out in
+	 * the distance, which is what "too far from my hand" was.
+	 */
 	private static ItemTransform transform(float rotX, float rotY, float rotZ,
 			float tx, float ty, float tz, float scale) {
 		return new ItemTransform(
 				new Vector3f(rotX, rotY, rotZ),
-				new Vector3f(tx, ty, tz),
+				new Vector3f(tx / 16.0f, ty / 16.0f, tz / 16.0f),
 				new Vector3f(scale, scale, scale));
 	}
 }

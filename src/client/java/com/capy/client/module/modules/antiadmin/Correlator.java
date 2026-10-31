@@ -74,7 +74,14 @@ public final class Correlator {
 	/** Scores one subject, or returns null when it is not worth an alert. */
 	private AlertRecord evaluate(Minecraft mc, UUID subject, List<Observation> observations,
 			ServerProfile profile, Confidence minimum, String host) {
-		if (observations.isEmpty() || npcs.contains(subject)) {
+		// A positional subject is a cell, not an account: two particles near
+		// each other with no name attached. Those used to be reported as
+		// "someone is near and unseen", which is what made the module shout at
+		// a player standing alone - the cell is made by the signal itself, so
+		// there is no account behind it to be right or wrong about. Only an
+		// account can be reported; an unexplained particle is not a person.
+		if (observations.isEmpty() || subject == null || npcs.contains(subject)
+				|| SignalBuffer.isSpatial(subject)) {
 			return null;
 		}
 		Map<DetectionKind, Integer> counts = new EnumMap<>(DetectionKind.class);
@@ -101,6 +108,14 @@ public final class Correlator {
 		}
 
 		Confidence confidence = score(counts, confirmed);
+		// One weak signal on an account the user never named is not enough to
+		// interrupt them: a single orphan footstep or a stray potion particle
+		// names the wrong person far more often than the right one. Two
+		// independent kinds, or a strong kind, still get through - that is the
+		// bar a real vanish has always had to clear.
+		if (confirmed.size() < 2 && !confirmed.stream().anyMatch(DetectionKind::strong)) {
+			return null;
+		}
 		BlockPos position = lastPosition(counted);
 		Confidence floor = profile.regionFloor(position);
 		if (floor != null) {

@@ -250,8 +250,16 @@ public class CustomSkyModule extends Module implements Configurable {
 		// and elevation, so turning the view slides it across the sky instead of
 		// dragging it along with the crosshair: look left, and the black hole
 		// leaves the screen the way the sun does.
-		viewYaw = mc.player.getYRot();
-		viewPitch = mc.player.getXRot();			// A theme's subject hangs at a fixed bearing of the world, never at
+		// The camera, not the body. A sky is oriented by the direction the frame
+		// was drawn looking, and only the camera knows that: the player's yaw
+		// is the body's heading, which lags behind the mouse while turning and
+		// does not move at all in third person or with a smoothing module on.
+		// Reading it was why a theme stayed in the middle of the screen while
+		// the player looked around - the anchor had one fixed bearing to slide
+		// against, and the value it was sliding against never changed.
+		org.joml.Vector3fc forward = mc.gameRenderer.getMainCamera().forwardVector();
+		viewYaw = (float) Math.toDegrees(Math.atan2(-forward.x(), forward.z()));
+		viewPitch = (float) Math.toDegrees(-Math.asin(Math.max(-1.0, Math.min(1.0, forward.y()))));			// A theme's subject hangs at a fixed bearing of the world, never at
 			// the heading the module happened to be switched on at. Anchoring on
 			// the current view is what made a theme look pinned to the crosshair:
 			// re-enabling it, or changing theme, put the subject back in the
@@ -593,9 +601,13 @@ public class CustomSkyModule extends Module implements Configurable {
 				a(0xFF060A1C, alpha), a(0xFF02040C, alpha), a(0xFF000000, alpha));
 
 		float drift = (float) Math.sin(time * 0.035f) * h * 0.008f;
-		float ax = w * 0.04f;
+		// The galaxy has a place in the sky, like the black hole and the sun:
+		// the band runs corner to corner around bearing 0, so it slides out of
+		// the frame as the player turns instead of hanging off the screen.
+		float shift = skyX(skyOriginYaw) - w * 0.5f;
+		float ax = w * 0.04f + shift;
 		float ay = h * 1.02f + drift;
-		float bx = w * 0.98f;
+		float bx = w * 0.98f + shift;
 		float by = h * -0.04f + drift;
 
 		// The Milky Way: a broad, uneven swath built from many small, soft
