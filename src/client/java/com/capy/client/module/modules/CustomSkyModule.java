@@ -806,6 +806,12 @@ public class CustomSkyModule extends Module implements Configurable {
 
 		int[] hems = {0xFF3BFFA8, 0xFF45FFD2, 0xFF4FC8FF, 0xFF9C7BFF};
 		float strip = Math.max(2f, w / 320f);
+		// The curtain hangs at the theme's bearing: its waves and its brightest
+		// rays are sampled from a coordinate that moves with the sky, so the
+		// same fold of the aurora stays over the same part of the horizon as
+		// the player turns, instead of the whole curtain being redrawn on the
+		// screen in the same place.
+		float anchor = skyX(skyOriginYaw) - w * 0.5f;
 		for (int band = 0; band < hems.length; band++) {
 			int hem = hems[band];
 			float baseY = h * (0.34f + band * 0.070f);
@@ -815,19 +821,20 @@ public class CustomSkyModule extends Module implements Configurable {
 			int clear = a(hem, 0f);
 			int slice = 0;
 			for (float x = -strip; x < w + strip; x += strip, slice++) {
+				float sx = x - anchor;
 				float y = baseY
-						+ (float) Math.sin(x * 0.0038f + time * 0.42f + band * 1.3f) * amplitude
-						+ (float) Math.sin(x * 0.0125f - time * 0.95f + band * 2.4f) * amplitude * 0.32f;
+						+ (float) Math.sin(sx * 0.0038f + time * 0.42f + band * 1.3f) * amplitude
+						+ (float) Math.sin(sx * 0.0125f - time * 0.95f + band * 2.4f) * amplitude * 0.32f;
 				// Three rates of shimmer: a fine one per ray, a slower one along the
 				// curtain, and a fixed offset per slice so neighbouring rays differ.
 				float ray = 0.5f + 0.5f
-						* (float) Math.sin(x * 0.16f + time * 1.7f + band * 1.7f);
+						* (float) Math.sin(sx * 0.16f + time * 1.7f + band * 1.7f);
 				float swell = 0.5f + 0.5f
-						* (float) Math.sin(x * 0.055f - time * 1.1f + band * 2.2f);
+						* (float) Math.sin(sx * 0.055f - time * 1.1f + band * 2.2f);
 				float grain = noise(slice, 430 + band);
 				float beams = 0.30f + 0.70f * (0.45f * ray + 0.35f * swell + 0.20f * grain);
 				float column2 = 0.5f + 0.5f
-						* (float) Math.sin(x * 0.008f - time * 0.55f + band * 2.9f);
+						* (float) Math.sin(sx * 0.008f - time * 0.55f + band * 2.9f);
 				float top = height * (0.42f + 0.34f * column2 + 0.24f * beams);
 				int high = a(hem, alpha * depth * (0.008f + 0.030f * beams));
 				int mid = a(mix(hem, 0xFFFFFFFF, 0.25f),

@@ -208,7 +208,28 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 		float eased = ease(progress);
 		float peak = (float) size.real();
 		float alpha = (float) opacity.real() * (float) Math.sin(progress * Math.PI);
-		drawShape(vc, pose, animation, 1.0f + (peak - 1.0f) * eased, withAlpha(rgb, alpha), filled, width);
+
+		// A flash of white on the first tenth of a second, blending back into
+		// the chosen colour. A placement is an event: the eye catches a bright
+		// edge far better than a soft one, and the colour is still the user's
+		// by the time the shape is readable.
+		float flash = Math.max(0f, 1f - elapsed / 90f);
+		int hot = mix(rgb, 0xFFFFFFFF, flash * 0.85f);
+		// A small overshoot that decays into the resting size, so the shape
+		// settles instead of stopping dead at its final scale.
+		float settle = (float) Math.sin(progress * Math.PI * 2.0) * 0.045f * (1f - progress);
+		float scale = 1.0f + (peak - 1.0f) * eased + settle;
+		drawShape(vc, pose, animation, scale, withAlpha(hot, alpha), filled, width);
+
+		// The shockwave: one ring leaving the block at the speed of the
+		// placement, always on. It is the motion that makes the effect read as
+		// "this block landed" rather than as a wireframe fading in.
+		float wave = clamp01(elapsed / (durationMs * 0.55f));
+		if (wave < 1f) {
+			float waveScale = scale * (1f + 0.55f * wave);
+			int waveColor = withAlpha(hot, alpha * (1f - wave) * 0.55f);
+			drawShape(vc, pose, animation, waveScale, waveColor, filled, Math.max(1f, width * (1f - wave)));
+		}
 
 		if (!ripple.value()) {
 			return;
@@ -361,9 +382,22 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 		}
 	}
 
-	/** One face of a box, wound so that both sides are visible. */
+	/**
+	 * One face of a box, wound so that both sides are visible.
+	 *
+	 * <p>Each face is shaded by its own normal rather than filled with one flat
+	 * colour. A single colour across six faces reads as a silhouette - the
+	 * shape has no inside - while four brightness steps are enough for the eye
+	 * to place the light and see the box turn as it grows.
+	 */
 	private static void face(VertexConsumer vc, PoseStack.Pose pose, double x0, double y0, double z0,
 			double x1, double y1, double z1, int argb, Direction direction) {
+		argb = shade(argb, switch (direction) {
+			case UP -> 1.0f;
+			case DOWN -> 0.52f;
+			case NORTH, SOUTH -> 0.82f;
+			case EAST, WEST -> 0.68f;
+		});
 		switch (direction) {
 			case NORTH -> quad(vc, pose, x0, y0, z0, x0, y1, z0, x1, y1, z0, x1, y0, z0, argb);
 			case SOUTH -> quad(vc, pose, x1, y0, z1, x1, y1, z1, x0, y1, z1, x0, y0, z1, argb);
@@ -448,6 +482,26 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 
 	private static float clamp01(double value) {
 		return (float) Math.max(0.0, Math.min(1.0, value));
+	}
+
+	/** Multiplies the colour channels by {@code factor}, leaving alpha alone. */
+	private static int shade(int argb, float factor) {
+		float f = Math.max(0.2f, Math.min(1.2f, factor));
+		int a = (argb >>> 24) & 0xFF;
+		int r = Math.min(255, Math.round(((argb >>> 16) & 0xFF) * f));
+		int g = Math.min(255, Math.round(((argb >>> 8) & 0xFF) * f));
+		int b = Math.min(255, Math.round((argb & 0xFF) * f));
+		return (a << 24) | (r << 16) | (g << 8) | b;
+	}
+
+	/** Linear blend of two ARGB colours, alpha included. */
+	private static int mix(int from, int to, float t) {
+		float f = Math.max(0f, Math.min(1f, t));
+		int a = Math.round(((from >>> 24) & 0xFF) * (1f - f) + ((to >>> 24) & 0xFF) * f);
+		int r = Math.round(((from >>> 16) & 0xFF) * (1f - f) + ((to >>> 16) & 0xFF) * f);
+		int g = Math.round(((from >>> 8) & 0xFF) * (1f - f) + ((to >>> 8) & 0xFF) * f);
+		int b = Math.round((from & 0xFF) * (1f - f) + (to & 0xFF) * f);
+		return (a << 24) | (r << 16) | (g << 8) | b;
 	}
 
 	private static int withAlpha(int argb, float factor) {

@@ -479,41 +479,50 @@ public final class GuiFrame {
 	private void renderHeader(UiCanvas c, UiType type, int wx, int wy, int ww, int mouseX, int mouseY, float delta) {
 		int cy = wy + (UiTheme.HEADER_H - 34) / 2;
 
-		// The mark: a plum disc carrying the blossom, with a soft glow.
-		int mark = 34;
-		int markX = wx + UiTheme.SP_6;
-		Ui.surface(c, markX, cy, mark, mark, 12, UiTheme.PANEL_ALT, UiTheme.PANEL_TOP);
-		Ui.outline(c, markX, cy, mark, mark, 12, UiTheme.BORDER);
-		UiIcons.draw(c, UiIcons.Icon.CREST, markX + 6, cy + 6, 22, UiTheme.ACCENT);
-		Ui.glow(c, markX - 6, cy - 6, mark + 12, mark + 12, UiTheme.ACCENT, 0.16f);
-
-		// Wordmark. Every line in the header is centred inside the header band,
-		// so the wordmark, the page title and the search placeholder share a
-		// common centre line even though they use different weights.
+		// The page leads the band. The badge, the crest and the wordmark that
+		// used to sit here were a logo inside a title bar that already carries
+		// the window's name: they took the width the page title needs and told
+		// the player nothing the sidebar does not. What replaces them is what a
+		// header is for - where you are, and how much is switched on.
 		UiText display = type.display();
 		UiText pageFont = type.medium();
-		int nameX = markX + mark + UiTheme.SP_4;
-		int nameY = Ui.centerTextY(wy, UiTheme.HEADER_H, display);
-		// The wordmark is the client's own name, so it wears the accent rather
-		// than the body text colour: it is branding, not content.
-		display.draw(c, "Capy Client", nameX, nameY, UiTheme.ACCENT);
+		String pageTitle = search.query().isEmpty() ? CATEGORIES[selected].title : "Search results";
+		int titleX = wx + UiTheme.SP_6;
+		int titleY = Ui.centerTextY(wy, UiTheme.HEADER_H, display);
+		int titleMax = Math.max(0, searchX(wx, ww) - titleX - UiTheme.SP_4);
+		int titleW = Math.min(display.width(pageTitle), titleMax);
+		Ui.drawEllipsized(c, display, pageTitle, titleX, titleY, titleMax, UiTheme.TEXT);
 
-		// The current page, separated from the wordmark by a hairline.
-		int pageX = nameX + display.width("Capy Client") + UiTheme.SP_4;
-		int fieldX = searchX(wx, ww);
-		int styleRoom = accentX(wx, ww);
-		// The page title is worth showing only when it is a word, not an
-		// ellipsis. On a narrow window the sidebar already names the page, so
-		// the space goes to the search field and the two chips instead.
-		if (styleRoom - pageX > 118) {
-			int ruleH = display.lineHeight() - 4;
-			int ruleY = wy + (UiTheme.HEADER_H - ruleH) / 2;
-			Ui.surface(c, pageX - UiTheme.SP_3, ruleY, 1, ruleH, 0, UiTheme.BORDER);
-			String page = search.query().isEmpty() ? CATEGORIES[selected].title : "Search results";
-			Ui.drawEllipsized(c, pageFont, page, pageX + UiTheme.SP_3,
-					Ui.centerTextY(wy, UiTheme.HEADER_H, pageFont),
-					styleRoom - pageX - UiTheme.SP_6, UiTheme.TEXT_2);
+		// An accent rule under the page name, opening as the page change
+		// settles. It is what makes moving between pages read as a movement
+		// rather than as the card list being replaced.
+		float emphasis = Math.max(0f, Math.min(1f, select[selected]));
+		int underlineW = Math.round(titleW * (0.35f + 0.65f * emphasis));
+		if (underlineW > 0 && !compactHeader()) {
+			Ui.surface(c, titleX, wy + UiTheme.HEADER_H - 8, underlineW, 2, 1, UiTheme.ACCENT);
 		}
+
+		// The live count: how many modules are on. It answers "is anything
+		// even enabled" without opening a page, and it re-reads every frame so
+		// it follows a toggle immediately.
+		String count = enabledCount() + " on";
+		int pillW = pageFont.width(count) + UiTheme.SP_4;
+		int pillH = 18;
+		int pillX = titleX + titleW + UiTheme.SP_4;
+		int pillY = wy + (UiTheme.HEADER_H - pillH) / 2;
+		if (!compactHeader() && pillX + pillW < accentX(wx, ww) - UiTheme.SP_4) {
+			boolean hot = mouseX >= pillX && mouseX < pillX + pillW
+					&& mouseY >= pillY && mouseY < pillY + pillH;
+			Ui.surface(c, pillX, pillY, pillW, pillH, pillH / 2,
+					hot ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
+					hot ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
+			Ui.outline(c, pillX, pillY, pillW, pillH, pillH / 2,
+					hot ? UiTheme.ACCENT : UiTheme.BORDER);
+			Ui.drawCentered(c, pageFont, count, pillX + pillW / 2, pillY + 5,
+					hot ? UiTheme.TEXT : UiTheme.ACCENT);
+		}
+
+		int fieldX = searchX(wx, ww);
 
 		// The palette and the style switch sit between the page title and the
 		// search field.
@@ -544,6 +553,17 @@ public final class GuiFrame {
 		// bar rather than as text floating on the shell.
 		Ui.fadeLine(c, wx + UiTheme.SP_5, wy + UiTheme.HEADER_H - 1,
 				ww - UiTheme.SP_5 * 2, Ui.withAlpha(UiTheme.BORDER, 0xA6));
+	}
+
+	/** How many modules are enabled right now, for the header's count pill. */
+	private static int enabledCount() {
+		int on = 0;
+		for (Module module : ModuleManager.get().modules()) {
+			if (module.isEnabled()) {
+				on++;
+			}
+		}
+		return on;
 	}
 
 	private int searchX(int wx, int ww) {

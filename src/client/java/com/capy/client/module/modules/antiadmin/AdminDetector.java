@@ -2,6 +2,7 @@ package com.capy.client.module.modules.antiadmin;
 
 import com.capy.client.module.WatchlistSetting;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -147,6 +148,19 @@ public final class AdminDetector {
 		if (mc == null || watchlist == null || seen == null || mc.getConnection() == null) {
 			return out;
 		}
+		// Forget the accounts that are no longer listed. Without this, the first
+		// arrival a watched account ever made was the only one ever reported:
+		// its id stayed in `seen` for the rest of the session, so a player who
+		// left and came back - which is exactly when a staff member turns up to
+		// watch - was silently ignored. That is the bug behind "the guy I typed
+		// in settings is on the server and it says nothing".
+		Set<UUID> online = new HashSet<>();
+		for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
+			if (info != null && info.getProfile() != null && info.getProfile().id() != null) {
+				online.add(info.getProfile().id());
+			}
+		}
+		seen.retainAll(online);
 		for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
 			if (info == null || info.getProfile() == null || info.getProfile().id() == null) {
 				continue;
