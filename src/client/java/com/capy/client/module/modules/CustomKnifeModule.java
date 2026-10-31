@@ -13,8 +13,6 @@ import com.capy.client.module.modules.knife.KnifePose;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.ItemOwner;
@@ -36,12 +34,11 @@ import java.util.List;
  * they were. The alternative - swapping the held item for another item - would
  * have to be undone every tick and would be visible to the server.
  *
- * The models themselves are real 3D geometry: cuboids with thickness, bevelled
- * tips, separate cutting edges and their own hardware, baked with the same
- * display transforms a vanilla handheld item uses so the knife sits in the
- * hand at the sword's angle and scale. One model per style and sword material
- * means a wooden sword keeps a wooden handle and a netherite one keeps looking
- * like netherite.
+ * The knife itself is a real 3D mesh: a glTF file per style, drawn by
+ * {@code KnifeSpecialRenderer} with the display transform a vanilla handheld
+ * item uses, so it sits in the hand at the sword's angle and scale. One mesh per
+ * style and a texture sheet per material means a wooden sword keeps a wooden
+ * blade and a netherite one keeps looking like netherite.
  *
  * Holding the inspect key (C by default, rebindable in Controls) plays a short
  * flourish in first person; each style has its own. See {@link KnifePose}.
@@ -77,47 +74,11 @@ public class CustomKnifeModule extends Module implements Configurable {
 	/** Sword materials, in the order of {@link #MODELS}' second dimension. */
 	private static final String[] MATERIALS = {"wooden", "stone", "iron", "golden", "diamond", "netherite"};
 
-	private static final String NAMESPACE = "capy";
-	private static final String MODEL_PREFIX = "knife/";
-
-	/**
-	 * A model id that is never shipped. Asking the model manager for it returns
-	 * the shared "missing model" instance, which is how a model that did not
-	 * load can be recognised without reaching into the bakery.
-	 */
-	private static final Identifier MISSING_PROBE =
-			Identifier.fromNamespaceAndPath(NAMESPACE, "capy_missing_model_probe");
-
-	/** Prebuilt ids, indexed [style][material], so rendering never allocates one. */
-	private static final Identifier[][] MODELS = buildModels();
-
-	/**
-	 * Which models actually baked, one flag per [style][material].
-	 *
-	 * Resolved on first use instead of on every item draw: the check is two
-	 * map lookups, and the item model resolver runs it for every visible item
-	 * in the inventory on every frame. A model that did load always loads
-	 * again after a resource reload - it ships in our own jar - so a positive
-	 * answer is safe to keep; a negative one is retried until it flips.
-	 */
-	private static final boolean[] MODEL_READY = new boolean[STYLES.length * MATERIALS.length];
-
 	private final ChoiceSetting style = setting(new ChoiceSetting("style", 0, STYLES));
 	private final BooleanSetting inspect = setting(new BooleanSetting("inspect", true));
 
 	public CustomKnifeModule() {
 		super(Category.VISUAL, "custom_knife");
-	}
-
-	private static Identifier[][] buildModels() {
-		Identifier[][] ids = new Identifier[STYLES.length][MATERIALS.length];
-		for (int s = 0; s < STYLES.length; s++) {
-			for (int m = 0; m < MATERIALS.length; m++) {
-				ids[s][m] = Identifier.fromNamespaceAndPath(NAMESPACE,
-						MODEL_PREFIX + STYLES[s] + "_" + MATERIALS[m]);
-			}
-		}
-		return ids;
 	}
 
 	public ChoiceSetting styleSetting() {
@@ -229,57 +190,18 @@ public class CustomKnifeModule extends Module implements Configurable {
 	}
 
 	/**
-	 * Returns the stack to render: the given stack itself when nothing should
-	 * change, or a copy carrying one of our item models.
+	 * Nothing to substitute any more, and deliberately so.
 	 *
-	 * Called from the item model resolver, so it must stay cheap and must never
-	 * throw: a broken asset or an unexpected stack has to leave the sword as it
-	 * was, never break the render pass.
+	 * <p>A knife is the glTF mesh that {@link #attachGltf} attaches to the render
+	 * state, not a cuboid item model, so there is no model id to swap in. Doing
+	 * nothing is also the correct fallback while a style's mesh is still being
+	 * parsed: a model that fails to bake is drawn as vanilla's missing model - a
+	 * magenta and black cube filling the item slot - which is exactly the bug a
+	 * swap would reintroduce the moment a `.glb` were missing. The vanilla sword
+	 * is always a correct thing to draw.
 	 */
 	public ItemStack swapFor(ItemStack stack, ItemOwner owner) {
-		if (!isEnabled() || stack == null || stack.isEmpty() || !stack.is(ItemTags.SWORDS)) {
-			return stack;
-		}
-		Minecraft mc = Minecraft.getInstance();
-		if (mc == null || (owner != null && owner != mc.player)) {
-			// Somebody else's sword (another player, an item frame, a dropped
-			// item). Only the local player's own gear is restyled.
-			return stack;
-		}
-		Identifier current = stack.get(DataComponents.ITEM_MODEL);
-		if (current != null && NAMESPACE.equals(current.getNamespace())
-				&& current.getPath().startsWith(MODEL_PREFIX)) {
-			// Already one of our knives. This is also what stops the resolver
-			// from recursing: the swapped copy comes back through here once and
-			// is left alone the second time.
-			return stack;
-		}
-		int styleIndex = style.index();
-		int material = materialIndex(stack);
-		if (!isLoaded(mc, styleIndex, material)) {
-			return stack;
-		}
-		ItemStack copy = stack.copy();
-		copy.set(DataComponents.ITEM_MODEL, MODELS[styleIndex][material]);
-		return copy;
-	}
-
-	/** True when the model was baked; a missing one would render as a magenta cube. */
-	private static boolean isLoaded(Minecraft mc, int styleIndex, int material) {
-		int slot = styleIndex * MATERIALS.length + material;
-		if (MODEL_READY[slot]) {
-			return true;
-		}
-		if (mc.getModelManager() == null) {
-			// Too early (no resource reload finished yet): draw the vanilla
-			// item and ask again on the next frame.
-			return false;
-		}
-		Identifier model = MODELS[styleIndex][material];
-		boolean ready = mc.getModelManager().getItemModel(model)
-				!= mc.getModelManager().getItemModel(MISSING_PROBE);
-		MODEL_READY[slot] = ready;
-		return ready;
+		return stack;
 	}
 
 	/** Which sprite palette this sword uses, by name. */

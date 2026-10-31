@@ -68,20 +68,35 @@ public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpe
 		if (knife == null || knife.meshes() == null || knife.meshes().isEmpty()) {
 			return;
 		}
-		GltfRenderer.render(knife.meshes(), knife.material(), pose, collector, light, overlay);
+		// The mesh is authored in item space - one unit per sixteenth of a
+		// block - because that is the space a vanilla item model's cuboids are
+		// written in, and it is the space the display transform in this class is
+		// copied from. A special model, though, is submitted in block space: the
+		// transform above is applied around geometry a chest or a shield is
+		// authored at, 0..1. Without this division a knife is drawn sixteen
+		// times life size - a wall of blade in first person and an item far too
+		// large to fit its hotbar slot, which is exactly how it looked.
+		pose.pushPose();
+		pose.scale(1.0f / 16.0f, 1.0f / 16.0f, 1.0f / 16.0f);
+		GltfRenderer.render(knife.meshes(), knife.style(), knife.material(), pose, collector, light, overlay);
+		pose.popPose();
 	}
 
 	/**
 	 * The volume the item occupies, for extents driven layout such as the
-	 * inventory's oversized item scaling. A knife reaches the corners of its
-	 * box, so the box is reported.
+	 * inventory's oversized item scaling.
+	 *
+	 * <p>Reported in blocks, like the geometry - a knife is submitted in the
+	 * space a chest occupies, so its box is one block, not sixteen. Reporting
+	 * sixteen blocks here made the inventory believe the item was sixteen times
+	 * the slot and scale it away.
 	 */
 	@Override
 	public void getExtents(Consumer<Vector3fc> out) {
 		for (int x = 0; x <= 1; x++) {
 			for (int y = 0; y <= 1; y++) {
 				for (int z = 0; z <= 1; z++) {
-					out.accept(new Vector3f(x * 16.0f, y * 16.0f, z * 16.0f));
+					out.accept(new Vector3f(x, y, z));
 				}
 			}
 		}

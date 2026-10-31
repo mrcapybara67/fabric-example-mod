@@ -36,26 +36,63 @@ public final class GltfRenderer {
 	/** Built render layers, keyed by texture. */
 	private static final Map<Identifier, RenderType> LAYERS = new ConcurrentHashMap<>();
 
+	/**
+	 * The finish each style is built in: the guard, the collar and the small
+	 * hardware are drawn in this colour, over the material's own blade.
+	 *
+	 * <p>Without it all six knives are the same steel and the same brown wrap,
+	 * which is fine on a shelf and useless in the hand: the colour is the fastest
+	 * way to tell a karambit from a stiletto at item scale, and it is what makes
+	 * each style read as a designed object rather than a shape.
+	 */
+	private static final Map<String, Integer> FINISH = Map.of(
+			"karambit", 0xFFC8203A,   // lacquered red
+			"cleaver", 0xFF4A7FB5,    // blued steel
+			"dagger", 0xFF7B4FD8,     // amethyst
+			"kukri", 0xFFD98A1E,      // brass
+			"stiletto", 0xFF2FB8C6,   // cyan anodised
+			"katana", 0xFFD8B24A);    // gold
+
 	private GltfRenderer() {
 	}
 
 	/**
 	 * Submits every part of the mesh, each with the texture its primitive index
-	 * selects.
+	 * selects and, for the hardware, the style's own finish.
 	 */
-	public static void render(List<GltfMesh> meshes, String material, PoseStack pose,
+	public static void render(List<GltfMesh> meshes, String style, String material, PoseStack pose,
 			SubmitNodeCollector collector, int light, int overlay) {
 		for (GltfMesh mesh : meshes) {
-			Identifier texture = textureFor(mesh.part, material);
+			Identifier texture = textureFor(mesh.part, material, style);
+			int tint = tintFor(mesh.part, style);
 			collector.submitCustomGeometry(pose, layer(texture),
-					(poseState, vertices) -> draw(poseState, vertices, mesh, light, overlay));
+					(poseState, vertices) -> draw(poseState, vertices, mesh, light, overlay, tint));
 		}
 	}
 
+	/**
+	 * The colour a part is multiplied by. White leaves the sheet untouched, so
+	 * the blade keeps its material and the handle keeps its leather.
+	 */
+	private static int tintFor(int part, String style) {
+		// 0 blade, 1 grip, 4 honed edge, 5 cord wrap: all material, all untinted.
+		// 2 guard and 3+ (collars, pins, pommels) are the metal fittings, and
+		// those are what the style is finished in.
+		boolean hardware = part == 2
+				|| (part >= GltfLoader.PART_ACCENT && part != GltfLoader.PART_EDGE && part != 5);
+		if (hardware) {
+			Integer finish = style == null ? null : FINISH.get(style);
+			if (finish != null) {
+				return finish;
+			}
+		}
+		return 0xFFFFFFFF;
+	}
+
 	/** The sheet a primitive draws with. */
-	private static Identifier textureFor(int part, String material) {
+	private static Identifier textureFor(int part, String material, String style) {
 		return switch (part) {
-			case 1 -> KnifeTextures.grip();
+			case 1 -> KnifeTextures.grip(style);
 			case 2 -> KnifeTextures.guard();
 			case GltfLoader.PART_EDGE -> KnifeTextures.edge(material);
 			case 5 -> KnifeTextures.wrap();
@@ -86,7 +123,7 @@ public final class GltfRenderer {
 	}
 
 	private static void draw(PoseStack.Pose pose, VertexConsumer vertices, GltfMesh mesh,
-			int light, int overlay) {
+			int light, int overlay, int tint) {
 		float[] positions = mesh.positions;
 		float[] normals = mesh.normals;
 		float[] uvs = mesh.uvs;
@@ -107,14 +144,15 @@ public final class GltfRenderer {
 				// fixable by the player.
 				continue;
 			}
-			emit(vertices, pose, positions, normals, uvs, i0, lightU, lightV, overlay);
-			emit(vertices, pose, positions, normals, uvs, i1, lightU, lightV, overlay);
-			emit(vertices, pose, positions, normals, uvs, i2, lightU, lightV, overlay);
+			emit(vertices, pose, positions, normals, uvs, i0, lightU, lightV, overlay, tint);
+			emit(vertices, pose, positions, normals, uvs, i1, lightU, lightV, overlay, tint);
+			emit(vertices, pose, positions, normals, uvs, i2, lightU, lightV, overlay, tint);
 		}
 	}
 
 	private static void emit(VertexConsumer vertices, PoseStack.Pose pose, float[] positions,
-			float[] normals, float[] uvs, int index, int lightU, int lightV, int overlay) {
+			float[] normals, float[] uvs, int index, int lightU, int lightV, int overlay,
+			int tint) {
 		float x = positions[index * 3];
 		float y = positions[index * 3 + 1];
 		float z = positions[index * 3 + 2];
@@ -125,9 +163,10 @@ public final class GltfRenderer {
 		float nz = normals != null && normals.length > index * 3 + 2 ? normals[index * 3 + 2] : 0.0f;
 
 		vertices.addVertex(pose, x, y, z);
-		// White, so the sheet's own colours survive: item rendering in 1.21.11
-		// tints by vertex colour, not by a separate light pass.
-		vertices.setColor(255, 255, 255, 255);
+		// Item rendering in 1.21.11 tints by vertex colour, not by a separate
+		// light pass, so white is "the sheet's own colours".
+		vertices.setColor((tint >>> 16) & 0xFF, (tint >>> 8) & 0xFF, tint & 0xFF,
+				(tint >>> 24) & 0xFF);
 		vertices.setUv(u, v);
 		vertices.setUv2(lightU, lightV);
 		vertices.setOverlay(overlay);

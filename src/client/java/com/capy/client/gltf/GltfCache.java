@@ -9,7 +9,6 @@ import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -21,20 +20,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * and kept until the resources reload, and the render path is a plain map
  * lookup.
  *
- * <p>Two caches, not one: a style that failed to load is remembered as failed so
- * a missing file is not re-read sixty times a second, and a reload clears both
- * so adding the file back needs no restart. Failures are per style, so one bad
- * GLB costs that style alone.
+ * <p>Only successful parses are kept, and a resource reload clears the cache so
+ * a replaced file needs no restart. Failures are per style, so one bad GLB
+ * costs that style alone.
  *
- * <p>Access is from the render thread and from the preload thread, so both maps
- * are concurrent and a loaded list is immutable once published.
+ * <p>Access is from the render thread and from the preload thread, so the map is
+ * concurrent and a loaded list is immutable once published.
  */
 public final class GltfCache {
 	private static final String NAMESPACE = "capy";
 	private static final String GLTF_PATH_PREFIX = "models/item/knife/gltf/";
 
 	private static final Map<String, List<GltfMesh>> CACHE = new ConcurrentHashMap<>();
-	private static final Set<String> MISSING = ConcurrentHashMap.newKeySet();
 
 	private GltfCache() {
 	}
@@ -55,9 +52,16 @@ public final class GltfCache {
 		if (cached != null) {
 			return cached;
 		}
-		if (resourceManager == null || MISSING.contains(style)) {
+		if (resourceManager == null) {
 			return List.of();
 		}
+		// A failure is not remembered. Caching "this style has no mesh" would
+		// turn a single transient read - the preload thread running while a
+		// resource reload swaps the pack out from under it, say - into a style
+		// that stays a plain vanilla sword until the module is toggled, which is
+		// indistinguishable from the feature being broken. Retrying costs one
+		// map lookup in the resource manager per frame, and only while the style
+		// is actually held.
 		return load(style, resourceManager);
 	}
 
@@ -66,9 +70,6 @@ public final class GltfCache {
 		try {
 			Optional<Resource> resource = resourceManager.getResource(id);
 			if (resource.isEmpty()) {
-				// Not shipped, or not this style's turn: remember it so the
-				// resolver does not stat the pack for it every frame.
-				MISSING.add(style);
 				GltfLog.missing(style);
 				return List.of();
 			}
@@ -78,11 +79,9 @@ public final class GltfCache {
 			}
 			List<GltfMesh> meshes = List.copyOf(GltfLoader.load(bytes));
 			CACHE.put(style, meshes);
-			MISSING.remove(style);
 			GltfLog.loaded(style, meshes);
 			return meshes;
 		} catch (Exception failure) {
-			MISSING.add(style);
 			GltfLog.failed(style, failure);
 			return List.of();
 		}
@@ -97,7 +96,6 @@ public final class GltfCache {
 	/** Drops everything. Called on a resource reload and when the module is off. */
 	public static void invalidate() {
 		CACHE.clear();
-		MISSING.clear();
 	}
 
 	/**
