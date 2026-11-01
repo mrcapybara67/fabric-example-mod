@@ -1,6 +1,7 @@
 package com.capy.client.module.modules.antiadmin;
 
 import java.util.Locale;
+import java.util.UUID;
 import net.minecraft.world.entity.player.PlayerSkin;
 
 /**
@@ -92,6 +93,7 @@ public final class AdminAlert {
 	 */
 	public static final float FACE_FALL = 0.90f;
 
+	private final UUID uuid;
 	private final String username;
 	private final String identity;
 	private final double distance;
@@ -101,6 +103,7 @@ public final class AdminAlert {
 	private final long startMs;
 
 	public AdminAlert(AdminDetector.Match match, Kind kind, long startMs) {
+		this.uuid = match.uuid();
 		this.username = match.username();
 		this.identity = match.identity();
 		this.distance = match.distance();
@@ -108,6 +111,11 @@ public final class AdminAlert {
 		this.skin = match.skin();
 		this.kind = kind == null ? Kind.NEARBY : kind;
 		this.startMs = startMs;
+	}
+
+	/** The account this alert is about. Used to re-read its skin at draw time. */
+	public UUID uuid() {
+		return uuid;
 	}
 
 	/** Why this alert was raised. */

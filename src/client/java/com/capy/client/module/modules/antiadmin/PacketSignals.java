@@ -57,6 +57,20 @@ public final class PacketSignals {
 
 	private static final ConcurrentLinkedDeque<Event> EVENTS = new ConcurrentLinkedDeque<>();
 
+	/**
+	 * Every chat and system line, in arrival order.
+	 *
+	 * <p>Separate from {@link #EVENTS} on purpose: the detectors drain that queue
+	 * once per tick, so a second reader would steal their input. This one is
+	 * append only and read by sequence number, which lets the anticheat notifier
+	 * read the same lines without consuming anything. It is the only evidence
+	 * about the server's own plugins a client is ever handed - a message
+	 * prefixed {@code "Vulcan »"} is the anticheat naming itself.
+	 */
+	private static final ConcurrentLinkedDeque<TextLine> TEXT = new ConcurrentLinkedDeque<>();
+	private static final java.util.concurrent.atomic.AtomicLong TEXT_SEQ = new java.util.concurrent.atomic.AtomicLong();
+	private static final int MAX_TEXT = 64;
+
 	private PacketSignals() {
 	}
 
@@ -133,6 +147,10 @@ public final class PacketSignals {
 
 	/** Entities the server removed, resolved to player UUIDs where possible. */
 	public record EntitiesRemoved(List<UUID> uuids, long timeMs) implements Event {
+	}
+
+	/** One chat line, with the sequence number a second reader resumes from. */
+	public record TextLine(long seq, String text, boolean system) {
 	}
 
 	// --------------------------------------------------------------- recording
@@ -232,6 +250,7 @@ public final class PacketSignals {
 			return;
 		}
 		String text = packet.body() == null ? "" : packet.body().content();
+		remember(text, false);
 		push(new Chat(packet.sender(), text == null ? "" : text, now()));
 	}
 
@@ -239,6 +258,7 @@ public final class PacketSignals {
 		if (!clientThread() || packet.content() == null) {
 			return;
 		}
+		remember(packet.content().getString(), true);
 		push(new SystemChat(packet.content().getString(), now()));
 	}
 
@@ -344,6 +364,44 @@ public final class PacketSignals {
 	/** Drops everything queued. Called on a world change or a toggle. */
 	public static void clear() {
 		EVENTS.clear();
+		TEXT.clear();
+	}
+
+	// ------------------------------------------------------------- text lines
+
+	/**
+	 * The chat and system lines that arrived after {@code seq}, oldest first.
+	 *
+	 * Reading does not consume: several readers can follow the same stream at
+	 * their own pace, and a reader that stops for a while simply skips ahead by
+	 * asking for everything past the last sequence number it saw.
+	 */
+	public static List<TextLine> textAfter(long seq) {
+		if (TEXT.isEmpty()) {
+			return List.of();
+		}
+		List<TextLine> out = new ArrayList<>();
+		for (TextLine line : TEXT) {
+			if (line.seq() > seq) {
+				out.add(line);
+			}
+		}
+		return out;
+	}
+
+	/** The sequence number of the newest line, for a reader that joins late. */
+	public static long textSequence() {
+		return TEXT_SEQ.get();
+	}
+
+	private static void remember(String text, boolean system) {
+		if (text == null || text.isEmpty()) {
+			return;
+		}
+		while (TEXT.size() >= MAX_TEXT) {
+			TEXT.pollFirst();
+		}
+		TEXT.addLast(new TextLine(TEXT_SEQ.incrementAndGet(), text, system));
 	}
 
 	// --------------------------------------------------------------- internals

@@ -237,92 +237,120 @@ public final class UiIcons {
 
 	// ---- category marks -----------------------------------------------------
 
-	/** Compass: a ring with a two-tone needle. */
+	/** Compass: a two pixel dial with a solid north half and a faded south. */
 	private static void compass(UiCanvas c, int x, int y, int s, int col) {
 		int cx = x + s / 2;
 		int cy = y + s / 2;
 		int r = Math.max(3, s / 2 - 1);
-		Ui.ring(c, cx, cy, r, Math.max(1, s / 12), col);
-		// Needle: two triangles that share a centre.
-		for (int i = 0; i <= s / 2 - 2; i++) {
-			int w = Math.max(0, 1 - i / Math.max(1, s / 6));
-			c.fill(cx - 1 - w, cy - i, cx + 2 + w, cy - i + 1, col);
-			c.fill(cx - 1, cy + i, cx + 2, cy + i + 1, withAlpha(col, 0x99));
+		Ui.ringFast(c, cx, cy, r, Math.max(2, s / 12), col);
+		int reach = Math.max(2, r - 2);
+		for (int i = 1; i <= reach; i++) {
+			int w = Math.max(1, Math.round((reach - i) * 0.34f));
+			// North is solid, south is half strength: the brightness split is
+			// what makes the dial read as pointing somewhere rather than as a
+			// plus sign dropped inside a ring.
+			c.fill(cx - w, cy - i, cx + w + 1, cy - i + 1, col);
+			c.fill(cx - 1, cy + i, cx + 2, cy + i + 1, withAlpha(col, 0x66));
 		}
+		disc(c, cx, cy, Math.max(1.4f, s * 0.07f), col);
 	}
 
-	/** Globe: ring, equator and one meridian. */
+	/** Globe: a limb, an equator and a meridian that curves. */
 	private static void globe(UiCanvas c, int x, int y, int s, int col) {
 		int cx = x + s / 2;
 		int cy = y + s / 2;
 		int r = Math.max(3, s / 2 - 1);
-		Ui.ring(c, cx, cy, r, Math.max(1, s / 12), col);
-		c.fill(cx - r, cy, cx + r + 1, cy + 1, withAlpha(col, 0xCC));
-		int meridian = Math.max(2, Math.round(s * 0.18f));
-		Ui.ring(c, cx, cy, meridian, 1, col);
+		Ui.ringFast(c, cx, cy, r, Math.max(2, s / 14), col);
+		c.fill(cx - r + 1, cy, cx + r, cy + 1, withAlpha(col, 0xD0));
+		// The meridian is an ellipse, sampled along its height: a second circle
+		// through the middle reads as a target, not as a sphere.
+		int steps = Math.max(8, s * 2);
+		int halfW = Math.max(2, Math.round(r * 0.44f));
+		for (int i = 0; i <= steps; i++) {
+			float t = i / (float) steps;
+			int py = cy - r + 1 + Math.round((2f * r - 2f) * t);
+			float f = (py - cy) / (float) Math.max(1, r);
+			int dx = Math.round(halfW * (float) Math.sqrt(Math.max(0f, 1f - f * f)));
+			c.fill(cx + dx, py, cx + dx + 1, py + 1, withAlpha(col, 0xB0));
+			c.fill(cx - dx, py, cx - dx + 1, py + 1, withAlpha(col, 0xB0));
+		}
 	}
 
-	/** Eye: two arcs meeting at the corners, with a pupil. */
+	/** Eye: a thick almond with a pupil and a specular dot. */
 	private static void eye(UiCanvas c, int x, int y, int s, int col) {
 		int left = x + 1;
 		int right = x + s - 2;
 		int cy = y + s / 2;
-		int steps = Math.max(6, s * 2);
+		int steps = Math.max(8, s * 2);
 		for (int i = 0; i <= steps; i++) {
 			float t = i / (float) steps;
 			int px = Math.round(left + (right - left) * t);
 			int arc = Math.round((float) Math.sin(t * Math.PI) * (s * 0.30f));
-			c.fill(px, cy - arc, px + 1, cy - arc + 1, col);
-			c.fill(px, cy + arc, px + 1, cy + arc + 1, col);
+			// Two pixels of lid rather than one: a one pixel curve at chip size
+			// is a dotted line, which is what made these marks look chopped.
+			c.fill(px, cy - arc, px + 1, cy - arc + 2, col);
+			c.fill(px, cy + arc - 1, px + 1, cy + arc + 1, col);
 		}
-		disc(c, cxOf(x, s), cy, Math.max(1.5f, s * 0.13f), col);
+		int cx = left + (right - left) / 2;
+		disc(c, cx, cy, Math.max(2f, s * 0.15f), col);
+		disc(c, cx - Math.max(1, Math.round(s * 0.03f)), cy - Math.max(1, Math.round(s * 0.03f)),
+				Math.max(0.8f, s * 0.05f), withAlpha(0xFFFFFF, 0xC0));
 	}
 
-	/** Donut: the client's ring in miniature. */
+	/** Donut: the client's ring, with a lit upper edge so it reads as round. */
 	private static void donut(UiCanvas c, int x, int y, int s, int col) {
+		int cx = cxOf(x, s);
+		int cy = y + s / 2;
 		int r = Math.max(3, s / 2 - 1);
-		Ui.ring(c, cxOf(x, s), y + s / 2, r, Math.max(2, s / 4), col);
+		Ui.ringFast(c, cx, cy, r, Math.max(2, s / 4), col);
+		int steps = Math.max(5, s);
+		for (int i = 0; i < steps; i++) {
+			double angle = Math.toRadians(200 + i * (140.0 / steps));
+			int px = cx + (int) Math.round(Math.cos(angle) * r);
+			int py = cy + (int) Math.round(Math.sin(angle) * r);
+			c.fill(px, py, px + 1, py + 1, withAlpha(0xFFFFFF, 0x90));
+		}
 	}
 
-	/** Sliders: three rails with their knobs. */
+	/** Sliders: three rails with round knobs. */
 	private static void sliders(UiCanvas c, int x, int y, int s, int col) {
 		int left = x + 1;
-		int right = x + s - 2;
+		int right = x + s - 1;
 		int mid = cxOf(x, s);
-		int row0 = y + Math.max(2, s / 4);
+		int row0 = y + Math.max(3, s / 4);
 		int row1 = y + s / 2;
-		int row2 = y + s - Math.max(2, s / 4) - 1;
-		c.fill(left, row0, right, row0 + 1, withAlpha(col, 0xAA));
-		c.fill(left, row1, right, row1 + 1, col);
-		c.fill(left, row2, right, row2 + 1, withAlpha(col, 0xAA));
-		int knob = Math.max(2, s / 7);
-		c.fill(left + knob + 2, row0 - knob, left + knob + 2 + knob, row0 + knob, col);
-		c.fill(right - knob * 2 - 2, row1 - knob, right - knob * 2 - 2 + knob, row1 + knob, col);
-		c.fill(mid, row2 - knob, mid + knob, row2 + knob, col);
+		int row2 = y + s - Math.max(3, s / 4) - 1;
+		c.fill(left, row0, right, row0 + 2, withAlpha(col, 0xAA));
+		c.fill(left, row1, right, row1 + 2, withAlpha(col, 0xAA));
+		c.fill(left, row2, right, row2 + 2, withAlpha(col, 0xAA));
+		// Round knobs, not square ones: a square on a rail reads as a second
+		// tick mark, which is why the old mark looked like a bar chart.
+		float knob = Math.max(1.6f, s * 0.11f);
+		disc(c, left + Math.round((right - left) * 0.30f), row0 + 1, knob, col);
+		disc(c, left + Math.round((right - left) * 0.72f), row1 + 1, knob, col);
+		disc(c, mid, row2 + 1, knob, col);
 	}
 
-	/** Layout: a panel with a header band and two content blocks. */
+	/** Layout: a rectangular panel, a header band and two content blocks. */
 	private static void layout(UiCanvas c, int x, int y, int s, int col) {
 		int left = x + 1;
 		int top = y + 1;
 		int right = x + s - 2;
 		int bottom = y + s - 2;
+		// A rectangle outline, drawn as four runs. The ring this used to draw
+		// was a circle around a rectangular chip, and that is the shape that read
+		// as chopped: two edges cut the circle into pieces.
+		c.fill(left, top, right, top + 1, col);
+		c.fill(left, bottom - 1, right, bottom, col);
+		c.fill(left, top, left + 1, bottom, col);
+		c.fill(right - 1, top, right, bottom, col);
+		int headerBottom = top + Math.max(4, Math.round(s * 0.30f));
+		c.fill(left + 1, headerBottom, right - 1, headerBottom + 1, withAlpha(col, 0x99));
+		int bodyTop = headerBottom + Math.max(2, Math.round(s * 0.10f));
+		int bodyBottom = Math.max(bodyTop + 2, bottom - 2);
 		int mid = cxOf(x, s);
-		Ui.ring(c, mid, y + s / 2, Math.max(3, s / 2 - 1), 1, col);
-		c.fill(left + 2, top + 2, right - 2, top + 4, col);
-		// The two content blocks need two rows even at twelve pixels, where
-		// bottom - 3 lands exactly on top + 6 and the shapes are degenerate:
-		// the chip then draws as a bare circle with a line through it. The
-		// bottom row is therefore never above the top row, and neither block
-		// is ever narrower than one pixel for the same reason.
-		int blockTop = top + Math.max(5, s / 3);
-		int blockBottom = Math.max(blockTop + 2, bottom - 2);
-		int leftBlockLeft = left + 3;
-		int leftBlockRight = Math.max(leftBlockLeft + 1, mid - 1);
-		int rightBlockLeft = mid + 1;
-		int rightBlockRight = Math.max(rightBlockLeft + 1, right - 3);
-		c.fill(leftBlockLeft, blockTop, leftBlockRight, blockBottom, withAlpha(col, 0xB0));
-		c.fill(rightBlockLeft, blockTop, rightBlockRight, blockBottom, withAlpha(col, 0xB0));
+		c.fill(left + 2, bodyTop, Math.max(left + 3, mid - 1), bodyBottom, withAlpha(col, 0xB0));
+		c.fill(mid + 1, bodyTop, Math.max(mid + 2, right - 2), bodyBottom, withAlpha(col, 0xB0));
 	}
 
 	/** Palette: a paint disc with three wells. */

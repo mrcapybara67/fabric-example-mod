@@ -7,6 +7,8 @@ import com.capy.client.gui.UiLabels;
 import com.capy.client.gui.UiText;
 import com.capy.client.gui.UiTheme;
 import com.capy.client.gui.UiType;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.world.entity.player.PlayerSkin;
@@ -86,14 +88,14 @@ public final class AlertRenderer {
 	}
 
 	/** Draws the guardian style face effect and then the wording. */
-	public static void renderFaceAlert(UiCanvas c, UiType type, GuiGraphics graphics,
+	public static void renderFaceAlert(UiCanvas c, GuiGraphics graphics,
 			int screenW, int screenH, AdminAlert alert) {
 		long now = System.currentTimeMillis();
 		if (alert.alpha(now) <= 0.01f) {
 			return;
 		}
 		renderFace(c, graphics, screenW, screenH, alert, now);
-		renderWording(c, type, screenW, screenH, alert, now);
+		renderWording(graphics, screenW, screenH, alert, now);
 	}
 
 	// ------------------------------------------------------------------ face
@@ -129,27 +131,38 @@ public final class AlertRenderer {
 		int y = centerY - drawSize / 2;
 
 		int tint = Ui.withAlpha(0xFFFFFF, Math.round(255f * faceAlpha));
-		drawPortrait(c, graphics, alert.skin(), x, y, drawSize, tint, faceAlpha);
+		// The live skin first: the copy taken when the alert was raised can be
+		// the default face if the account had only just joined. Falling back to
+		// the stored one covers a player who has already left the server.
+		PlayerSkin live = AdminDetector.skinOf(Minecraft.getInstance(), alert.uuid());
+		drawPortrait(c, graphics, live != null ? live : alert.skin(), x, y, drawSize, tint, faceAlpha);
 	}
 
 	// --------------------------------------------------------------- wording
 
-	private static void renderWording(UiCanvas c, UiType type,
+	private static void renderWording(GuiGraphics graphics,
 			int screenW, int screenH, AdminAlert alert, long now) {
 		float nameAlpha = alert.nameAlpha(now);
 		float signOffAlpha = alert.signOffAlpha(now);
 		if (nameAlpha <= 0.01f && signOffAlpha <= 0.01f) {
 			return;
 		}
-		// The headline is the interface's largest face. This wording is the one
-		// thing on screen the player has to read without looking for it, so it
-		// is deliberately much bigger than the rest of the HUD.
-		UiText nameFont = type.headline();
-		UiText signOffFont = type.display();
+		// Vanilla's own font, at twice its size. This wording is the one thing
+		// on screen the player has to read without looking for it, so it is
+		// drawn the way the anticheat banner is - the game's font, large -
+		// rather than in the interface's typeface.
+		Font font = vanillaFont();
+		if (graphics == null || font == null) {
+			return;
+		}
+		float nameScale = 2.0f;
+		float signOffScale = 1.5f;
 
 		// The block is centred where the face was, so the eye stays in one
 		// place through the whole sequence.
-		int blockH = nameFont.lineHeight() + LINE_GAP + signOffFont.lineHeight();
+		int nameHeight = Math.round(font.lineHeight * nameScale);
+		int signOffHeight = Math.round(font.lineHeight * signOffScale);
+		int blockH = nameHeight + LINE_GAP + signOffHeight;
 		int top = Math.round(screenH * 0.44f) - blockH / 2;
 		int maxWidth = Math.max(40, screenW - 48);
 
@@ -165,50 +178,70 @@ public final class AlertRenderer {
 				case UNSEEN -> LABEL_UNSEEN;
 			};
 			String line = pattern.replace("%s", alert.username());
-			drawShadowedCentered(c, nameFont, line, screenW / 2, top, maxWidth,
+			drawCentered(graphics, font, line, screenW / 2, top, maxWidth, nameScale,
 					Ui.withAlpha(ALERT_RED, Math.round(255f * nameAlpha)));
 		}
 		if (signOffAlpha > 0.01f) {
-			drawShadowedCentered(c, signOffFont, LABEL_SIGN_OFF, screenW / 2,
-					top + nameFont.lineHeight() + LINE_GAP,
-					maxWidth, Ui.withAlpha(ALERT_RED, Math.round(255f * signOffAlpha)));
+			drawCentered(graphics, font, LABEL_SIGN_OFF, screenW / 2,
+					top + nameHeight + LINE_GAP, maxWidth, signOffScale,
+					Ui.withAlpha(ALERT_RED, Math.round(255f * signOffAlpha)));
 		}
+	}
+
+	/** The game's own font, or null before the client has one. */
+	private static Font vanillaFont() {
+		Minecraft mc = Minecraft.getInstance();
+		return mc == null ? null : mc.font;
 	}
 
 	/**
-	 * Centres a line, shortening it with an ellipsis when it does not fit, and
-	 * draws a one pixel shadow so it stays readable over any world.
+	 * Centres a line of vanilla text at a multiple of its own size.
 	 *
-	 * The shadow inherits the text's alpha, so it never keeps a hard edge on
-	 * screen after the line has faded.
+	 * <p>Vanilla's font has one size, so the only way to make this wording
+	 * larger is to scale the GUI matrix around it. Vanilla's drop shadow is used
+	 * so the line stays readable over any world, and it fades with the text
+	 * because the colour carries the alpha.</p>
 	 */
-	private static void drawShadowedCentered(UiCanvas c, UiText font, String text, int centerX, int y,
-			int maxWidth, int color) {
-		if (text == null || text.isEmpty()) {
+	private static void drawCentered(GuiGraphics graphics, Font font, String text, int centerX, int y,
+			int maxWidth, float scale, int color) {
+		if (text == null || text.isEmpty() || ((color >>> 24) & 0xFF) <= 0) {
 			return;
 		}
-		String fitted = fit(font, text, maxWidth);
-		int x = centerX - font.width(fitted) / 2;
-		int alpha = (color >>> 24) & 0xFF;
-		if (alpha <= 0) {
-			return;
-		}
-		int shadow = Ui.withAlpha(0x000000, Math.round(alpha * 0.55f));
-		font.draw(c, fitted, x + 1, y + 1, shadow);
-		font.draw(c, fitted, x, y, color);
+		String fitted = fit(font, text, maxWidth, scale);
+		float width = font.width(fitted) * scale;
+		var pose = graphics.pose();
+		pose.pushMatrix();
+		pose.translate(centerX - width / 2f, y);
+		pose.scale(scale, scale);
+		graphics.drawString(font, fitted, 0, 0, color, true);
+		pose.popMatrix();
 	}
 
-	/** Trims a line to fit, adding an ellipsis. */
-	private static String fit(UiText font, String text, int maxWidth) {
-		if (maxWidth <= 0 || font.width(text) <= maxWidth) {
+	/** Left aligned vanilla text, scaled the same way as {@link #drawCentered}. */
+	private static void drawLeft(GuiGraphics graphics, Font font, String text, int x, int y,
+			int maxWidth, float scale, int color) {
+		if (text == null || text.isEmpty() || ((color >>> 24) & 0xFF) <= 0) {
+			return;
+		}
+		String fitted = fit(font, text, maxWidth, scale);
+		var pose = graphics.pose();
+		pose.pushMatrix();
+		pose.translate(x, y);
+		pose.scale(scale, scale);
+		graphics.drawString(font, fitted, 0, 0, color, true);
+		pose.popMatrix();
+	}
+
+	/** Trims a line to fit the given width at the given scale, adding an ellipsis. */
+	private static String fit(Font font, String text, int maxWidth, float scale) {
+		if (maxWidth <= 0 || font.width(text) * scale <= maxWidth) {
 			return text;
 		}
-		String ellipsis = "…";
 		String out = text;
-		while (out.length() > 1 && font.width(out + ellipsis) > maxWidth) {
+		while (out.length() > 1 && font.width(out + "…") * scale > maxWidth) {
 			out = out.substring(0, out.length() - 1);
 		}
-		return out + ellipsis;
+		return out + "…";
 	}
 
 	// ---------------------------------------------------------- notification
@@ -220,8 +253,8 @@ public final class AlertRenderer {
 	 * at fixed offsets, so the title and the name line up on the same left
 	 * edge whatever the fonts resolve to.
 	 */
-	public static void renderNotification(UiCanvas c, UiType type, int screenW, int screenH,
-			AdminAlert alert, float alpha) {
+	public static void renderNotification(UiCanvas c, int screenW, int screenH,
+			AdminAlert alert, float alpha, GuiGraphics graphics) {
 		if (alpha <= 0.01f) {
 			return;
 		}
@@ -241,13 +274,19 @@ public final class AlertRenderer {
 		// ghost does, because the position was remembered before they went.
 		String detail = alert.detailText();
 		String name = detail.isEmpty() ? alert.username() : alert.username() + "  ·  " + detail;
-		// Both lines are one step larger than the old SMALL/MEDIUM pair. The
-		// corner notification is a secondary cue, but it still has to be
-		// readable while the player is fighting, not only in a screenshot.
-		UiText titleFont = type.display();
-		UiText nameFont = type.medium();
-		int w = Math.max(titleFont.width(title), nameFont.width(name)) + 56;
-		int h = 48;
+		// The card's two lines are vanilla's font as well, one step larger than
+		// the game's own size: the corner notification is a secondary cue, but
+		// it still has to be readable while the player is fighting.
+		Font font = vanillaFont();
+		if (graphics == null || font == null) {
+			return;
+		}
+		float titleScale = 1.35f;
+		float nameScale = 1.15f;
+		int titleW = Math.round(font.width(title) * titleScale);
+		int nameW = Math.round(font.width(name) * nameScale);
+		int w = Math.max(titleW, nameW) + 56;
+		int h = Math.max(52, Math.round(font.lineHeight * (titleScale + nameScale)) + 16);
 		int slide = Math.round((1f - alpha) * 14f);
 		int x = screenW - w - 12 - slide;
 		int y = 12;
@@ -264,9 +303,11 @@ public final class AlertRenderer {
 
 		int textX = x + 38;
 		int rowH = h / 2;
-		Ui.drawEllipsized(c, titleFont, title, textX, Ui.centerTextY(y, rowH, titleFont), w - 48,
+		int titleY = y + Math.max(0, (rowH - Math.round(font.lineHeight * titleScale)) / 2);
+		int nameY = y + rowH + Math.max(0, (rowH - Math.round(font.lineHeight * nameScale)) / 2);
+		drawLeft(graphics, font, title, textX, titleY, w - 48, titleScale,
 				Ui.withAlpha(accent, Math.round(240 * alpha)));
-		Ui.drawEllipsized(c, nameFont, name, textX, Ui.centerTextY(y + rowH, rowH, nameFont), w - 48,
+		drawLeft(graphics, font, name, textX, nameY, w - 48, nameScale,
 				Ui.withAlpha(UiTheme.TEXT, Math.round(240 * alpha)));
 	}
 

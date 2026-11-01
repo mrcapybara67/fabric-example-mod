@@ -642,10 +642,20 @@ public final class RadialView {
 		int groupH = mark + gap + logo.lineHeight();
 		int groupTop = centerY - groupH / 2 - Math.round((1f - ease) * 10f);
 
-		// The seal, not a bare flower: the ring around the blossom is what makes
-		// this mark the client's own at a glance.
-		UiIcons.draw(c, UiIcons.Icon.CREST, centerX - mark / 2, groupTop, mark,
-				Ui.withAlpha(ink, Math.round(0xF0 * fade)));
+		// A lit sphere instead of a flat glyph: two stacked discs, a rim and a
+		// specular dot give the hub a light source of its own, which is the depth
+		// the style was missing. The client's name stays under it.
+		int orbR = Math.max(9, mark / 2);
+		int orbAlpha = Math.round(0xF0 * fade);
+		Ui.circle(c, centerX, groupTop + orbR + Math.max(1, orbR / 6), orbR,
+				Ui.withAlpha(0x000000, Math.round(0x50 * fade)));
+		Ui.circleGradient(c, centerX, groupTop + orbR, orbR,
+				Ui.withAlpha(Ui.lighten(accent, 0.62f), orbAlpha),
+				Ui.withAlpha(accentDeep, orbAlpha));
+		Ui.ringFast(c, centerX, groupTop + orbR, Math.max(2, orbR - 1), 2,
+				Ui.withAlpha(0xFFFFFFFF, Math.round(0x55 * fade)));
+		Ui.circle(c, centerX - Math.round(orbR * 0.34f), groupTop + orbR - Math.round(orbR * 0.36f),
+				Math.max(1, Math.round(orbR * 0.26f)), Ui.withAlpha(0xFFFFFFFF, Math.round(0xB0 * fade)));
 		int logoY = groupTop + mark + gap;
 		Ui.drawCentered(c, logo, "Capy Client", centerX, logoY, Ui.withAlpha(ink, Math.round(255 * fade)));
 	}

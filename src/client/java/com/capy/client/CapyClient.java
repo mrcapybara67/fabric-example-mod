@@ -11,6 +11,7 @@ import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.AntiAdminModule;
+import com.capy.client.module.modules.AntiCheatNotifierModule;
 import com.capy.client.module.modules.BlockAnimationModule;
 import com.capy.client.module.modules.BlockOverlayModule;
 import com.capy.client.module.modules.CustomFOVModule;
@@ -21,6 +22,7 @@ import com.capy.client.module.modules.HandAuraModule;
 import com.capy.client.module.modules.SmoothCameraModule;
 import com.capy.client.module.modules.SwingSpeedModule;
 import com.capy.client.module.modules.WeatherNotifierModule;
+import com.capy.client.module.modules.esp.AmethystFinderModule;
 import com.capy.client.module.modules.esp.BlockEspModule;
 import com.capy.client.module.modules.esp.EspRenderer;
 import com.capy.client.module.modules.esp.PlayerEspModule;
@@ -57,12 +59,20 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(weather);
 		AntiAdminModule antiAdmin = new AntiAdminModule();
 		modules.register(antiAdmin);
+		// The notifier sits beside Anti Admin: both modules answer a question
+		// about the server rather than about the world, and neither owns a
+		// watchlist.
+		AntiCheatNotifierModule antiCheatNotifier = new AntiCheatNotifierModule();
+		modules.register(antiCheatNotifier);
 		// The three world overlays. They share one renderer and one set of
 		// drawing rules, so what they highlight differs but how they look
 		// never does.
 		modules.register(new PlayerEspModule());
 		modules.register(new StorageEspModule());
 		modules.register(new BlockEspModule());
+		// The finder is not an overlay: it searches the world for a geode and
+		// marks what it found, which is why it lives in its own category.
+		modules.register(new AmethystFinderModule());
 		// The visual set: the sky, the light level, the camera, the field of
 		// view, and the two overlays that frame what the player is looking at.
 		modules.register(new CustomSkyModule());
@@ -172,6 +182,12 @@ public class CapyClient implements ClientModInitializer {
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anti_admin"),
 				(graphics, deltaTracker) -> Guard.run("anti-admin alerts",
 						() -> antiAdmin.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight())));
+
+		// The anticheat banner sits under the alerts: it is a note about the
+		// server, never a warning about a player.
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anticheat_notifier"),
+				(graphics, deltaTracker) -> Guard.run("anticheat banner",
+						() -> antiCheatNotifier.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight())));
 
 		// Transient detection state must not survive a world change or a
 		// disconnect: the players of the old world are gone.

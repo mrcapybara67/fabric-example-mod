@@ -78,7 +78,22 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		// Every ESP overlay lives in DonutSMP: it is the category players open
 		// on that server, and grouping the three overlays together makes their
 		// shared colour/range/tracer controls easy to compare.
-		super(Category.DONUT_SMP, id);
+		this(Category.DONUT_SMP, id, defaultColor, defaultRange, defaultTracers);
+	}
+
+	/**
+	 * An overlay that belongs in a category of its own.
+	 *
+	 * A finder searches the world rather than marking a server, so it sits with
+	 * the other finders; everything else - the colour, the range, the fill and
+	 * the tracers - is the shared overlay behaviour and comes from here.
+	 */
+	protected EspModule(Category category, String id, int defaultColor, int defaultRange, boolean defaultTracers) {
+		this(category, id, Integer.valueOf(defaultColor), defaultRange, defaultTracers);
+	}
+
+	private EspModule(Category category, String id, Integer defaultColor, int defaultRange, boolean defaultTracers) {
+		super(category, id);
 		this.defaultColor = defaultColor == null ? 0 : defaultColor;
 		this.defaultRange = defaultRange;
 		this.defaultTracers = defaultTracers;

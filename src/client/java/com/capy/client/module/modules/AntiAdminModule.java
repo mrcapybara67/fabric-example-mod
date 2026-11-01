@@ -346,10 +346,10 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 				UiCanvas canvas = McCanvas.of(graphics);
 				UiType type = TYPE;
 				if (faceAlert.value()) {
-					AlertRenderer.renderFaceAlert(canvas, type, graphics, screenW, screenH, alert);
+					AlertRenderer.renderFaceAlert(canvas, graphics, screenW, screenH, alert);
 				}
 				if (notification.value()) {
-					AlertRenderer.renderNotification(canvas, type, screenW, screenH, alert, alpha);
+					AlertRenderer.renderNotification(canvas, screenW, screenH, alert, alpha, graphics);
 				}
 			}
 		}

@@ -269,6 +269,43 @@ public final class AdminDetector {
 				info.getSkin());
 	}
 
+	/**
+	 * The freshest skin available for an account, or null.
+	 *
+	 * <p>The skin stored with an alert is a copy taken when the alert was
+	 * raised. On a server where a player's skin is still being fetched at that
+	 * moment - which is exactly what happens when somebody has just joined -
+	 * that copy is the default skin, and the portrait then shows a face that
+	 * belongs to nobody. Reading the skin again at draw time replaces it with
+	 * the real texture the moment the client has it.
+	 */
+	public static PlayerSkin skinOf(Minecraft mc, UUID uuid) {
+		if (mc == null || uuid == null) {
+			return null;
+		}
+		if (mc.level != null) {
+			try {
+				net.minecraft.world.entity.player.Player player = mc.level.getPlayerByUUID(uuid);
+				if (player instanceof AbstractClientPlayer client) {
+					return client.getSkin();
+				}
+			} catch (RuntimeException | LinkageError ignored) {
+				// Fall through to the player list below.
+			}
+		}
+		if (mc.getConnection() != null) {
+			try {
+				PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
+				if (info != null) {
+					return info.getSkin();
+				}
+			} catch (RuntimeException | LinkageError ignored) {
+				// No entry left to read.
+			}
+		}
+		return null;
+	}
+
 	private static PlayerInfo playerInfo(Minecraft mc, AbstractClientPlayer player) {
 		if (mc.getConnection() == null) {
 			return null;

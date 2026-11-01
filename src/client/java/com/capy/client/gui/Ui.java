@@ -265,9 +265,10 @@ public final class Ui {
 			return;
 		}
 		int spread = Math.max(10, Math.round(radius * 0.38f));
-		// Three wide bands are indistinguishable from seven narrow ones at
-		// this softness, and cost less than half the fills.
-		int steps = 3;
+		// Two wide bands are indistinguishable from seven narrow ones at this
+		// softness. The halo is drawn for the hub and every node on the ring,
+		// so this is one of the most repeated shapes in the interface.
+		int steps = 2;
 		int band = Math.max(1, spread / steps);
 		for (int i = steps - 1; i >= 0; i--) {
 			float t = i / (float) Math.max(1, steps - 1);
@@ -639,7 +640,10 @@ public final class Ui {
 		final float halfWidth = 44.0f;
 		int from = (int) Math.floor(center - halfWidth);
 		int to = (int) Math.ceil(center + halfWidth);
-		c.pushClip(ix, iy, iw, ih);
+		// The band is clamped to the surface instead of being clipped to it.
+		// A scissor change flushes the batched GUI geometry, and this runs on
+		// every frame of both styles; two fills of arithmetic are far cheaper
+		// than the two flushes the clip used to cost.
 		for (int col = from; col <= to; col += 2) {
 			float d = (col + 0.5f - center) / halfWidth;
 			if (d <= -1f || d >= 1f) {
@@ -650,9 +654,13 @@ public final class Ui {
 			if (alpha <= 0) {
 				continue;
 			}
-			c.fill(ix + col, iy, ix + col + 2, iy + ih, (alpha << 24) | 0x00FFFFFF);
+			int bandStart = Math.max(0, col);
+			int bandEnd = Math.min(iw, col + 2);
+			if (bandEnd <= bandStart) {
+				continue;
+			}
+			c.fill(ix + bandStart, iy, ix + bandEnd, iy + ih, (alpha << 24) | 0x00FFFFFF);
 		}
-		c.popClip();
 	}
 
 	/** Horizontal hairline with a soft fade at both ends. */

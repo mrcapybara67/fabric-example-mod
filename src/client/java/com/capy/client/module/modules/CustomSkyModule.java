@@ -133,9 +133,26 @@ public class CustomSkyModule extends Module implements Configurable {
 	private float skyOriginYaw;
 	/** The theme the last frame drew, so a change can re-anchor. */
 	private int lastTheme = -1;
-	/** Pixels per degree of sky, from the frame's own field of view. */
-	private float pxPerDegree = 20f;
-	private float pyPerDegree = 12f;
+	/**
+	 * The camera's basis for this frame: what "right", "up" and "forward"
+	 * mean on screen. A sky body is placed by projecting its world direction
+	 * through these, which is the only way it can slide across the frame at the
+	 * same rate the world does.
+	 */
+	private float rightX = 1f;
+	private float rightY;
+	private float rightZ;
+	private float upX;
+	private float upY = 1f;
+	private float upZ;
+	private float fwdX;
+	private float fwdY;
+	private float fwdZ = -1f;
+	/** Tangents of half the vertical and horizontal field of view. */
+	private float tanHalfV = 0.46f;
+	private float tanHalfH = 0.72f;
+	/** Reused result of {@link #skyPoint(float, float)}; never keep the array. */
+	private final float[] skyPoint = new float[2];
 	private long lastNanos;
 	/** Clock value at which the next shooting star is allowed to appear. */
 	private float nextShootingStar = 4f;
@@ -268,9 +285,29 @@ public class CustomSkyModule extends Module implements Configurable {
 			// to find it, exactly as they would the sun.
 			skyOriginYaw = anchorOf(index);
 			lastTheme = index;
-		double horizontal = Math.toDegrees(2.0 * Math.atan(Math.tan(Math.toRadians(fov * 0.5)) * aspect));
-		pxPerDegree = (float) (w / Math.max(1.0, horizontal));
-		pyPerDegree = (float) (h / Math.max(1.0, fov));
+		// The camera's own basis. A bearing is not a screen offset: the same
+		// azimuth lands in a different place at every elevation, and the whole
+		// picture has to move with the camera exactly as the world does. The
+		// old code shifted a body horizontally by the yaw difference, which is
+		// a flat approximation - it left the subject glued to the crosshair at
+		// any pitch other than zero, and left the rest of the sky black because
+		// nothing else was projected at all.
+		org.joml.Quaternionf rotation = mc.gameRenderer.getMainCamera().rotation();
+		org.joml.Vector3f axis = new org.joml.Vector3f(1f, 0f, 0f);
+		rotation.transform(axis);
+		rightX = axis.x;
+		rightY = axis.y;
+		rightZ = axis.z;
+		rotation.transform(axis.set(0f, 1f, 0f));
+		upX = axis.x;
+		upY = axis.y;
+		upZ = axis.z;
+		rotation.transform(axis.set(0f, 0f, -1f));
+		fwdX = axis.x;
+		fwdY = axis.y;
+		fwdZ = axis.z;
+		tanHalfV = (float) Math.tan(Math.toRadians(fov * 0.5));
+		tanHalfH = tanHalfV * (float) aspect;
 
 		try {
 			// A fresh stack, deliberately not the world's.
@@ -322,12 +359,51 @@ public class CustomSkyModule extends Module implements Configurable {
 
 	/** Screen X of a point on the sky, given its compass azimuth in degrees. */
 	private float skyX(float azimuth) {
-		return frameW * 0.5f - wrapDegrees(viewYaw - azimuth) * pxPerDegree;
+		return skyPoint(azimuth, 0f)[0];
 	}
 
-	/** Screen Y of a point on the sky, given its elevation in degrees. */
-	private float skyY(float elevation) {
-		return frameH * 0.5f - (elevation + viewPitch) * pyPerDegree;
+	/**
+	 * Where a compass bearing and an elevation land on screen, projected through
+	 * the camera's own basis.
+	 *
+	 * <p>The body's direction is built in world space (yaw 0 is south, +Y is up),
+	 * resolved against the camera's right/up/forward vectors, and divided by its
+	 * depth - a real perspective projection, with the frame's own field of view.
+	 * That is what makes a theme behave like the sun: turning left slides it
+	 * right at the rate the terrain moves, looking up slides it down, and looking
+	 * away from it takes it off the frame instead of parking it on the
+	 * crosshair.</p>
+	 *
+	 * <p>The caller must copy the two values immediately; the array is reused so
+	 * a frame full of stars allocates nothing.</p>
+	 */
+	private float[] skyPoint(float azimuth, float elevation) {
+		double az = Math.toRadians(azimuth);
+		double el = Math.toRadians(elevation);
+		double cosEl = Math.cos(el);
+		float dx = (float) (-Math.sin(az) * cosEl);
+		float dy = (float) Math.sin(el);
+		float dz = (float) (Math.cos(az) * cosEl);
+		float depth = dx * fwdX + dy * fwdY + dz * fwdZ;
+		float sx = dx * rightX + dy * rightY + dz * rightZ;
+		float sy = dx * upX + dy * upY + dz * upZ;
+		if (depth <= 0.10f) {
+			// Behind the eye there is no projection at all. The body is put well
+			// outside the frame on the side it left by, so it leaves the screen
+			// instead of streaking across the middle as its depth crosses zero.
+			skyPoint[0] = frameW * 0.5f + (sx >= 0f ? 1f : -1f) * frameW * 2.5f;
+			skyPoint[1] = clampSkyY(frameH * 0.5f - (sy / 0.10f) / tanHalfV * frameH * 0.5f);
+			return skyPoint;
+		}
+		skyPoint[0] = frameW * 0.5f + (sx / depth) / tanHalfH * frameW * 0.5f;
+		skyPoint[1] = clampSkyY(frameH * 0.5f - (sy / depth) / tanHalfV * frameH * 0.5f);
+		return skyPoint;
+	}
+
+	/** Keeps a projected body near enough to be drawn, never at infinity. */
+	private float clampSkyY(float y) {
+		float limit = frameH * 4f;
+		return Math.max(-limit, Math.min(limit, y));
 	}
 
 	/** Degrees folded into -180..180, so a sky body has one position per turn. */
@@ -430,11 +506,12 @@ public class CustomSkyModule extends Module implements Configurable {
 		float base = Math.min(w, h);
 		// Fixed in the sky, at compass azimuth 0 and 26 degrees up: low enough to
 		// sit over the horizon, high enough to be looked up at.
-		float cx = skyX(skyOriginYaw);
 		// Fourteen degrees up: high enough to read as "in the sky", low enough
 		// that the disc is not clipped by the top of the frame at the default
 		// pitch, which is where a player sees it first.
-		float cy = skyY(14f);
+		float[] sky = skyPoint(skyOriginYaw, 14f);
+		float cx = sky[0];
+		float cy = sky[1];
 		float hole = base * 0.108f;
 		// The disc's inner edge sits close to the shadow: the gap between a round
 		// shadow and a disc this flat is a wedge, and the wider it is the more it
@@ -697,9 +774,12 @@ public class CustomSkyModule extends Module implements Configurable {
 		x += (float) Math.sin(time * 0.045f) * frameW * 0.004f;
 		y += (float) Math.cos(time * 0.031f) * frameH * 0.004f;
 		// And they pan with the view: a star field that ignores the camera is a
-		// decal, not a sky. A third of the true angular rate, so the field reads
-		// as distant rather than pasted on to the far plane.
-		x -= wrapDegrees(viewYaw) * pxPerDegree;
+		// decal, not a sky. The rate is the frame's own horizontal scale, worked
+		// out from the current field of view, so the field slides at exactly the
+		// rate the terrain does and the stars stay where they belong when the
+		// player turns.
+		float pixelsPerDegree = (frameW * 0.5f) / tanHalfH * 0.0174533f;
+		x -= wrapDegrees(viewYaw) * pixelsPerDegree;
 		x = x % frameW;
 		if (x < 0f) {
 			x += frameW;
@@ -1072,8 +1152,9 @@ public class CustomSkyModule extends Module implements Configurable {
 				a(0xFF63B6E8, alpha), a(0xFF9CD2F2, alpha), a(0xFFD9C6E6, alpha),
 				a(0xFFFFC4DC, alpha), a(0xFFFFB2C6, alpha));
 
-		float sunX = skyX(skyOriginYaw);
-		float sunY = skyY(62f);
+		float[] sky = skyPoint(skyOriginYaw, 62f);
+		float sunX = sky[0];
+		float sunY = sky[1];
 		float breathe = 0.5f + 0.5f * (float) Math.sin(time * 0.5f);
 		c.glow(sunX, sunY, base * 0.56f, base * 0.56f,
 				a(0xFFFFD0E4, alpha * (0.20f + 0.09f * breathe)), 5, 26);
@@ -1279,8 +1360,9 @@ public class CustomSkyModule extends Module implements Configurable {
 		// The well is a place in the sky, not a layer of the HUD: at bearing 156
 		// it is behind the player when they face the black hole, and the whole
 		// body leaves the frame when they turn away from it.
-		float cx = skyX(skyOriginYaw);
-		float cy = skyY(20f);
+		float[] sky = skyPoint(skyOriginYaw, 20f);
+		float cx = sky[0];
+		float cy = sky[1];
 		float maxR = (float) Math.sqrt(w * w + h * h) * 0.5f;
 		float depth = 0.5f + 0.5f * (float) Math.sin(time * 0.22f);
 
@@ -1359,8 +1441,9 @@ public class CustomSkyModule extends Module implements Configurable {
 		float u = h / 1080f;
 		// South, at 34 degrees up: the opposite half of the sky from the black
 		// hole, so the two themes cannot sit on top of each other.
-		float mx = skyX(skyOriginYaw);
-		float my = skyY(34f);
+		float[] sky = skyPoint(skyOriginYaw, 34f);
+		float mx = sky[0];
+		float my = sky[1];
 		float moonR = base * 0.145f;
 
 		c.gradient(0f, 0f, w, h,
