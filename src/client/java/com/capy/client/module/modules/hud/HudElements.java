@@ -6,21 +6,37 @@ import java.util.Locale;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.level.Level;
 
 /**
  * The HUD elements that ship with the client.
  *
- * Every value here is measured from information the client actually has, so
+ * <p>Every value here is measured from information the client actually has, so
  * nothing on the HUD can be wrong: FPS is the client's own frame rate, ping is
  * the latency the server reports, coordinates and biome come from the world the
  * player is standing in, and the speed is the distance the player actually
- * moved. There is deliberately no armour display - the vanilla HUD already
- * shows armour, and a second copy would only take space.
+ * moved.</p>
  *
- * The elements are registered together so the whole set stays in one place and
- * the stacking order inside a grid cell is obvious.
+ * <h2>What is not here, and why</h2>
+ * <ul>
+ *   <li><b>players</b> - the tab list already says who is online, and a chip
+ *       that repeats it reads as a second, smaller tab list;</li>
+ *   <li><b>facing</b> - the compass already answers it, and a four letter word
+ *       that only ever changes when the player turns is the least useful thing
+ *       a HUD can spend a chip on;</li>
+ *   <li><b>session time</b> - nobody has ever made a decision with it. The day
+ *       counter below is the number that actually matters in a world.</li>
+ * </ul>
+ *
+ * <p>What replaces them is the pair of coordinate chips: the position the player
+ * is standing at, and the same position converted into the other dimension. On
+ * a server where the nether is used as a road, that second number is the one
+ * that tells the player where the overworld portal will come out.</p>
  */
 public final class HudElements {
+	/** Render distance between the two dimensions: eight overworld blocks per nether block. */
+	private static final double NETHER_RATIO = 8.0;
+
 	private HudElements() {
 	}
 
@@ -29,12 +45,10 @@ public final class HudElements {
 		modules.register(new Watermark());
 		modules.register(new Fps());
 		modules.register(new Ping());
-		modules.register(new Players());
 		modules.register(new Coordinates());
+		modules.register(new OtherDimension());
 		modules.register(new Biome());
-		modules.register(new Facing());
 		modules.register(new Speed());
-		modules.register(new Session());
 		modules.register(new Day());
 	}
 
@@ -74,25 +88,14 @@ public final class HudElements {
 				return "-";
 			}
 			PlayerInfo info = mc.getConnection().getPlayerInfo(mc.player.getUUID());
-			return info == null ? "-" : info.getLatency() + " ms";
-		}
-	}
-
-	private static final class Players extends HudElementModule {
-		Players() {
-			super("hud_players", "PLAYERS", ANCHOR_TOP_RIGHT);
-		}
-
-		@Override
-		public String value(Minecraft mc) {
-			if (mc.getConnection() == null) {
+			if (info == null || info.getLatency() <= 0) {
 				return "-";
 			}
-			int listed = mc.getConnection().getOnlinePlayers().size();
-			return String.valueOf(listed);
+			return info.getLatency() + " ms";
 		}
 	}
 
+	/** Where the player is standing, in the dimension they are in. */
 	private static final class Coordinates extends HudElementModule {
 		Coordinates() {
 			super("hud_coords", "XYZ", ANCHOR_BOTTOM_LEFT);
@@ -104,7 +107,45 @@ public final class HudElements {
 			if (player == null) {
 				return "-";
 			}
-			return String.format(Locale.ROOT, "%.0f %.0f %.0f", player.getX(), player.getY(), player.getZ());
+			return format(player.getX(), player.getY(), player.getZ());
+		}
+	}
+
+	/**
+	 * The same position in the other dimension.
+	 *
+	 * <p>The label follows the dimension the player is in: standing in the
+	 * overworld the chip is labelled NETHER and shows where the portal will
+	 * place them; standing in the nether it is labelled OVERWORLD and shows where
+	 * the return trip will surface. Y is not converted, because height is the
+	 * same in both.</p>
+	 */
+	private static final class OtherDimension extends HudElementModule {
+		OtherDimension() {
+			super("hud_coords_other", "NETHER", ANCHOR_BOTTOM_LEFT);
+		}
+
+		@Override
+		public String label() {
+			return isNether(Minecraft.getInstance()) ? "OVERWORLD" : "NETHER";
+		}
+
+		@Override
+		public String value(Minecraft mc) {
+			LocalPlayer player = mc.player;
+			if (player == null) {
+				return "-";
+			}
+			double x = player.getX();
+			double z = player.getZ();
+			if (isNether(mc)) {
+				x *= NETHER_RATIO;
+				z *= NETHER_RATIO;
+			} else {
+				x /= NETHER_RATIO;
+				z /= NETHER_RATIO;
+			}
+			return format(x, player.getY(), z);
 		}
 	}
 
@@ -122,23 +163,22 @@ public final class HudElements {
 			if (key.isEmpty()) {
 				return "-";
 			}
-			return key.get().identifier().getPath().replace('_', ' ');
-		}
-	}
-
-	private static final class Facing extends HudElementModule {
-		Facing() {
-			super("hud_facing", "FACING", ANCHOR_BOTTOM_LEFT);
-		}
-
-		@Override
-		public String value(Minecraft mc) {
-			LocalPlayer player = mc.player;
-			if (player == null) {
-				return "-";
+			String path = key.get().identifier().getPath();
+			// "cherry_grove" reads as a place name, "cherry grove" reads as a
+			// description. The chip is a label, so it is capitalised like one.
+			StringBuilder out = new StringBuilder(path.length());
+			boolean wordStart = true;
+			for (int i = 0; i < path.length(); i++) {
+				char ch = path.charAt(i);
+				if (ch == '_') {
+					out.append(' ');
+					wordStart = true;
+					continue;
+				}
+				out.append(wordStart ? Character.toUpperCase(ch) : ch);
+				wordStart = false;
 			}
-			var direction = player.getDirection();
-			return direction == null ? "-" : direction.getName().toUpperCase(Locale.ROOT);
+			return out.toString();
 		}
 	}
 
@@ -192,33 +232,14 @@ public final class HudElements {
 		}
 	}
 
-	/** How long the client has been running this session. */
-	private static final class Session extends HudElementModule {
-		private long startMs = System.currentTimeMillis();
-
-		Session() {
-			super("hud_session", "TIME", ANCHOR_BOTTOM_RIGHT);
-		}
-
-		@Override
-		protected void onToggle(boolean state) {
-			if (state) {
-				startMs = System.currentTimeMillis();
-			}
-		}
-
-		@Override
-		public String value(Minecraft mc) {
-			long seconds = Math.max(0, (System.currentTimeMillis() - startMs) / 1000L);
-			long hours = seconds / 3600L;
-			if (hours > 0) {
-				return String.format(Locale.ROOT, "%d:%02d:%02d", hours, (seconds / 60) % 60, seconds % 60);
-			}
-			return String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60);
-		}
-	}
-
-	/** The in-game day counter. */
+	/**
+	 * The world's day counter and the in-game clock.
+	 *
+	 * <p>A day is 24000 ticks and starts at 06:00, which is why the offset is
+	 * six hours and not zero: 0 is sunrise, not midnight. The clock is the number
+	 * a player plans a night around, and the day count is how long the world has
+	 * existed - one chip, both.</p>
+	 */
 	private static final class Day extends HudElementModule {
 		Day() {
 			super("hud_day", "DAY", ANCHOR_BOTTOM_RIGHT);
@@ -231,7 +252,24 @@ public final class HudElements {
 			}
 			// getDayTime can be negative in a custom world; a day below one would
 			// read as a glitch.
-			return String.valueOf(Math.max(1L, mc.level.getDayTime() / 24000L + 1L));
+			long day = Math.max(1L, mc.level.getDayTime() / 24000L + 1L);
+			long ticks = mc.level.getDayTime() % 24000L;
+			if (ticks < 0) {
+				ticks += 24000L;
+			}
+			long minutes = (ticks * 1440L / 24000L + 6L * 60L) % 1440L;
+			return String.format(Locale.ROOT, "%d \u00b7 %02d:%02d", day, minutes / 60L, minutes % 60L);
 		}
+	}
+
+	// -------------------------------------------------------------- helpers
+
+	/** Whole blocks, because a HUD reading a fraction of a block is noise. */
+	private static String format(double x, double y, double z) {
+		return String.format(Locale.ROOT, "%.0f %.0f %.0f", Math.floor(x), Math.floor(y), Math.floor(z));
+	}
+
+	private static boolean isNether(Minecraft mc) {
+		return mc != null && mc.level != null && mc.level.dimension().equals(Level.NETHER);
 	}
 }

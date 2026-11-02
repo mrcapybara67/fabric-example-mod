@@ -1,7 +1,9 @@
 package com.capy.client.module.modules.hud;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
+import com.capy.client.module.ColorSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
@@ -11,16 +13,30 @@ import net.minecraft.client.Minecraft;
 /**
  * One element of the HUD: a single compact chip that shows one fact.
  *
- * The HUD is a set of independent modules rather than one panel, so every
+ * <p>The HUD is a set of independent modules rather than one panel, so every
  * readout can be switched on, off and placed on its own. A module only has to
  * say what its value is; where the chip goes and how it is drawn lives in
  * {@link HudRenderer}, so every element is guaranteed to look and align the
- * same way.
+ * same way.</p>
  *
- * Placement is a nine cell grid (see the {@code ANCHOR_*} constants) plus a
- * small pixel nudge, which is enough to build any common HUD layout without a
- * drag editor. Elements that share a cell are stacked in registration order,
- * so turning more of them on can never make two chips overlap.
+ * <h2>Moving a chip</h2>
+ * Placement is a nine cell grid (the {@code ANCHOR_*} constants) plus a pixel
+ * nudge, which is enough to build any common layout without a drag editor and
+ * without a screen of its own:
+ *
+ * <ul>
+ *   <li>{@code anchor} picks the cell and the stacking direction;</li>
+ *   <li>{@code offset_x} / {@code offset_y} move the chip from that cell, up to
+ *       {@value #MAX_NUDGE} pixels either way - enough to move a chip from one
+ *       corner to the other on a 4K window, so the grid is a starting point
+ *       rather than a cage;</li>
+ *   <li>{@code background}, {@code accent}, {@code accent_bar} and
+ *       {@code show_label} are the look of the chip itself.</li>
+ * </ul>
+ *
+ * <p>Every setting is persisted per module, so a layout survives a restart, and
+ * a module that is switched off keeps its position for the next time it is
+ * switched on.</p>
  */
 public abstract class HudElementModule extends Module implements Configurable {
 	public static final int ANCHOR_TOP_LEFT = 0;
@@ -33,13 +49,24 @@ public abstract class HudElementModule extends Module implements Configurable {
 	public static final int ANCHOR_BOTTOM_CENTER = 7;
 	public static final int ANCHOR_BOTTOM_RIGHT = 8;
 
-	public static final int MAX_NUDGE = 80;
+	/**
+	 * How far a chip may be nudged from its cell, in pixels.
+	 *
+	 * <p>Two hundred is half a 4K window at GUI scale four: every position on
+	 * the screen is reachable from the nearest cell, so the grid decides where a
+	 * chip starts and never where it has to stay.</p>
+	 */
+	public static final int MAX_NUDGE = 200;
 
 	private final String label;
 	private final int defaultAnchor;
 	private final SliderSetting anchor;
 	private final SliderSetting offsetX;
 	private final SliderSetting offsetY;
+	private final BooleanSetting showLabel;
+	private final SliderSetting background;
+	private final BooleanSetting accentBar;
+	private final ColorSetting accent;
 
 	protected HudElementModule(String id, String label, int defaultAnchor) {
 		super(Category.HUD, id);
@@ -49,6 +76,15 @@ public abstract class HudElementModule extends Module implements Configurable {
 				ANCHOR_TOP_LEFT, ANCHOR_BOTTOM_RIGHT));
 		this.offsetX = setting(new SliderSetting("offset_x", 0, -MAX_NUDGE, MAX_NUDGE));
 		this.offsetY = setting(new SliderSetting("offset_y", 0, -MAX_NUDGE, MAX_NUDGE));
+		this.showLabel = setting(new BooleanSetting("show_label", true));
+		// A plate at ninety five percent: the chip is a label on top of the
+		// world, and the world has to stay readable through it. Zero draws the
+		// value straight over the scene, which is the look some players want.
+		this.background = setting(new SliderSetting("background", 95, 0, 100));
+		this.accentBar = setting(new BooleanSetting("accent_bar", true));
+		// Zero means "the interface accent", so a chip follows the theme until
+		// the player gives it a colour of its own.
+		this.accent = setting(new ColorSetting("accent", 0));
 	}
 
 	/** The muted prefix drawn before the value; empty for a bare readout. */
@@ -78,6 +114,27 @@ public abstract class HudElementModule extends Module implements Configurable {
 		return defaultAnchor;
 	}
 
+	/** False draws the value alone, without the muted prefix. */
+	public boolean labelVisible() {
+		return showLabel.value();
+	}
+
+	/** Plate opacity, 0..255. */
+	public int backgroundAlpha() {
+		return Math.round(Math.max(0f, Math.min(1f, (float) background.real() / 100f)) * 255f);
+	}
+
+	/** False draws no accent bar, for a chip that should disappear into the HUD. */
+	public boolean accentBarVisible() {
+		return accentBar.value();
+	}
+
+	/** The chip's own accent, or 0 to follow the interface accent. */
+	public int accentArgb() {
+		int argb = accent.argb();
+		return (argb >>> 24) == 0 ? 0 : argb;
+	}
+
 	// ---------------------------------------------------------- persistence
 
 	@Override
@@ -85,6 +142,10 @@ public abstract class HudElementModule extends Module implements Configurable {
 		anchor.set(ConfigValues.intValue(json, "anchor", defaultAnchor));
 		offsetX.set(ConfigValues.intValue(json, "offset_x", 0));
 		offsetY.set(ConfigValues.intValue(json, "offset_y", 0));
+		showLabel.set(ConfigValues.boolValue(json, "show_label", true));
+		background.set(ConfigValues.intValue(json, "background", 95));
+		accentBar.set(ConfigValues.boolValue(json, "accent_bar", true));
+		accent.set(ConfigValues.intValue(json, "accent", 0));
 	}
 
 	@Override
@@ -92,6 +153,10 @@ public abstract class HudElementModule extends Module implements Configurable {
 		json.addProperty("anchor", anchor());
 		json.addProperty("offset_x", offsetX());
 		json.addProperty("offset_y", offsetY());
+		json.addProperty("show_label", labelVisible());
+		json.addProperty("background", Math.round(background.real()));
+		json.addProperty("accent_bar", accentBarVisible());
+		json.addProperty("accent", accentArgb());
 	}
 
 	private static int clamp(int value, int min, int max) {

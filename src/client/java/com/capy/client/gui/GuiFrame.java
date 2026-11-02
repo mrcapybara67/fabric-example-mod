@@ -403,6 +403,12 @@ public final class GuiFrame {
 
 		Ui.shadow(c, wx, wy, ww, wh, r);
 		Ui.surface(c, wx, wy, ww, wh, r, UiTheme.SHELL_TOP, UiTheme.SHELL_BOTTOM);
+		if (UiTheme.isGlass()) {
+			// One specular band across the whole window, on the same clock as the
+			// HUD chips, so the window and the chips read as the same pane of
+			// glass rather than as two unrelated materials.
+			Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());
+		}
 		// A soft light from above: the top of the window catches the light.
 		Ui.glow(c, wx + 2, wy + 2, ww - 4, Math.min(wh, 90), UiTheme.PALE_CHERRY, 0.05f);
 		Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());

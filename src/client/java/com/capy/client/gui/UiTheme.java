@@ -190,11 +190,11 @@ public final class UiTheme {
 			0xFF131C26,
 			0xFF212E3B,
 			0xFF19242F,
-			0xFF41566D,
+			0xFF5B7290,
 			0xFF7CD8FF,
 			0xFFBFEBFF,
 			0xFF2F9BC8,
-			0x337CD8FF,
+			0x447CD8FF,
 			0xFFD6F4FF,
 			0xFFEFFBFF,
 			0xFFF2F8FF,
@@ -227,6 +227,19 @@ public final class UiTheme {
 	/** The palette currently in use. */
 	public static Palette palette() {
 		return active;
+	}
+
+	/**
+	 * True when the active palette is the glass family.
+	 *
+	 * <p>The two families are not the same material with a different hue: Sakura
+	 * is matte paper and Liquid Glass is a lit pane. The one place that matters
+	 * to the drawing code is the specular band, which a paper surface must not
+	 * have - it reads as wet - so surfaces ask this rather than comparing ids
+	 * themselves in five different places.</p>
+	 */
+	public static boolean isGlass() {
+		return "liquid_glass".equals(active.id());
 	}
 
 	/** All selectable palettes, in display order. */
