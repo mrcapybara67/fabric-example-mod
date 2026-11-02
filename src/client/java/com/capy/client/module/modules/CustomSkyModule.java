@@ -276,14 +276,8 @@ public class CustomSkyModule extends Module implements Configurable {
 		}
 		float depth = Math.max(16f, far * 0.9f);
 
-		float fov = CustomFOVModule.lastFov();
-		if (!Float.isFinite(fov) || fov < 10f || fov > 170f) {
-			fov = 70f;
-		}
-		fov = Math.max(30f, Math.min(150f, fov));
-		double halfH = depth * Math.tan(Math.toRadians(fov * 0.5)) * OVERSCAN;
-		double aspect = w / (double) Math.max(1f, h);
-		double halfW = halfH * aspect;
+		// The frame's own tangents and the plane it is painted on are worked out
+		// below, from the matrices this pass is drawing with.
 
 		// Where the sky is pointing. Every sky body is placed by compass azimuth
 		// and elevation, so turning the view slides it across the sky instead of
@@ -296,9 +290,57 @@ public class CustomSkyModule extends Module implements Configurable {
 		// Reading it was why a theme stayed in the middle of the screen while
 		// the player looked around - the anchor had one fixed bearing to slide
 		// against, and the value it was sliding against never changed.
+		// The look direction, and only that.
+		//
+		// The camera's quaternion is deliberately not used any more. A quaternion
+		// is easy to have the wrong way round - the inverse of the view, or the
+		// eye's pose rather than the camera's - and with a wrong convention the
+		// projection turns the sky by the opposite angle to the one the world
+		// turns by. The two cancel, the subject stays near the middle of the
+		// frame, and the player sees a theme that follows the camera while the
+		// horizon slides away underneath it. A forward vector has no convention
+		// to get wrong: it is simply the direction the frame is being drawn
+		// looking, and the other two axes are built from it below.
 		org.joml.Vector3fc forward = mc.gameRenderer.getMainCamera().forwardVector();
-		viewYaw = (float) Math.toDegrees(Math.atan2(-forward.x(), forward.z()));
-		viewPitch = (float) Math.toDegrees(-Math.asin(Math.max(-1.0, Math.min(1.0, forward.y()))));			// A theme's subject hangs at a fixed bearing of the world, never at
+		float fx = forward.x();
+		float fy = forward.y();
+		float fz = forward.z();
+		float flen = (float) Math.sqrt(fx * fx + fy * fy + fz * fz);
+		if (!(flen > 1.0e-5f) || !Float.isFinite(flen)) {
+			fx = 0f;
+			fy = 0f;
+			fz = -1f;
+		} else {
+			fx /= flen;
+			fy /= flen;
+			fz /= flen;
+		}
+		fwdX = fx;
+		fwdY = fy;
+		fwdZ = fz;
+		// right = forward x worldUp. Only degenerate when looking straight up
+		// or down, where any horizontal axis is as good as another and the
+		// fallback below picks one rather than dividing by zero.
+		float rx = -fz;
+		float rz = fx;
+		float rlen = (float) Math.sqrt(rx * rx + rz * rz);
+		if (!(rlen > 1.0e-4f)) {
+			rx = 1f;
+			rz = 0f;
+		} else {
+			rx /= rlen;
+			rz /= rlen;
+		}
+		rightX = rx;
+		rightY = 0f;
+		rightZ = rz;
+		// up = right x forward, which keeps all three axes orthonormal.
+		upX = rightY * fz - rightZ * fy;
+		upY = rightZ * fx - rightX * fz;
+		upZ = rightX * fy - rightY * fx;
+
+		viewYaw = (float) Math.toDegrees(Math.atan2(-fwdX, fwdZ));
+		viewPitch = (float) Math.toDegrees(-Math.asin(Math.max(-1.0, Math.min(1.0, fwdY))));			// A theme's subject hangs at a fixed bearing of the world, never at
 			// the heading the module happened to be switched on at. Anchoring on
 			// the current view is what made a theme look pinned to the crosshair:
 			// re-enabling it, or changing theme, put the subject back in the
@@ -314,22 +356,35 @@ public class CustomSkyModule extends Module implements Configurable {
 		// a flat approximation - it left the subject glued to the crosshair at
 		// any pitch other than zero, and left the rest of the sky black because
 		// nothing else was projected at all.
-		org.joml.Quaternionf rotation = mc.gameRenderer.getMainCamera().rotation();
-		org.joml.Vector3f axis = new org.joml.Vector3f(1f, 0f, 0f);
-		rotation.transform(axis);
-		rightX = axis.x;
-		rightY = axis.y;
-		rightZ = axis.z;
-		rotation.transform(axis.set(0f, 1f, 0f));
-		upX = axis.x;
-		upY = axis.y;
-		upZ = axis.z;
-		rotation.transform(axis.set(0f, 0f, -1f));
-		fwdX = axis.x;
-		fwdY = axis.y;
-		fwdZ = axis.z;
-		tanHalfV = (float) Math.tan(Math.toRadians(fov * 0.5));
-		tanHalfH = tanHalfV * (float) aspect;
+		// The field of view comes from the projection that is being applied, not
+		// from a value another module remembered. A projection with a different
+		// field of view than the one the sky assumes squeezes every body towards
+		// the middle of the frame, which reads as the theme not moving at all.
+		float fov = CustomFOVModule.lastFov();
+		if (!Float.isFinite(fov) || fov < 10f || fov > 170f) {
+			fov = 70f;
+		}
+		fov = Math.max(30f, Math.min(150f, fov));
+		Matrix4f projection = null;
+		try {
+			projection = mc.gameRenderer.getProjectionMatrix(fov);
+		} catch (Throwable ignored) {
+			// A projection that cannot be built is not worth a frame; the field
+			// of view below is enough to place the sky.
+		}
+		if (projection != null && finite(projection) && projection.m11() > 1.0e-4f
+				&& projection.m00() > 1.0e-4f) {
+			tanHalfV = 1f / projection.m11();
+			tanHalfH = 1f / projection.m00();
+		} else {
+			tanHalfV = (float) Math.tan(Math.toRadians(fov * 0.5));
+			tanHalfH = tanHalfV * (w / Math.max(1f, h));
+		}
+		// The plane the painting is laid out on: the size of the frame at the far
+		// plane, in the same tangents, so a body projected to the edge of the
+		// view lands exactly on the edge of the plane.
+		double halfH = depth * tanHalfV * OVERSCAN;
+		double halfW = depth * tanHalfH * OVERSCAN;
 		// Pitch to pixels, through the same tangent the frame is projected with.
 		// The camera reports a negative pitch when it looks up, and looking up
 		// has to send the sky down, so the sign is reversed here.
@@ -345,12 +400,17 @@ public class CustomSkyModule extends Module implements Configurable {
 			// screen that is "the theme sits on the crosshair and the rest of the
 			// sky is black". Starting from identity and cancelling only the model
 			// view puts the vertices in camera space, which is what a sky wants.
+			// The pass's matrix is cancelled, but only if it is a real matrix. In
+			// this version the world's vertices are already camera relative, so
+			// the common answer is the identity - and an identity inverse is what
+			// keeps the painting in the space the projection expects.
 			Matrix4f inverse = new Matrix4f(RenderSystem.getModelViewMatrix()).invert();
 			if (!finite(inverse)) {
 				// A singular view has no inverse, and JOML answers with a matrix of
-				// NaN - which blanks the whole sky. The camera's own rotation is
-				// what the view is in the normal frame, so it is used instead.
-				inverse = new Matrix4f().rotation(new org.joml.Quaternionf(rotation).conjugate());
+				// NaN - which blanks the whole sky. An identity pose is the safe
+				// answer: the painting then lands in view space, in front of the
+				// camera, instead of nowhere at all.
+				inverse.identity();
 			}
 			PoseStack stack = new PoseStack();
 			stack.last().pose().mul(inverse);
