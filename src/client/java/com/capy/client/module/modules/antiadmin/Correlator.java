@@ -49,16 +49,20 @@ public final class Correlator {
 	/**
 	 * Runs the correlation for this tick.
 	 *
-	 * @param minimum the lowest confidence the user wants to see
+	 * @param minimum  the lowest confidence the user wants to see
+	 * @param watchlist when not null, only an account on it may produce an
+	 *                  alert; null keeps the signal layer open to any named
+	 *                  account
 	 * @return how many subjects produced an alert this tick
 	 */
-	public int tick(Minecraft mc, ServerProfile profile, Confidence minimum, String host) {
+	public int tick(Minecraft mc, ServerProfile profile, Confidence minimum, String host,
+			com.capy.client.module.WatchlistSetting watchlist) {
 		if (mc == null || mc.level == null || mc.player == null || profile == null) {
 			return 0;
 		}
 		int raised = 0;
 		for (Map.Entry<UUID, List<Observation>> entry : buffer.snapshot().entrySet()) {
-			AlertRecord record = evaluate(mc, entry.getKey(), entry.getValue(), profile, minimum, host);
+			AlertRecord record = evaluate(mc, entry.getKey(), entry.getValue(), profile, minimum, host, watchlist);
 			if (record == null || !alerts.raise(record)) {
 				continue;
 			}
@@ -73,7 +77,8 @@ public final class Correlator {
 
 	/** Scores one subject, or returns null when it is not worth an alert. */
 	private AlertRecord evaluate(Minecraft mc, UUID subject, List<Observation> observations,
-			ServerProfile profile, Confidence minimum, String host) {
+			ServerProfile profile, Confidence minimum, String host,
+			com.capy.client.module.WatchlistSetting watchlist) {
 		// A positional subject is a cell, not an account: two particles near
 		// each other with no name attached. Those used to be reported as
 		// "someone is near and unseen", which is what made the module shout at
@@ -125,7 +130,22 @@ public final class Correlator {
 			return null;
 		}
 
-		return new AlertRecord(subject, nameOf(mc, subject), confidence, counted, System.currentTimeMillis(),
+		// Who this is about, before it is reported. Evidence that names nobody is
+		// not evidence about a person: the buffer can hold a subject whose
+		// profile has already been removed, and the old code reported it as
+		// "unknown" - which the player read as "the module is detecting someone
+		// who is not even on my list". An alert that cannot say who it is about
+		// is never shown.
+		String name = nameOf(mc, subject);
+		if (name == null || name.isEmpty() || "unknown".equals(name) || "someone".equals(name)) {
+			return null;
+		}
+		// Watchlist only: with the setting on, the signal layer is corroboration
+		// for the watched accounts, not a second, unnamed detector.
+		if (watchlist != null && !watchlist.matches(name)) {
+			return null;
+		}
+		return new AlertRecord(subject, name, confidence, counted, System.currentTimeMillis(),
 				position, distanceTo(mc.player, position), host, kindFor(counted));
 	}
 

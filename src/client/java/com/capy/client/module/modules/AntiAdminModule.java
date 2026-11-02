@@ -100,6 +100,16 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private final BooleanSetting ghostMode = setting(new BooleanSetting("ghost_mode", false));
 	private final ChoiceSetting threshold =
 			setting(new ChoiceSetting("alert_threshold", 1, "low", "medium", "high", "certain"));
+	/**
+	 * Restricts the signal layer to the accounts the user named.
+	 *
+	 * <p>On by default. The detectors read what the server did, not who did it,
+	 * so an unnamed account can otherwise be reported with nothing but
+	 * "unknown" to go on - which is exactly the alert that made the module look
+	 * like it was inventing people. With this on, a signal has to land on a
+	 * watched account before it says anything.</p>
+	 */
+	private final BooleanSetting watchlistOnly = setting(new BooleanSetting("watchlist_only", true));
 	private final ChoiceSetting profileChoice =
 			setting(new ChoiceSetting("profile", 0, "auto", "default", "donut-family", "anarchy"));
 	private final StringSetting webhookUrl = setting(new StringSetting("webhook", ""));
@@ -238,7 +248,8 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 				detector.onTick(mc);
 			}
 		}
-		correlator.tick(mc, profile, minimumConfidence(), host);
+		correlator.tick(mc, profile, minimumConfidence(), host,
+				watchlistOnly.value() ? watchlist : null);
 		if (--scanCountdown <= 0) {
 			scanCountdown = SCAN_INTERVAL;
 			scanWatchlist(mc);
@@ -391,6 +402,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	@Override
 	public void loadConfig(JsonObject json) {
 		watchlist.set(ConfigValues.stringList(json, "watchlist"));
+		watchlistOnly.set(ConfigValues.boolValue(json, "watchlist_only", true));
 		range.set(ConfigValues.intValue(json, "range", DEFAULT_RANGE));
 		faceAlert.set(ConfigValues.boolValue(json, "face_alert", true));
 		notification.set(ConfigValues.boolValue(json, "notification", true));
@@ -410,6 +422,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			names.add(entry);
 		}
 		json.add("watchlist", names);
+		json.addProperty("watchlist_only", watchlistOnly.value());
 		json.addProperty("range", detectionRange());
 		json.addProperty("face_alert", faceAlert.value());
 		json.addProperty("notification", notification.value());

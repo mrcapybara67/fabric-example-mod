@@ -64,6 +64,18 @@ import net.minecraft.sounds.SoundEvents;
 public class AntiCheatNotifierModule extends Module implements Configurable, Tickable {
 	/** How often the evidence is re-read, in ticks. */
 	private static final int CHECK_INTERVAL = 40;
+	/**
+	 * How long the module has to have been on before it judges a server.
+	 *
+	 * <p>Three seconds. The evidence it reads - the server address, the list
+	 * entry, the server's own chat - is all available immediately, but a module
+	 * that is switched on and off while the user is arranging their settings
+	 * used to announce a verdict on every enable, because the first evaluation
+	 * ran one tick after the toggle with no evidence read yet and concluded
+	 * "nothing found". Nothing found is not the same as proven absent, so the
+	 * judgement now waits for the module to have actually been running.</p>
+	 */
+	private static final int SETTLE_TICKS = 60;
 
 	/** The two banner lines, in Minecraft's own font. */
 	private static final String LINE_TITLE = "the anticheat is off";
@@ -95,6 +107,15 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 	 * rejoining, which is the exact moment the memory is worth anything.
 	 */
 	private static final Map<String, String> LEARNED = new ConcurrentHashMap<>();
+	/**
+	 * Addresses whose verdict has already been announced this session.
+	 *
+	 * <p>Keyed by address, not by module state: switching the module off and on
+	 * again is the same server and the same verdict, and telling the player a
+	 * second time - which is what a state-only edge trigger did - reads as a
+	 * fresh detection. Static so the memory survives a kick and a rejoin too.</p>
+	 */
+	private static final java.util.Set<String> ANNOUNCED = ConcurrentHashMap.newKeySet();
 
 	private final ChoiceSetting force = setting(new ChoiceSetting("force", 0, "auto", "off", "on"));
 	private final BooleanSetting unknownServers = setting(new BooleanSetting("unknown_servers", true));
@@ -121,6 +142,8 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 	private long holdMs = 5000L;
 	/** The verdict: true when the server looks unprotected. */
 	private boolean unprotected;
+	/** Ticks the module has been continuously enabled. */
+	private int enabledTicks;
 
 	public AntiCheatNotifierModule() {
 		super(Category.MISC, "anticheat_notifier");
@@ -129,6 +152,7 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 	@Override
 	protected void onToggle(boolean state) {
 		countdown = 0;
+		enabledTicks = 0;
 		judgedHost = "";
 		fingerprint = "";
 		shownAt = 0L;
@@ -153,6 +177,9 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 			judgedHost = "";
 			shownAt = 0L;
 			return;
+		}
+		if (enabledTicks < Integer.MAX_VALUE) {
+			enabledTicks++;
 		}
 		if (--countdown > 0) {
 			return;
@@ -211,10 +238,21 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 			judgedHost = host;
 			return;
 		}
+		if (enabledTicks < SETTLE_TICKS) {
+			// Not judged yet: the module has only just been switched on, and a
+			// verdict reached before it has read anything is a guess.
+			return;
+		}
 		if (host.equals(judgedHost)) {
 			return;
 		}
 		judgedHost = host;
+		// Once per address per session. A toggle, a rejoin or a second world
+		// load is not new evidence, and re-announcing on one is what made
+		// spamming the module's own switch look like a detection.
+		if (!ANNOUNCED.add(host)) {
+			return;
+		}
 		announce();
 	}
 

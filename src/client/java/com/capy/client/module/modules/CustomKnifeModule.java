@@ -9,6 +9,7 @@ import com.capy.client.module.Category;
 import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
+import com.capy.client.module.SliderSetting;
 import com.capy.client.module.modules.knife.KnifePose;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
@@ -76,6 +77,17 @@ public class CustomKnifeModule extends Module implements Configurable {
 
 	private final ChoiceSetting style = setting(new ChoiceSetting("style", 0, STYLES));
 	private final BooleanSetting inspect = setting(new BooleanSetting("inspect", true));
+	/**
+	 * Size of the mesh, as a percentage of the authored one.
+	 *
+	 * <p>A hand authored mesh cannot fit every hand, every GUI scale and every
+	 * field of view at once, and the visible size of a knife in first person is
+	 * the one thing players disagree about most. One slider answers it without a
+	 * rebuild, and it is applied where the mesh is converted into block space, so
+	 * it scales the model and not its display transform - the pose still sits it
+	 * in the fist.
+	 */
+	private final SliderSetting scale = setting(new SliderSetting("scale", 100, 50, 200, 0));
 
 	public CustomKnifeModule() {
 		super(Category.VISUAL, "custom_knife");
@@ -134,7 +146,8 @@ public class CustomKnifeModule extends Module implements Configurable {
 		if (meshes.isEmpty()) {
 			return false;
 		}
-		return KnifeSpecialRenderer.attach(state, context, style, materialOf(stack), meshes);
+		return KnifeSpecialRenderer.attach(state, context, style, materialOf(stack), meshes,
+				scaleValue());
 	}
 
 	/**
@@ -190,7 +203,6 @@ public class CustomKnifeModule extends Module implements Configurable {
 	public String styleId() {
 		return style.option();
 	}
-
 	/**
 	 * Nothing to substitute any more, and deliberately so.
 	 *
@@ -204,6 +216,12 @@ public class CustomKnifeModule extends Module implements Configurable {
 	 */
 	public ItemStack swapFor(ItemStack stack, ItemOwner owner) {
 		return stack;
+	}
+
+	/** The size multiplier the mesh is drawn at, clamped to the slider's range. */
+	public float scaleValue() {
+		float value = (float) scale.real() / 100f;
+		return Math.max(0.5f, Math.min(2.0f, value));
 	}
 
 	/** Which sprite palette this sword uses, by name. */
@@ -244,11 +262,13 @@ public class CustomKnifeModule extends Module implements Configurable {
 			style.reset();
 		}
 		inspect.set(ConfigValues.boolValue(json, "inspect", true));
+		scale.set(ConfigValues.intValue(json, "scale", 100));
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		json.addProperty("style", styleId());
 		json.addProperty("inspect", inspect.value());
+		json.addProperty("scale", scale.get());
 	}
 }

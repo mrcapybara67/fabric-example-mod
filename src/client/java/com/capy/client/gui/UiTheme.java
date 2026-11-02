@@ -20,6 +20,8 @@ import java.util.Map;
  *     <li>{@code sakura_deep} — darker canvas and a hotter pink, for players
  *         who want maximum contrast against a bright world.</li>
  *     <li>{@code sakura_blush} — softer, lighter and pinker, a calmer sheet.</li>
+ *     <li>{@code liquid_glass} — cold blue glass and an ice accent: the second
+ *         family, picked with the same picker.</li>
  *   </ul>
  *
  * Colours are plain ARGB ints so they can be blended and alpha-scaled without
@@ -162,10 +164,50 @@ public final class UiTheme {
 			0xFF401327
 	);
 
+	/**
+	 * Liquid Glass: a cool, translucent sheet with an ice blue accent.
+	 *
+	 * <p>The second family rather than another shade of Sakura. Where Sakura is
+	 * warm plum paper, this is cold glass: darker, bluer surfaces with a tighter
+	 * value range - so the hairlines and the accent do the separating - and an
+	 * accent that reads as light rather than as ink. The text tokens stay near
+	 * white because a glass sheet is read through, not on.
+	 */
+	private static final Palette LIQUID_GLASS = new Palette(
+			"liquid_glass",
+			"Liquid Glass",
+			0x8C06101A,
+			0xFF1B2430,
+			0xFF111A24,
+			0xFF23303D,
+			0xFF1A2531,
+			0xFF2B3A49,
+			0xFF2A3846,
+			0xFF1F2B38,
+			0xFF37495C,
+			0xFF2A3948,
+			0xFF18232E,
+			0xFF131C26,
+			0xFF212E3B,
+			0xFF19242F,
+			0xFF41566D,
+			0xFF7CD8FF,
+			0xFFBFEBFF,
+			0xFF2F9BC8,
+			0x337CD8FF,
+			0xFFD6F4FF,
+			0xFFEFFBFF,
+			0xFFF2F8FF,
+			0xFFB3C4D6,
+			0xFF93A5B9,
+			0xFF8599AD,
+			0xFF06222E
+	);
+
 	private static final Map<String, Palette> PALETTES = new LinkedHashMap<>();
 
 	static {
-		for (Palette palette : List.of(SAKURA, SAKURA_DEEP, SAKURA_BLUSH)) {
+		for (Palette palette : List.of(SAKURA, SAKURA_DEEP, SAKURA_BLUSH, LIQUID_GLASS)) {
 			PALETTES.put(palette.id(), palette);
 		}
 	}

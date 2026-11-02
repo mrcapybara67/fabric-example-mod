@@ -64,6 +64,16 @@ public final class AmethystFinderModule extends EspModule {
 	private static final double INFLATE = 0.003;
 	/** Growth on a geode box, so it reads as a region and not as a block. */
 	private static final double GEODE_INFLATE = 0.15;
+	/**
+	 * How close two clusters have to be to count as the same geode.
+	 *
+	 * <p>A geode is about fifteen blocks across, so its clusters regularly sit
+	 * either side of the sixteen block cell they used to be counted in. Counting
+	 * per cell split such a geode in half and a threshold of three was then
+	 * reached on neither side - a geode full of clusters that the finder never
+	 * reported. Groups are merged by distance instead of by cell.
+	 */
+	private static final double MERGE_GAP = 8.0;
 	/** How far out clusters are counted. See the class documentation. */
 	private static final int BYPASS_RADIUS = 24;
 	/** Most geodes remembered for the chat line before the memory is dropped. */
@@ -210,8 +220,30 @@ public final class AmethystFinderModule extends EspModule {
 		});
 
 		int need = Math.max(3, Math.min(5, threshold.get()));
-		for (Map.Entry<Long, List<BlockPos>> entry : found.entrySet()) {
-			List<BlockPos> clusters = entry.getValue();
+		// Merge the per-cell buckets into one group per geode, by proximity.
+		List<List<BlockPos>> groups = new ArrayList<>();
+		List<AABB> groupBounds = new ArrayList<>();
+		for (List<BlockPos> clusters : found.values()) {
+			for (BlockPos pos : clusters) {
+				AABB box = new AABB(pos);
+				int join = -1;
+				for (int i = 0; i < groupBounds.size(); i++) {
+					if (groupBounds.get(i).inflate(MERGE_GAP).intersects(box)) {
+						join = i;
+						break;
+					}
+				}
+				if (join < 0) {
+					groups.add(new ArrayList<>());
+					groupBounds.add(box);
+					groups.get(groups.size() - 1).add(pos);
+				} else {
+					groups.get(join).add(pos);
+					groupBounds.set(join, groupBounds.get(join).minmax(box));
+				}
+			}
+		}
+		for (List<BlockPos> clusters : groups) {
 			if (showCluster.value()) {
 				for (BlockPos pos : clusters) {
 					if (scratch.size() >= MAX_BOXES) {
@@ -227,7 +259,7 @@ public final class AmethystFinderModule extends EspModule {
 			scratchGeodes.add(geode);
 			scratch.add(geode);
 			if (announce.value()) {
-				announce(entry.getKey(), geode);
+				announce(cellKeyOf(geode), geode);
 			}
 		}
 		publish();
@@ -281,6 +313,14 @@ public final class AmethystFinderModule extends EspModule {
 			return new AABB(0, 0, 0, 0, 0, 0);
 		}
 		return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+	}
+
+	/** The cell key of a geode box, used only to remember what was announced. */
+	private static long cellKeyOf(AABB geode) {
+		return cellKey(BlockPos.containing(
+				(geode.minX + geode.maxX) * 0.5,
+				(geode.minY + geode.maxY) * 0.5,
+				(geode.minZ + geode.maxZ) * 0.5));
 	}
 
 	/**

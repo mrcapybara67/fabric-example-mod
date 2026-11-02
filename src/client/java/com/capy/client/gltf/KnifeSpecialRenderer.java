@@ -40,8 +40,15 @@ import java.util.function.Consumer;
 public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpecialRenderer.Knife> {
 	public static final KnifeSpecialRenderer INSTANCE = new KnifeSpecialRenderer();
 
-	/** Everything needed to draw one held knife. */
-	public record Knife(String style, String material, List<GltfMesh> meshes) {
+	/**
+	 * Everything needed to draw one held knife.
+	 *
+	 * <p>{@code scale} is the user's size multiplier, applied where the mesh is
+	 * converted into block space. It exists because a hand authored mesh cannot
+	 * be made to fit every hand and every GUI scale at once, and a player who
+	 * finds the knife too large should be able to fix it without a rebuild.
+	 */
+	public record Knife(String style, String material, List<GltfMesh> meshes, float scale) {
 	}
 
 	private KnifeSpecialRenderer() {
@@ -49,7 +56,7 @@ public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpe
 
 	/** Attaches a drawn knife to a render state. False when it cannot be drawn. */
 	public static boolean attach(ItemStackRenderState state, ItemDisplayContext context,
-			String style, String material, List<GltfMesh> meshes) {
+			String style, String material, List<GltfMesh> meshes, float scale) {
 		if (state == null || meshes == null || meshes.isEmpty()) {
 			return false;
 		}
@@ -58,7 +65,8 @@ public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpe
 		// one would be a crash rather than a default.
 		layer.setTransform(transformFor(context, style));
 		layer.setUsesBlockLight(false);
-		layer.setupSpecialModel(INSTANCE, new Knife(style, material, meshes));
+		layer.setupSpecialModel(INSTANCE, new Knife(style, material, meshes,
+				scale > 0f && Float.isFinite(scale) ? scale : 1f));
 		return true;
 	}
 
@@ -80,8 +88,9 @@ public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpe
 			// authored at, 0..1. Without this division a knife is drawn sixteen
 			// times life size - a wall of blade in first person and an item far too
 			// large to fit its hotbar slot, which is exactly how it looked.
+			float sizing = knife.scale() / 16.0f;
 			pose.pushPose();
-			pose.scale(1.0f / 16.0f, 1.0f / 16.0f, 1.0f / 16.0f);
+			pose.scale(sizing, sizing, sizing);
 			GltfRenderer.render(knife.meshes(), knife.style(), knife.material(), pose, collector, light, overlay);
 			pose.popPose();
 		} catch (Throwable failure) {
@@ -128,7 +137,8 @@ public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpe
 		}
 		String style = module.styleId();
 		List<GltfMesh> meshes = GltfCache.get(style, mc.getResourceManager());
-		return meshes.isEmpty() ? null : new Knife(style, CustomKnifeModule.materialOf(stack), meshes);
+		return meshes.isEmpty() ? null
+				: new Knife(style, CustomKnifeModule.materialOf(stack), meshes, module.scaleValue());
 	}
 
 	/**

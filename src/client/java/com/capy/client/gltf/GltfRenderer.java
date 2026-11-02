@@ -2,6 +2,7 @@ package com.capy.client.gltf;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
@@ -35,6 +36,16 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class GltfRenderer {
 	/** Built render layers, keyed by texture. */
 	private static final Map<Identifier, RenderType> LAYERS = new ConcurrentHashMap<>();
+
+	/**
+	 * What a part is drawn with when its own sheet is not installed.
+	 *
+	 * <p>A render layer whose texture is missing is drawn with the magenta and
+	 * black checker, so one wrong path - or one sheet a pack override removed -
+	 * turns the whole knife into that checker. A plain steel texture is always
+	 * present and always readable, so the knife keeps its silhouette.
+	 */
+	private static final Identifier FALLBACK = Identifier.withDefaultNamespace("textures/block/iron_block.png");
 
 	/**
 	 * The finish each style is built in: the guard, the collar and the small
@@ -117,9 +128,31 @@ public final class GltfRenderer {
 		if (cached != null) {
 			return cached;
 		}
-		RenderType created = RenderTypes.entityCutoutNoCull(texture);
+		RenderType created = RenderTypes.entityCutoutNoCull(installed(texture) ? texture : FALLBACK);
 		RenderType raced = LAYERS.putIfAbsent(texture, created);
 		return raced != null ? raced : created;
+	}
+
+  	/**
+	 * True when the texture is actually in the loaded packs.
+	 *
+	 * <p>Only asked once per texture, because the answer is cached with the
+	 * layer. A resource manager that is not ready answers "present": the
+	 * alternative is a first frame that quietly switches every knife to steel.
+	 */
+	private static boolean installed(Identifier texture) {
+		try {
+			Minecraft mc = Minecraft.getInstance();
+			var manager = mc == null ? null : mc.getResourceManager();
+			if (manager == null) {
+				return true;
+			}
+			Identifier file = Identifier.fromNamespaceAndPath(texture.getNamespace(),
+					"textures/" + texture.getPath() + ".png");
+			return manager.getResource(file).isPresent();
+		} catch (Throwable ignored) {
+			return true;
+		}
 	}
 
 	private static void draw(PoseStack.Pose pose, VertexConsumer vertices, GltfMesh mesh,
