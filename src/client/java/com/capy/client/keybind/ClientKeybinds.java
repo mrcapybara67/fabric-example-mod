@@ -33,9 +33,11 @@ public final class ClientKeybinds {
 	/** Translation key of the binding. */
 	private static final String OPEN_GUI_KEY = "key.capy.open_gui";
 	private static final String INSPECT_KEY = "key.capy.inspect_knife";
+	private static final String HUD_EDITOR_KEY = "key.capy.hud_editor";
 
 	private static KeyMapping openClickGui;
 	private static KeyMapping inspectKnife;
+	private static KeyMapping hudEditor;
 
 	/** Ticks left to keep trying to hand input back; negative means idle. */
 	private static int restoreTicks = -1;
@@ -57,6 +59,12 @@ public final class ClientKeybinds {
 				INSPECT_KEY,
 				InputConstants.Type.KEYSYM,
 				GLFW.GLFW_KEY_C,
+				category
+		));
+		hudEditor = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+				HUD_EDITOR_KEY,
+				InputConstants.Type.KEYSYM,
+				GLFW.GLFW_KEY_H,
 				category
 		));
 	}
@@ -85,6 +93,25 @@ public final class ClientKeybinds {
 			clicked = true;
 		}
 		return clicked;
+	}
+
+	/**
+	 * True on the tick after the HUD editor key was pressed.
+	 *
+	 * <p>Drained even when it is ignored for the same reason as the others: a
+	 * press made while a screen was open must not open the editor later.</p>
+	 */
+	public static boolean consumeHudEditorClick() {
+		boolean clicked = false;
+		while (hudEditor != null && hudEditor.consumeClick()) {
+			clicked = true;
+		}
+		return clicked;
+	}
+
+	/** The HUD editor binding, so the editor can show the current key. */
+	public static KeyMapping hudEditor() {
+		return hudEditor;
 	}
 
 	/**

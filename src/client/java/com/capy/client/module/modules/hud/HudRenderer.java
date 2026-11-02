@@ -13,13 +13,22 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 
 /**
- * Draws every enabled HUD element.
+ * Draws every enabled HUD element, and lays them out for the editor.
  *
  * <p>All elements share one chip: a glass plate with an accent bar, a muted
  * label and a bright value. Sharing the geometry is what keeps the HUD aligned
  * - the label and the value are centred in the same box, so they sit on the
  * same line whatever the two fonts resolve to, and every chip is the same
  * height no matter which readout it holds.</p>
+ *
+ * <h2>One layout, two readers</h2>
+ * The position of a chip is computed once per frame by {@link #prepare} and then
+ * read by whoever needs it: the renderer to draw it, and the drag editor to draw
+ * a handle around it and to work out where the pointer moved it to. That is the
+ * reason the layout is public and the drawing is not - an editor with its own
+ * copy of the arrangement maths would drift from the real thing the first time
+ * either changed, and a handle that is two pixels off the chip it moves is worse
+ * than no editor at all.
  *
  * <h2>The drawing</h2>
  * A chip is built from the same four steps as every other surface in the
@@ -38,12 +47,6 @@ import net.minecraft.client.gui.GuiGraphics;
  * <p>Everything is drawn on whole pixels and every corner radius comes from the
  * shared scale, so at a 4K window the plate is an exact rectangle rather than a
  * blurry one, and the text sits on the pixel grid its font expects.</p>
- *
- * <h2>Placement</h2>
- * The grid is a nine cell anchor. Elements in the same cell stack downwards in
- * registration order, so turning on more readouts can never stack two of them
- * on top of each other. Each chip then applies its own pixel nudge, which is how
- * a player moves one chip without disturbing the rest of the column.
  */
 public final class HudRenderer {
 	private static final UiType TYPE = new McType();
@@ -67,6 +70,8 @@ public final class HudRenderer {
 	private static String[] scratchValues = new String[16];
 	private static String[] scratchLabels = new String[16];
 	private static int[] scratchWidths = new int[16];
+	private static int[] scratchBaseX = new int[16];
+	private static int[] scratchBaseY = new int[16];
 	private static int scratchSize;
 
 	private HudRenderer() {
@@ -80,18 +85,40 @@ public final class HudRenderer {
 		}
 		UiText regular = TYPE.regular();
 		UiText medium = TYPE.medium();
-		gather(mc, regular, medium);
+		prepare(mc, screenW, screenH, regular, medium);
 		if (scratchSize == 0) {
 			return;
 		}
 		UiCanvas canvas = McCanvas.of(graphics);
-		for (int anchor = 0; anchor < CELLS; anchor++) {
-			renderCell(canvas, regular, medium, anchor, screenW, screenH);
+		float sheen = sheenPhase();
+		for (int i = 0; i < scratchSize; i++) {
+			HudElementModule hud = scratchModules[i];
+			drawChip(canvas, regular, medium, scratchLabels[i], scratchValues[i],
+					scratchBaseX[i] + hud.offsetX(), scratchBaseY[i] + hud.offsetY(),
+					scratchWidths[i], hud, sheen);
 		}
 	}
 
-	/** Collects the enabled elements, their values and their widths. */
-	private static void gather(Minecraft mc, UiText regular, UiText medium) {
+	// ----------------------------------------------------------------- layout
+
+	/** Lays out the enabled chips for the current frame, using the shared fonts. */
+	public static void prepare(int screenW, int screenH) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null) {
+			scratchSize = 0;
+			return;
+		}
+		UiText regular = TYPE.regular();
+		prepare(mc, screenW, screenH, regular, TYPE.medium());
+	}
+
+	/**
+	 * Gathers the enabled elements, measures them and gives each one its cell
+	 * position. The offsets are deliberately <em>not</em> applied here: the
+	 * editor needs the base position to compute a new offset from, and the
+	 * renderer adds the offset when it draws.
+	 */
+	private static void prepare(Minecraft mc, int screenW, int screenH, UiText regular, UiText medium) {
 		scratchSize = 0;
 		for (Module module : ModuleManager.get().modules()) {
 			if (!(module instanceof HudElementModule hud) || !hud.isEnabled()) {
@@ -109,6 +136,40 @@ public final class HudRenderer {
 					scratchValues[scratchSize], hud.accentBarVisible());
 			scratchSize++;
 		}
+		if (scratchSize == 0) {
+			return;
+		}
+		// One cell at a time: the column is the anchor modulo three, the row is
+		// the anchor divided by three, and the chips of a cell stack downwards
+		// from the edge that cell belongs to.
+		for (int anchor = 0; anchor < CELLS; anchor++) {
+			int count = 0;
+			int totalH = 0;
+			for (int i = 0; i < scratchSize; i++) {
+				if (scratchModules[i].anchor() != anchor) {
+					continue;
+				}
+				count++;
+				totalH += CHIP_H + GAP;
+			}
+			if (count == 0) {
+				continue;
+			}
+			totalH -= GAP;
+			int column = anchor % 3;
+			int row = anchor / 3;
+			int y = row == 0 ? MARGIN : row == 1 ? (screenH - totalH) / 2 : screenH - MARGIN - totalH;
+			for (int i = 0; i < scratchSize; i++) {
+				if (scratchModules[i].anchor() != anchor) {
+					continue;
+				}
+				int w = scratchWidths[i];
+				scratchBaseX[i] = column == 0 ? MARGIN
+						: column == 1 ? (screenW - w) / 2 : screenW - MARGIN - w;
+				scratchBaseY[i] = y;
+				y += CHIP_H + GAP;
+			}
+		}
 	}
 
 	private static void grow() {
@@ -117,6 +178,46 @@ public final class HudRenderer {
 		scratchValues = java.util.Arrays.copyOf(scratchValues, size);
 		scratchLabels = java.util.Arrays.copyOf(scratchLabels, size);
 		scratchWidths = java.util.Arrays.copyOf(scratchWidths, size);
+		scratchBaseX = java.util.Arrays.copyOf(scratchBaseX, size);
+		scratchBaseY = java.util.Arrays.copyOf(scratchBaseY, size);
+	}
+
+	// ------------------------------------------------------- layout readings
+
+	/** How many chips the last {@link #prepare} laid out. */
+	public static int slotCount() {
+		return scratchSize;
+	}
+
+	/** The module behind a laid out chip. */
+	public static HudElementModule slotModule(int index) {
+		return scratchModules[index];
+	}
+
+	/** The chip's cell position, before its own nudge. */
+	public static int slotBaseX(int index) {
+		return scratchBaseX[index];
+	}
+
+	public static int slotBaseY(int index) {
+		return scratchBaseY[index];
+	}
+
+	/** Where the chip is actually drawn, nudge included. */
+	public static int slotX(int index) {
+		return scratchBaseX[index] + scratchModules[index].offsetX();
+	}
+
+	public static int slotY(int index) {
+		return scratchBaseY[index] + scratchModules[index].offsetY();
+	}
+
+	public static int slotWidth(int index) {
+		return scratchWidths[index];
+	}
+
+	public static int chipHeight() {
+		return CHIP_H;
 	}
 
 	private static int chipWidth(UiText regular, UiText medium, String label, String value,
@@ -131,54 +232,7 @@ public final class HudRenderer {
 		return width + medium.width(value);
 	}
 
-	private static void renderCell(UiCanvas c, UiText regular, UiText medium, int anchor,
-			int screenW, int screenH) {
-		int count = 0;
-		int totalH = 0;
-		for (int i = 0; i < scratchSize; i++) {
-			if (scratchModules[i].anchor() != anchor) {
-				continue;
-			}
-			count++;
-			totalH += CHIP_H + GAP;
-		}
-		if (count == 0) {
-			return;
-		}
-		totalH -= GAP;
-
-		int column = anchor % 3;
-		int row = anchor / 3;
-		int baseY;
-		if (row == 0) {
-			baseY = MARGIN;
-		} else if (row == 1) {
-			baseY = (screenH - totalH) / 2;
-		} else {
-			baseY = screenH - MARGIN - totalH;
-		}
-
-		float sheen = sheenPhase();
-		int y = baseY;
-		for (int i = 0; i < scratchSize; i++) {
-			HudElementModule hud = scratchModules[i];
-			if (hud.anchor() != anchor) {
-				continue;
-			}
-			int w = scratchWidths[i];
-			int x;
-			if (column == 0) {
-				x = MARGIN;
-			} else if (column == 1) {
-				x = (screenW - w) / 2;
-			} else {
-				x = screenW - MARGIN - w;
-			}
-			drawChip(c, regular, medium, scratchLabels[i], scratchValues[i],
-					x + hud.offsetX(), y + hud.offsetY(), w, hud, sheen);
-			y += CHIP_H + GAP;
-		}
-	}
+	// ---------------------------------------------------------------- drawing
 
 	/** Draws one chip: shadow, glass plate, hairline, accent bar, text. */
 	private static void drawChip(UiCanvas c, UiText regular, UiText medium, String label,

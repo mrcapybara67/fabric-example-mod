@@ -2,6 +2,7 @@
 	"capy.gui.title": "Capy Client",
 	"key.capy.open_gui": "Open Capy GUI",
 	"key.capy.inspect_knife": "Inspect Knife",
+	"key.capy.hud_editor": "HUD Editor",
 	"key.category.capy.keybind": "Capy Keybind",
 	"capy.module.swing_speed.name": "Swing Speed",
 	"capy.module.swing_speed.desc": "Retimes the first person swing animation, faster or slower. Attack and mining speed untouched.",

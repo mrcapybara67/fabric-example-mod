@@ -110,6 +110,24 @@ public abstract class HudElementModule extends Module implements Configurable {
 		return offsetY.get();
 	}
 
+	/**
+	 * Moves the chip to a nudge, clamped to the slider's range.
+	 *
+	 * <p>The drag editor writes through this rather than through the setting, so
+	 * the clamp lives in one place: a drag that leaves the window would otherwise
+	 * store a value the setting refuses, and the chip would snap back to where it
+	 * was on the next frame while the pointer kept moving.</p>
+	 */
+	public void moveTo(int x, int y) {
+		offsetX.set(clamp(x, -MAX_NUDGE, MAX_NUDGE));
+		offsetY.set(clamp(y, -MAX_NUDGE, MAX_NUDGE));
+	}
+
+	/** Puts the chip back on its cell. */
+	public void resetPosition() {
+		moveTo(0, 0);
+	}
+
 	public int defaultAnchor() {
 		return defaultAnchor;
 	}

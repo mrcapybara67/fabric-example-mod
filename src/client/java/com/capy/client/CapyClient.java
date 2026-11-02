@@ -3,6 +3,7 @@ package com.capy.client;
 import com.capy.client.config.ClientConfig;
 import com.capy.client.gui.ClickGuiScreen;
 import com.capy.client.gui.GuiColors;
+import com.capy.client.gui.HudEditorScreen;
 import com.capy.client.gui.UiFonts;
 import com.capy.client.gltf.GltfReloadListener;
 import com.capy.client.gui.UiTheme;
@@ -132,6 +133,13 @@ public class CapyClient implements ClientModInitializer {
 			Guard.run("input restore", () -> ClientKeybinds.tickInputRestore(client));
 			// The inspect key is drained every tick for the same reason, and
 			// only acted on while the player is actually in the world.
+			// The HUD editor key. It opens over the world rather than as a page in
+			// the click GUI, because placing a chip needs the scene behind it: the
+			// whole question is whether the readout is readable there.
+			boolean editHud = ClientKeybinds.consumeHudEditorClick();
+			if (editHud && client.screen == null && client.player != null) {
+				client.setScreen(new HudEditorScreen());
+			}
 			boolean inspect = ClientKeybinds.consumeInspectClick();
 			if (inspect && client.screen == null) {
 				CustomKnifeModule knife = modules.get(CustomKnifeModule.class);
