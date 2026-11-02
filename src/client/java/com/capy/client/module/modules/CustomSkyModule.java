@@ -124,6 +124,18 @@ public class CustomSkyModule extends Module implements Configurable {
 	private float viewYaw;
 	private float viewPitch;
 	/**
+	 * How far a layer drawn in screen space has to be moved down the frame
+	 * because the player looked up, in pixels.
+	 *
+	 * <p>A sky is not a wallpaper: looking up moves the terrain down the screen,
+	 * and anything painted on the sky has to move with it. Stars, dust and the
+	 * aurora have no bearing of their own to project - they are a field - so the
+	 * whole field is slid by this much instead. Without it they kept their
+	 * screen height at every pitch, which is what makes a theme look pinned to
+	 * the crosshair.</p>
+	 */
+	private float skyPitch;
+	/**
 	 * The heading the current theme was switched on at.
 	 *
 	 * Sky bodies are placed relative to this, and it is a fixed bearing of the
@@ -204,6 +216,12 @@ public class CustomSkyModule extends Module implements Configurable {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.level == null || mc.player == null) {
 			return;
+		}
+		// The toggle drops the source while this listener is still registered
+		// for one more frame; a batch whose builder was closed writes into freed
+		// memory, so the pair is reset instead of reused.
+		if (batch != null && buffer == null) {
+			dropBatch();
 		}
 		int index = theme.index();
 		if (index == VANILLA) {
@@ -308,6 +326,10 @@ public class CustomSkyModule extends Module implements Configurable {
 		fwdZ = axis.z;
 		tanHalfV = (float) Math.tan(Math.toRadians(fov * 0.5));
 		tanHalfH = tanHalfV * (float) aspect;
+		// Pitch to pixels, through the same tangent the frame is projected with.
+		// The camera reports a negative pitch when it looks up, and looking up
+		// has to send the sky down, so the sign is reversed here.
+		skyPitch = -viewPitch * (frameH * 0.5f) / Math.max(0.02f, tanHalfV) * 0.0174533f;
 
 		try {
 			// A fresh stack, deliberately not the world's.
@@ -320,6 +342,12 @@ public class CustomSkyModule extends Module implements Configurable {
 			// sky is black". Starting from identity and cancelling only the model
 			// view puts the vertices in camera space, which is what a sky wants.
 			Matrix4f inverse = new Matrix4f(RenderSystem.getModelViewMatrix()).invert();
+			if (!finite(inverse)) {
+				// A singular view has no inverse, and JOML answers with a matrix of
+				// NaN - which blanks the whole sky. The camera's own rotation is
+				// what the view is in the normal frame, so it is used instead.
+				inverse = new Matrix4f().rotation(new org.joml.Quaternionf(rotation).conjugate());
+			}
 			PoseStack stack = new PoseStack();
 			stack.last().pose().mul(inverse);
 
@@ -400,6 +428,18 @@ public class CustomSkyModule extends Module implements Configurable {
 		return skyPoint;
 	}
 
+	/** True when every element of a matrix is a real number. */
+	private static boolean finite(Matrix4f matrix) {
+		return Float.isFinite(matrix.m00()) && Float.isFinite(matrix.m01())
+				&& Float.isFinite(matrix.m02()) && Float.isFinite(matrix.m03())
+				&& Float.isFinite(matrix.m10()) && Float.isFinite(matrix.m11())
+				&& Float.isFinite(matrix.m12()) && Float.isFinite(matrix.m13())
+				&& Float.isFinite(matrix.m20()) && Float.isFinite(matrix.m21())
+				&& Float.isFinite(matrix.m22()) && Float.isFinite(matrix.m23())
+				&& Float.isFinite(matrix.m30()) && Float.isFinite(matrix.m31())
+				&& Float.isFinite(matrix.m32()) && Float.isFinite(matrix.m33());
+	}
+
 	/** Keeps a projected body near enough to be drawn, never at infinity. */
 	private float clampSkyY(float y) {
 		float limit = frameH * 4f;
@@ -454,8 +494,12 @@ public class CustomSkyModule extends Module implements Configurable {
 			if (FogRendererAccessor.capy$fogEnabled()) {
 				FogRendererAccessor.capy$setFogEnabled(false);
 			}
-		} catch (RuntimeException | LinkageError e) {
+		} catch (Throwable e) {
+			// The accessor is a mixin. Before it applies - or if it never does -
+			// reading the field throws an {@link AssertionError}, which is not a
+			// RuntimeException: leaving it uncaught took the whole frame down.
 			fogHeld = false;
+			com.capy.client.util.Guard.report("capy sky fog", e);
 		}
 	}
 
@@ -466,8 +510,9 @@ public class CustomSkyModule extends Module implements Configurable {
 		fogHeld = false;
 		try {
 			FogRendererAccessor.capy$setFogEnabled(fogWasEnabled);
-		} catch (RuntimeException | LinkageError e) {
+		} catch (Throwable e) {
 			// Nothing to restore through; vanilla keeps whatever state it has.
+			com.capy.client.util.Guard.report("capy sky fog release", e);
 		}
 	}
 
@@ -784,6 +829,13 @@ public class CustomSkyModule extends Module implements Configurable {
 		if (x < 0f) {
 			x += frameW;
 		}
+		// And vertically: the field is a tile, so it wraps rather than running
+		// out of stars when the view swings past the edge of it.
+		y += skyPitch;
+		y = y % frameH;
+		if (y < 0f) {
+			y += frameH;
+		}
 		float magnitude = noise(seed, 207);
 		float size = Math.max(1f, u * (0.7f + magnitude * magnitude * 4.0f));
 		float twinkle = 0.55f + 0.45f
@@ -894,7 +946,9 @@ public class CustomSkyModule extends Module implements Configurable {
 		float anchor = skyX(skyOriginYaw) - w * 0.5f;
 		for (int band = 0; band < hems.length; band++) {
 			int hem = hems[band];
-			float baseY = h * (0.34f + band * 0.070f);
+			// The curtain hangs over the horizon, so it moves down the frame as
+			// the player looks up - the same travel the terrain makes.
+			float baseY = h * (0.34f + band * 0.070f) + skyPitch;
 			float amplitude = h * (0.052f + band * 0.004f);
 			float height = h * (0.24f - band * 0.028f);
 			float depth = 1f - band * 0.16f;
@@ -950,7 +1004,9 @@ public class CustomSkyModule extends Module implements Configurable {
 	private void sunset(Canvas c, float w, float h, float alpha) {
 		float u = h / 1080f;
 		float base = Math.min(w, h);
-		float horizon = h * 0.695f;
+		// The horizon is a place in the world, not a line on the screen: it sinks
+		// as the view rises.
+		float horizon = h * 0.695f + skyPitch;
 		float sea = h - horizon;
 
 		c.gradient(0f, 0f, w, horizon,
@@ -1255,7 +1311,7 @@ public class CustomSkyModule extends Module implements Configurable {
 	private void vaporwave(Canvas c, float w, float h, float alpha) {
 		float base = Math.min(w, h);
 		float u = h / 1080f;
-		float horizon = h * 0.62f;
+		float horizon = h * 0.62f + skyPitch;
 
 		c.gradient(0f, 0f, w, horizon,
 				a(0xFF12002A, alpha), a(0xFF2E0040, alpha), a(0xFF5C0057, alpha),

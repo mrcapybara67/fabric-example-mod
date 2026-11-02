@@ -51,6 +51,17 @@ public final class EspRenderTypes {
 		throughQuads = null;
 	}
 
+	/**
+	 * True once the see-through types were abandoned for this session.
+	 *
+	 * <p>The renderer keeps a buffer source of its own, and a source whose
+	 * layers were built from a pipeline that no longer exists can never be
+	 * flushed cleanly: the caller has to throw it away before drawing again.</p>
+	 */
+	public static boolean unavailable() {
+		return unavailable;
+	}
+
 	/** Outline lines, always without a depth test. */
 	public static RenderType lines() {
 		if (unavailable) {

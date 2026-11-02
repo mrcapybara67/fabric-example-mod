@@ -159,6 +159,13 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 		if (!isEnabled() || activeAnimations.isEmpty()) {
 			return;
 		}
+		// Switching the module off drops the source, but this listener stays
+		// registered for one more frame. A batch whose builder has already been
+		// closed would write into freed native memory, so a half dropped pair is
+		// reset before anything is drawn.
+		if (batch != null && buffer == null) {
+			dropBatch();
+		}
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.level == null || mc.player == null) {
 			return;

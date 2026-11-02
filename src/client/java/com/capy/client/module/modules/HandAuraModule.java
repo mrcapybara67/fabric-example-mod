@@ -125,16 +125,26 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 
 		float w = graphics.guiWidth();
 		float h = graphics.guiHeight();
-		float sizeValue = (float) size.real();
-		float halfW = w * 0.085f * sizeValue;
-		float halfH = h * 0.155f * sizeValue;
+		// The slider is a percentage of the default frame, not a multiplier of
+		// it: at its old reading, the default value of 10 made the frame 8.5
+		// screen widths across and pushed both hands off the display entirely.
+		// Dividing by the default keeps existing saved values meaning what they
+		// meant (10 is the frame described below) and lets the slider run from
+		// half to two and a half times that.
+		float scale = (float) size.real() / 10f;
+		float halfW = w * 0.046f * scale;
+		float halfH = h * 0.088f * scale;
 		UiCanvas canvas = McCanvas.of(graphics);
 
+		// The hand positions are the item renderer's own: the first person item
+		// sits low and towards the middle of the lower half of the screen, well
+		// inside the hotbar row, and the off hand mirrors it. The frame is
+		// centred on the middle of the item, not on the whole hand arc.
 		if (mainhand.value() && !mc.player.getMainHandItem().isEmpty()) {
-			drawHand(canvas, w * 0.695f, h * 0.76f, halfW, halfH, mainColor.argb(), mainFlash);
+			drawHand(canvas, w * 0.74f, h * 0.81f, halfW, halfH, mainColor.argb(), mainFlash);
 		}
 		if (offhand.value() && !mc.player.getOffhandItem().isEmpty()) {
-			drawHand(canvas, w * 0.305f, h * 0.76f, halfW, halfH, offColor.argb(), offFlash);
+			drawHand(canvas, w * 0.26f, h * 0.81f, halfW, halfH, offColor.argb(), offFlash);
 		}
 	}
 
@@ -154,8 +164,13 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 		}
 
 		int t = Math.max(1, Math.round((float) thickness.real()));
-		int armX = Math.max(t, Math.round(halfW * 2f * (float) length.real()));
-		int armY = Math.max(t, Math.round(halfH * 2f * (float) length.real()));
+		// Length is the share of an edge an arm covers, in percent. The old
+		// reading multiplied the edge by the slider value itself, so the default
+		// of 25 drew arms twenty-five times longer than the frame and the two
+		// top arms met in the middle of the screen.
+		float armShare = Math.max(0.02f, Math.min(0.5f, (float) length.real() * 0.01f));
+		int armX = Math.max(t, Math.round(halfW * 2f * armShare));
+		int armY = Math.max(t, Math.round(halfH * 2f * armShare));
 		int x0 = Math.round(cx - halfW);
 		int x1 = Math.round(cx + halfW);
 		int y0 = Math.round(cy - halfH);

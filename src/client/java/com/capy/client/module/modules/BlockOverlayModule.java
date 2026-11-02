@@ -84,6 +84,12 @@ public class BlockOverlayModule extends Module implements Configurable {
 		if (!isEnabled()) {
 			return;
 		}
+		// The toggle drops the source while this listener is still registered
+		// for one more frame. Writing into a batch whose builder has been closed
+		// is a native crash, so the pair is reset instead of reused.
+		if (batch != null && buffer == null) {
+			dropBatch();
+		}
 		Minecraft mc = Minecraft.getInstance();
 		// The F1 key hides vanilla's own block outline; an overlay that kept
 		// drawing through it would be the one thing left on a clean screen.

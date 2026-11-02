@@ -202,7 +202,7 @@ public final class PacketSignals {
 	}
 
 	public static void onPlayerInfoUpdate(ClientboundPlayerInfoUpdatePacket packet) {
-		if (!clientThread()) {
+		if (!playersReady()) {
 			return;
 		}
 		var actions = packet.actions();
@@ -224,7 +224,7 @@ public final class PacketSignals {
 	}
 
 	public static void onPlayerInfoRemove(ClientboundPlayerInfoRemovePacket packet) {
-		if (!clientThread()) {
+		if (!playersReady()) {
 			return;
 		}
 		Minecraft mc = Minecraft.getInstance();
@@ -418,6 +418,19 @@ public final class PacketSignals {
 	private static boolean clientThread() {
 		Minecraft mc = Minecraft.getInstance();
 		return mc != null && mc.isSameThread();
+	}
+
+	/**
+	 * True when the tab list can be read.
+	 *
+	 * <p>Player info is the first thing a server sends, so these handlers can
+	 * run before the client has a world, a player or even a connection object.
+	 * Ask the client a question in that window and it answers with a null
+	 * pointer, which is a crash on join rather than a missing alert.</p>
+	 */
+	private static boolean playersReady() {
+		Minecraft mc = Minecraft.getInstance();
+		return mc != null && mc.isSameThread() && mc.getConnection() != null && mc.player != null;
 	}
 
 	private static long now() {

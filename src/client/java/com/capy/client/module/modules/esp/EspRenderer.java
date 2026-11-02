@@ -128,6 +128,13 @@ public final class EspRenderer {
 		if (ACTIVE.isEmpty()) {
 			return;
 		}
+		// A pipeline that was abandoned mid-session cannot be drawn through any
+		// more. Whatever is still queued belongs to render types that no longer
+		// exist, so it is flushed and freed here rather than reused: a stale
+		// builder is what turns one failed draw into a crash on the next frame.
+		if (EspRenderTypes.unavailable() && batch != null) {
+			discard();
+		}
 
 		try {
 			Vec3 camera = mc.gameRenderer.getMainCamera().position();
@@ -185,27 +192,7 @@ public final class EspRenderer {
 			// A throw can leave the shared builder half filled. Flush it (or
 			// drop it if even the flush fails) so the next frame starts from a
 			// clean source instead of inheriting a broken buffer.
-			if (batch != null) {
-				try {
-					batch.endBatch();
-				} catch (RuntimeException ignored) {
-					// The buffer is already unusable; it is freed below and a
-					// fresh one is created next frame.
-				}
-				batch = null;
-			}
-			// Dropping the builder without closing it leaks the native memory
-			// it holds - and the retry above runs once per frame for as long as
-			// the failure lasts, so the leak would be megabytes a second rather
-			// than a one-off.
-			if (buffer != null) {
-				try {
-					buffer.close();
-				} catch (RuntimeException ignored) {
-					// Nothing useful to do: the reference is dropped either way.
-				}
-				buffer = null;
-			}
+			discard();
 			if (!throughFailed) {
 				throughFailed = true;
 				EspRenderTypes.disable();
@@ -293,6 +280,33 @@ public final class EspRenderer {
 				}
 				batches.endBatch();
 			}
+		}
+	}
+
+	/**
+	 * Flushes the current source as far as it will go, then frees it.
+	 *
+	 * <p>Both halves matter. A half written buffer must not be drawn into
+	 * again, and the builder behind it holds native memory that is only
+	 * returned when it is closed - so a failure that repeats every frame would
+	 * leak megabytes a second if it were merely dereferenced.</p>
+	 */
+	private static void discard() {
+		if (batch != null) {
+			try {
+				batch.endBatch();
+			} catch (RuntimeException | LinkageError ignored) {
+				// The source is already unusable; it is dropped either way.
+			}
+			batch = null;
+		}
+		if (buffer != null) {
+			try {
+				buffer.close();
+			} catch (RuntimeException | LinkageError ignored) {
+				// Nothing left to release.
+			}
+			buffer = null;
 		}
 	}
 
