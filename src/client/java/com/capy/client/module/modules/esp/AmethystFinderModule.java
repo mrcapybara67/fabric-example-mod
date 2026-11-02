@@ -189,7 +189,12 @@ public final class AmethystFinderModule extends EspModule {
 					}
 					for (int z = 0; z < 16; z++) {
 						for (int x = 0; x < 16; x++) {
-							if (!section.getBlockState(x, y, z).is(Blocks.AMETHYST_CLUSTER)) {
+							// A section can answer with null while it is still being
+							// filled from the server; asking a null state what block it is
+							// would end the scan with a crash instead of skipping a
+							// column. One comparison per block is not measurable.
+							BlockState state = section.getBlockState(x, y, z);
+							if (state == null || !state.is(Blocks.AMETHYST_CLUSTER)) {
 								continue;
 							}
 							BlockPos pos = new BlockPos(baseX + x, worldY, baseZ + z);

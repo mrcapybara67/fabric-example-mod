@@ -229,8 +229,6 @@ public class CustomSkyModule extends Module implements Configurable {
 			releaseFog();
 			return;
 		}
-		applyFog();
-
 		long now = System.nanoTime();
 		float dt = lastNanos == 0L ? 0f : (now - lastNanos) / 1.0e9f;
 		lastNanos = now;
@@ -260,8 +258,14 @@ public class CustomSkyModule extends Module implements Configurable {
 		frameH = h;
 		float alpha = (float) opacity.real();
 		if (alpha <= 0f) {
+			// A theme at zero opacity paints nothing, so it must not keep the fog
+			// switched off either: the module would be changing the world with no
+			// visible reason to.
+			releaseFog();
 			return;
 		}
+		// Held only once this frame is known to paint something.
+		applyFog();
 
 		// Near the far plane of the projection: far enough that no terrain can be
 		// in front of it, close enough that the depth value still has room below
