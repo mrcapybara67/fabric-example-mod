@@ -111,7 +111,9 @@ public class CapyClient implements ClientModInitializer {
 			// Build the bundled faces outside a frame. The lazy path would
 			// otherwise upload a font texture in the middle of the first GUI or
 			// HUD draw, which is the worst possible moment for it.
-			UiFonts.warmUp();
+			// Guarded: this is the client tick, where an escaped exception is the
+			// game dying the moment the player joins a world.
+			Guard.run("fonts", UiFonts::warmUp);
 			// The click counter is drained every tick, so a press that happens
 			// while a screen is open is dropped instead of queued.
 			boolean clicked = ClientKeybinds.consumeOpenGuiClick();
@@ -127,7 +129,7 @@ public class CapyClient implements ClientModInitializer {
 			}
 			// Hands the mouse and the held keys back after the GUI closes,
 			// retrying while the window is unfocused.
-			ClientKeybinds.tickInputRestore(client);
+			Guard.run("input restore", () -> ClientKeybinds.tickInputRestore(client));
 			// The inspect key is drained every tick for the same reason, and
 			// only acted on while the player is actually in the world.
 			boolean inspect = ClientKeybinds.consumeInspectClick();

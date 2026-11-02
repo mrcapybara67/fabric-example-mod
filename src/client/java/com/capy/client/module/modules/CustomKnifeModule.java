@@ -138,12 +138,16 @@ public class CustomKnifeModule extends Module implements Configurable {
 	}
 
 	/**
-	 * Enabling reads the nine meshes ahead of time; disabling frees them.
+	 * Enabling reads the meshes ahead of time; disabling frees them.
 	 *
-	 * <p>The preload is on a daemon thread because a parse is file IO plus a few
-	 * thousand array reads, and doing it on the game thread when the switch is
-	 * flipped would be a visible hitch for no reason. Disabling clears the cache
-	 * rather than leaving nine meshes resident for a module that is off.
+	 * <p>The parse happens on the calling thread, on purpose. It used to be
+	 * handed to a daemon thread "so switching the module on cannot hitch", and
+	 * that thread read the client's resource manager. A resource manager is not
+	 * thread safe: it is being read, and its pack list replaced, by the loader
+	 * itself while a world is being joined, and a second thread walking it there
+	 * is a race with the join - which surfaces as the game crashing the moment a
+	 * world finishes loading. Six small files parse in a few milliseconds, and
+	 * that is always cheaper than a race with the loader.
 	 */
 	@Override
 	protected void onToggle(boolean state) {
@@ -158,9 +162,7 @@ public class CustomKnifeModule extends Module implements Configurable {
 			// the selected style lazily instead.
 			return;
 		}
-		Thread preload = new Thread(() -> GltfCache.preloadAll(manager), "capy-gltf-preload");
-		preload.setDaemon(true);
-		preload.start();
+		GltfCache.preloadAll(manager);
 	}
 
 	/**

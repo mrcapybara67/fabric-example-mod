@@ -9,7 +9,6 @@ import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
 import com.google.gson.JsonObject;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -34,19 +33,26 @@ import org.joml.Matrix4f;
  * maps those pixels onto a plane at the far end of the view frustum, scaled by
  * the field of view the frame was actually projected with.
  *
- * <h2>Why the pose is the inverse of the model view</h2>
- * In 1.21.11 the world is drawn from a frame graph and the camera rotation is not
- * baked into a pose stack: {@code LevelRenderer} multiplies the view matrix into
- * {@code RenderSystem.getModelViewStack()} before the graph runs, and everything
- * inside the pass — entities included — is submitted in camera space with an
- * identity pose. The vertex shader applies that model view to whatever we hand
- * it, so a painting submitted with an identity pose would be fixed in the
- * <em>world</em>: it would face one compass direction, slide out of view when the
- * player turns, and be edge-on when looked at sideways.
+ * <h2>Why the vertices carry the camera's rotation</h2>
+ * The world pass draws every vertex through the camera's view rotation — the
+ * inverse of the camera's own orientation, which {@code Camera.setRotation} builds
+ * as {@code rotationYXZ(pi - yaw, -pitch)}. A painting submitted in view space is
+ * therefore turned by it: the artwork spins about the view axis, its subject stays
+ * near the middle of the frame at every heading, and the corners lose coverage.
+ * On screen that reads as a theme that follows the camera instead of lying in the
+ * sky.
  *
- * Pre-multiplying the pose by the inverse of the model view cancels the shader's
- * rotation exactly, which puts the painting back in camera space: it follows the
- * view, and its depth stays measured along the view axis.
+ * So the canvas lifts each vertex into the camera's frame itself
+ * ({@code forward * depth + right * x + up * y}), which the view rotation undoes
+ * exactly. Doing this in the positions rather than in a pose matrix is deliberate:
+ * a pose only cancels the rotation if it is the very matrix the draw applies, and
+ * a stale or already-reset model view silently leaves the painting turned — which
+ * is what every attempt that cancelled through the pose stack did. The positions
+ * cannot be skipped.
+ *
+ * The sky bodies are then placed by compass bearing against the same camera
+ * frame, so a theme's subject stays where it belongs in the world and the player
+ * turns to find it.
  *
  * <h2>Depth</h2>
  * The plane carries the projection's far depth with the depth test on and depth
@@ -189,7 +195,11 @@ public class CustomSkyModule extends Module implements Configurable {
 	protected void onToggle(boolean state) {
 		if (state) {
 			if (!listening) {
-				WorldRenderEvents.AFTER_ENTITIES.register(SKY_PHASE, this::render);
+				// Guarded at the listener: this runs inside the world pass on the
+				// first frame in a world, where a thrown exception is not "the sky is
+				// missing" but a crash on join.
+				WorldRenderEvents.AFTER_ENTITIES.register(SKY_PHASE,
+						context -> com.capy.client.util.Guard.run("custom sky", () -> render(context)));
 				listening = true;
 			}
 			lastNanos = 0L;
@@ -301,7 +311,14 @@ public class CustomSkyModule extends Module implements Configurable {
 		// horizon slides away underneath it. A forward vector has no convention
 		// to get wrong: it is simply the direction the frame is being drawn
 		// looking, and the other two axes are built from it below.
-		org.joml.Vector3fc forward = mc.gameRenderer.getMainCamera().forwardVector();
+		// The camera's own frame. {@code forwardVector}, {@code upVector} and
+		// {@code leftVector} are the three axes vanilla builds the view matrix
+		// from, so a bearing resolved against them agrees with the frame that is
+		// actually drawn - no hand-built cross product to get a sign wrong in.
+		net.minecraft.client.Camera camera = mc.gameRenderer.getMainCamera();
+		org.joml.Vector3fc forward = camera.forwardVector();
+		org.joml.Vector3fc upAxis = camera.upVector();
+		org.joml.Vector3fc leftAxis = camera.leftVector();
 		float fx = forward.x();
 		float fy = forward.y();
 		float fz = forward.z();
@@ -318,26 +335,52 @@ public class CustomSkyModule extends Module implements Configurable {
 		fwdX = fx;
 		fwdY = fy;
 		fwdZ = fz;
-		// right = forward x worldUp. Only degenerate when looking straight up
-		// or down, where any horizontal axis is as good as another and the
-		// fallback below picks one rather than dividing by zero.
-		float rx = -fz;
-		float rz = fx;
-		float rlen = (float) Math.sqrt(rx * rx + rz * rz);
-		if (!(rlen > 1.0e-4f)) {
-			rx = 1f;
-			rz = 0f;
+		// Screen right is minus the camera's left axis.
+		float rx = -leftAxis.x();
+		float ry = -leftAxis.y();
+		float rz = -leftAxis.z();
+		float rlen = (float) Math.sqrt(rx * rx + ry * ry + rz * rz);
+		if (!(rlen > 1.0e-4f) || !Float.isFinite(rlen)) {
+			// Looking straight along an axis leaves a degenerate left vector in
+			// some builds; a horizontal fallback keeps the field drawable instead
+			// of collapsing it to the centre of the frame.
+			rx = -fz;
+			ry = 0f;
+			rz = fx;
+			rlen = (float) Math.sqrt(rx * rx + rz * rz);
+			if (!(rlen > 1.0e-4f)) {
+				rx = 1f;
+				rz = 0f;
+			} else {
+				rx /= rlen;
+				rz /= rlen;
+			}
 		} else {
 			rx /= rlen;
+			ry /= rlen;
 			rz /= rlen;
 		}
 		rightX = rx;
-		rightY = 0f;
+		rightY = ry;
 		rightZ = rz;
-		// up = right x forward, which keeps all three axes orthonormal.
-		upX = rightY * fz - rightZ * fy;
-		upY = rightZ * fx - rightX * fz;
-		upZ = rightX * fy - rightY * fx;
+		// The camera's up axis, orthonormalised against the two we just fixed so
+		// all three stay a right-handed frame even if a camera mod reports one
+		// of them slightly off.
+		float ux = upAxis.x();
+		float uy = upAxis.y();
+		float uz = upAxis.z();
+		float ulen = (float) Math.sqrt(ux * ux + uy * uy + uz * uz);
+		if (ulen > 1.0e-4f && Float.isFinite(ulen)) {
+			upX = ux / ulen;
+			upY = uy / ulen;
+			upZ = uz / ulen;
+		} else {
+			// up = right x forward keeps the frame sound when the camera has no
+			// usable up vector.
+			upX = rightY * fz - rightZ * fy;
+			upY = rightZ * fx - rightX * fz;
+			upZ = rightX * fy - rightY * fx;
+		}
 
 		viewYaw = (float) Math.toDegrees(Math.atan2(-fwdX, fwdZ));
 		viewPitch = (float) Math.toDegrees(-Math.asin(Math.max(-1.0, Math.min(1.0, fwdY))));			// A theme's subject hangs at a fixed bearing of the world, never at
@@ -391,36 +434,20 @@ public class CustomSkyModule extends Module implements Configurable {
 		skyPitch = -viewPitch * (frameH * 0.5f) / Math.max(0.02f, tanHalfV) * 0.0174533f;
 
 		try {
-			// A fresh stack, deliberately not the world's.
-			//
-			// The pose stack handed to this event already carries whatever the
-			// pass and everything submitted before us put on it. Inheriting it
-			// applied the view twice, and the painting came out rotated by the
-			// pass and pinned to one heading instead of filling the viewport - on
-			// screen that is "the theme sits on the crosshair and the rest of the
-			// sky is black". Starting from identity and cancelling only the model
-			// view puts the vertices in camera space, which is what a sky wants.
-			// The pass's matrix is cancelled, but only if it is a real matrix. In
-			// this version the world's vertices are already camera relative, so
-			// the common answer is the identity - and an identity inverse is what
-			// keeps the painting in the space the projection expects.
-			Matrix4f inverse = new Matrix4f(RenderSystem.getModelViewMatrix()).invert();
-			if (!finite(inverse)) {
-				// A singular view has no inverse, and JOML answers with a matrix of
-				// NaN - which blanks the whole sky. An identity pose is the safe
-				// answer: the painting then lands in view space, in front of the
-				// camera, instead of nowhere at all.
-				inverse.identity();
-			}
+			// The painting is laid out in view space and each vertex is lifted into
+			// the camera's frame as it is emitted, which the pass's own view
+			// rotation undoes exactly. See the class comment for why the positions
+			// carry it and not the pose.
 			PoseStack stack = new PoseStack();
-			stack.last().pose().mul(inverse);
-
 			VertexConsumer vc = batch().getBuffer(RenderTypes.debugQuads());
-			Canvas canvas = new Canvas(vc, stack.last(), w, h, halfW, halfH, depth);
+			Canvas canvas = new Canvas(vc, stack.last(), w, h, halfW, halfH, depth,
+					rightX, rightY, rightZ, upX, upY, upZ, fwdX, fwdY, fwdZ);
 			draw(canvas, index, w, h, alpha);
 			batch().endBatch();
-		} catch (RuntimeException e) {
-			// A broken theme must cost the sky, never the frame.
+		} catch (Throwable e) {
+			// A broken theme must cost the sky, never the frame. Reported once so a
+			// theme that cannot draw is diagnosable instead of silently absent.
+			com.capy.client.util.Guard.report("custom sky theme", e);
 			dropBatch();
 		}
 	}
@@ -1771,9 +1798,22 @@ public class CustomSkyModule extends Module implements Configurable {
 		private final double halfW;
 		private final double halfH;
 		private final float depth;
+		/** The camera's frame, which the emitted vertices are turned into. */
+		private final float rightX;
+		private final float rightY;
+		private final float rightZ;
+		private final float upX;
+		private final float upY;
+		private final float upZ;
+		private final float fwdX;
+		private final float fwdY;
+		private final float fwdZ;
 
 		Canvas(VertexConsumer vc, PoseStack.Pose pose, float width, float height,
-				double halfW, double halfH, float depth) {
+				double halfW, double halfH, float depth,
+				float rightX, float rightY, float rightZ,
+				float upX, float upY, float upZ,
+				float fwdX, float fwdY, float fwdZ) {
 			this.vc = vc;
 			this.pose = pose;
 			this.width = width;
@@ -1781,12 +1821,38 @@ public class CustomSkyModule extends Module implements Configurable {
 			this.halfW = halfW;
 			this.halfH = halfH;
 			this.depth = depth;
+			this.rightX = rightX;
+			this.rightY = rightY;
+			this.rightZ = rightZ;
+			this.upX = upX;
+			this.upY = upY;
+			this.upZ = upZ;
+			this.fwdX = fwdX;
+			this.fwdY = fwdY;
+			this.fwdZ = fwdZ;
 		}
 
+		/**
+		 * One vertex: a screen pixel becomes a point on the sky plane, expressed
+		 * in the camera's frame.
+		 *
+		 * <p>The point is built in view space first - x to the right, y up, and the
+		 * plane {@code depth} along the view axis - and then turned by the camera's
+		 * axes. The camera's view rotation, which the world pass applies to every
+		 * vertex it draws, is the exact inverse of that turn, so the point lands
+		 * back on the pixel it came from. Without the turn the painting is rotated
+		 * about the view axis by the pass: the subject stays in the middle of the
+		 * frame at every heading and the corners go black.</p>
+		 */
 		void vertex(float x, float y, int argb) {
 			float nx = x / width * 2f - 1f;
 			float ny = 1f - y / height * 2f;
-			vc.addVertex(pose, (float) (nx * halfW), (float) (ny * halfH), -depth).setColor(argb);
+			float sx = (float) (nx * halfW);
+			float sy = (float) (ny * halfH);
+			float wx = rightX * sx + upX * sy + fwdX * depth;
+			float wy = rightY * sx + upY * sy + fwdY * depth;
+			float wz = rightZ * sx + upZ * sy + fwdZ * depth;
+			vc.addVertex(pose, wx, wy, wz).setColor(argb);
 		}
 
 		void quad(float x0, float y0, float x1, float y1, int top, int bottom) {

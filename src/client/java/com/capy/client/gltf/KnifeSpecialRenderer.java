@@ -68,18 +68,25 @@ public final class KnifeSpecialRenderer implements SpecialModelRenderer<KnifeSpe
 		if (knife == null || knife.meshes() == null || knife.meshes().isEmpty()) {
 			return;
 		}
-		// The mesh is authored in item space - one unit per sixteenth of a
-		// block - because that is the space a vanilla item model's cuboids are
-		// written in, and it is the space the display transform in this class is
-		// copied from. A special model, though, is submitted in block space: the
-		// transform above is applied around geometry a chest or a shield is
-		// authored at, 0..1. Without this division a knife is drawn sixteen
-		// times life size - a wall of blade in first person and an item far too
-		// large to fit its hotbar slot, which is exactly how it looked.
-		pose.pushPose();
-		pose.scale(1.0f / 16.0f, 1.0f / 16.0f, 1.0f / 16.0f);
-		GltfRenderer.render(knife.meshes(), knife.style(), knife.material(), pose, collector, light, overlay);
-		pose.popPose();
+		// This runs inside vanilla's own submit pass, once per visible layer, so
+		// an exception here is the game dying while a world draws - not a knife
+		// that looks wrong. A mesh that cannot be drawn simply is not.
+		try {
+			// The mesh is authored in item space - one unit per sixteenth of a
+			// block - because that is the space a vanilla item model's cuboids are
+			// written in, and it is the space the display transform in this class is
+			// copied from. A special model, though, is submitted in block space: the
+			// transform above is applied around geometry a chest or a shield is
+			// authored at, 0..1. Without this division a knife is drawn sixteen
+			// times life size - a wall of blade in first person and an item far too
+			// large to fit its hotbar slot, which is exactly how it looked.
+			pose.pushPose();
+			pose.scale(1.0f / 16.0f, 1.0f / 16.0f, 1.0f / 16.0f);
+			GltfRenderer.render(knife.meshes(), knife.style(), knife.material(), pose, collector, light, overlay);
+			pose.popPose();
+		} catch (Throwable failure) {
+			com.capy.client.util.Guard.report("knife mesh", failure);
+		}
 	}
 
 	/**
