@@ -52,11 +52,14 @@ public abstract class HudElementModule extends Module implements Configurable {
 	/**
 	 * How far a chip may be nudged from its cell, in pixels.
 	 *
-	 * <p>Two hundred is half a 4K window at GUI scale four: every position on
-	 * the screen is reachable from the nearest cell, so the grid decides where a
-	 * chip starts and never where it has to stay.</p>
+	 * <p>Six hundred is more than half a 4K window at any GUI scale a player
+	 * runs: at scale four the window is 960 by 540 logical pixels, at scale one
+	 * it is 3840 by 2160, and half of the wider measurement is 1920 - which is
+	 * why the drag editor re-anchors to the nearest cell before writing the
+	 * nudge instead of relying on this range alone. Together, the grid and the
+	 * nudge reach every position on the screen from the nearest cell.</p>
 	 */
-	public static final int MAX_NUDGE = 200;
+	public static final int MAX_NUDGE = 600;
 
 	private final String label;
 	private final int defaultAnchor;
@@ -121,6 +124,19 @@ public abstract class HudElementModule extends Module implements Configurable {
 	public void moveTo(int x, int y) {
 		offsetX.set(clamp(x, -MAX_NUDGE, MAX_NUDGE));
 		offsetY.set(clamp(y, -MAX_NUDGE, MAX_NUDGE));
+	}
+
+	/**
+	 * Anchors the chip to a grid cell.
+	 *
+	 * <p>The drag editor writes through this while a chip is being moved: the
+	 * nudge alone is capped at {@value #MAX_NUDGE} pixels, which is a sensible
+	 * range for a setting but not for a drag that crosses the window. Choosing
+	 * the nearest cell and nudging from <em>that</em> keeps every position on
+	 * screen reachable, and the offset written back stays small.</p>
+	 */
+	public void setAnchor(int cell) {
+		anchor.set(clamp(cell, ANCHOR_TOP_LEFT, ANCHOR_BOTTOM_RIGHT));
 	}
 
 	/** Puts the chip back on its cell. */

@@ -10,6 +10,7 @@ import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.google.gson.JsonObject;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.AABB;
 
@@ -47,9 +48,28 @@ import net.minecraft.world.phys.AABB;
  */
 public abstract class EspModule extends Module implements Configurable, Tickable {
 	public static final int MIN_RANGE = 8;
-	public static final int MAX_RANGE = 128;
-	/** Upper bound on the boxes a single module contributes to a frame. */
-	public static final int MAX_BOXES = 512;
+	/**
+	 * The longest range the slider allows, and the range every overlay starts
+	 * with: the far corner of a 32 chunk view distance, which is the largest a
+	 * vanilla server sends.
+	 *
+	 * It used to be 128. That cap was the reason an overlay stopped seeing a
+	 * container or a player that the client was already holding: the chunk data
+	 * was there, the scan simply never walked out to it, so the boxes only
+	 * appeared once the player had walked closer. The scanner never touches a
+	 * chunk the client does not already hold, so a generous limit costs nothing
+	 * on a short view distance and covers the whole one on a long view distance.
+	 */
+	public static final int MAX_RANGE = 512;
+	/**
+	 * Upper bound on the boxes a single module contributes to a frame.
+	 *
+	 * <p>Raised with the range: at a full horizon an ore filter legitimately
+	 * finds more than five hundred blocks, and the cap is applied after the walk
+	 * has gone nearest first, so a low cap silently drops the far half of what
+	 * was found. The renderer's buffer is sized for this number.</p>
+	 */
+	public static final int MAX_BOXES = 1024;
 
 	/** The overlay's own colour, or null when the subclass owns several. */
 	protected final ColorSetting color;
@@ -153,6 +173,30 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		return range.get();
 	}
 
+	/**
+	 * The range each overlay shipped with before the horizon.
+	 *
+	 * <p>A stored value that equals one of these is the slider nobody moved - the
+	 * default is what got saved, not a choice - so it is lifted to the current
+	 * default when the config is read. Any other value is the user's own and is
+	 * kept exactly as it is, which is why the lift is matched by value instead of
+	 * being applied to everything below the new default.</p>
+	 */
+	private static final Map<String, Integer> LEGACY_RANGE = Map.of(
+			"player_esp", 96,
+			"storage_esp", 64,
+			"block_esp", 64,
+			"amethyst_finder", 32);
+
+	/** Lifts a shipped default to today's; leaves a chosen range alone. */
+	private int migratedRange(int stored) {
+		Integer legacy = LEGACY_RANGE.get(id());
+		if (legacy != null && stored == legacy) {
+			return defaultRange;
+		}
+		return stored;
+	}
+
 	public boolean fills() {
 		return fill.value();
 	}
@@ -193,7 +237,7 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		if (color != null) {
 			color.set(ConfigValues.intValue(json, "color", defaultColor));
 		}
-		range.set(ConfigValues.intValue(json, "range", defaultRange));
+		range.set(migratedRange(ConfigValues.intValue(json, "range", defaultRange)));
 		fill.set(ConfigValues.boolValue(json, "fill", true));
 		outline.set(ConfigValues.boolValue(json, "outline", true));
 		tracers.set(ConfigValues.boolValue(json, "tracers", defaultTracers));

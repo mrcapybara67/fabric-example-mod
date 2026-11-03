@@ -26,7 +26,9 @@ public final class PlayerEspModule extends EspModule {
 	private final List<AABB> boxes = new ArrayList<>();
 
 	public PlayerEspModule() {
-		super("player_esp", 0xFFF25C86, 96, true);
+		// The whole view distance by default: the level already lists every
+		// player the client knows about, so this walk costs nothing extra.
+		super("player_esp", 0xFFF25C86, MAX_RANGE, true);
 	}
 
 	@Override

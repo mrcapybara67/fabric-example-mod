@@ -83,13 +83,25 @@ public final class HudRenderer {
 		if (mc == null || mc.player == null || mc.level == null) {
 			return;
 		}
-		UiText regular = TYPE.regular();
-		UiText medium = TYPE.medium();
-		prepare(mc, screenW, screenH, regular, medium);
+		prepare(mc, screenW, screenH, TYPE.regular(), TYPE.medium());
+		drawPrepared(graphics);
+	}
+
+	/**
+	 * Draws the chips the last {@link #prepare} laid out.
+	 *
+	 * <p>Separate from {@link #render} so the drag editor can draw the very same
+	 * chips over its own scrim: a chip that is dimmed under the editor's shading
+	 * is a chip the player cannot judge while placing it, which defeats the
+	 * point of dragging it around the scene it has to stay readable on.</p>
+	 */
+	public static void drawPrepared(GuiGraphics graphics) {
 		if (scratchSize == 0) {
 			return;
 		}
 		UiCanvas canvas = McCanvas.of(graphics);
+		UiText regular = TYPE.regular();
+		UiText medium = TYPE.medium();
 		float sheen = sheenPhase();
 		for (int i = 0; i < scratchSize; i++) {
 			HudElementModule hud = scratchModules[i];

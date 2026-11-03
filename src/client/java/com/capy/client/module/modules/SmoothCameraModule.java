@@ -48,19 +48,26 @@ public class SmoothCameraModule extends Module implements Configurable {
 
 	@Override
 	protected void onToggle(boolean state) {
+		Minecraft mc = Minecraft.getInstance();
+		// Guard: getInstance() exists from the very first initialiser, but the
+		// game has not built its options yet at that point, so mc.options is
+		// null while ClientConfig.load() re-enables the modules inside
+		// onInitializeClient(). Reading mc.options.smoothCamera there is the
+		// startup crash. Returning leaves the module flagged as enabled: the
+		// state above is never touched, and syncCinematic() applies the setting
+		// on the first frame, when the options exist.
+		if (mc == null || mc.options == null) {
+			return;
+		}
 		if (state) {
-			Minecraft mc = Minecraft.getInstance();
-			cinematicWasOn = mc != null && mc.options.smoothCamera;
+			cinematicWasOn = mc.options.smoothCamera;
 			return;
 		}
 		bankX = 0.0;
 		bankY = 0.0;
 		lastNanos = 0L;
 		cinematicApplied = false;
-		Minecraft mc = Minecraft.getInstance();
-		if (mc != null) {
-			mc.options.smoothCamera = cinematicWasOn;
-		}
+		mc.options.smoothCamera = cinematicWasOn;
 	}
 
 	/**

@@ -77,7 +77,11 @@ public class WatchlistSetting extends Setting<List<String>> {
 		if (contains(name)) {
 			return ListResult.DUPLICATE;
 		}
-		List<String> current = entries();
+		// Copied before it is modified, exactly like the block list. entries()
+		// is the live backing list, so adding to it in place mutated the setting
+		// behind set()'s back - and would throw outright if the stored list were
+		// ever immutable, which is what a null entry used to produce.
+		List<String> current = new ArrayList<>(entries());
 		if (current.size() >= MAX_ENTRIES) {
 			return ListResult.FULL;
 		}
@@ -92,7 +96,9 @@ public class WatchlistSetting extends Setting<List<String>> {
 			return false;
 		}
 		String needle = name.toLowerCase(Locale.ROOT);
-		List<String> current = entries();
+		// Copied for the same reason as add(): the removal must reach the
+		// setting through set(), not by editing its list underneath it.
+		List<String> current = new ArrayList<>(entries());
 		for (int i = 0; i < current.size(); i++) {
 			if (current.get(i).toLowerCase(Locale.ROOT).equals(needle)) {
 				current.remove(i);

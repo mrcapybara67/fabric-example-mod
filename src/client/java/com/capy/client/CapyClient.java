@@ -108,7 +108,12 @@ public class CapyClient implements ClientModInitializer {
 				.registerReloadListener(new GltfReloadListener());
 
 		// One tick listener drives the keybind and every tickable module.
-		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+		//
+		// The body is guarded as a whole, not only piece by piece: it opens
+		// screens, drains keybinds and restores input, and all of that runs
+		// inside vanilla's tick loop, where an escaped exception is a crash
+		// rather than a skipped feature.
+		ClientTickEvents.END_CLIENT_TICK.register(client -> Guard.run("tick", () -> {
 			// Build the bundled faces outside a frame. The lazy path would
 			// otherwise upload a font texture in the middle of the first GUI or
 			// HUD draw, which is the worst possible moment for it.
@@ -155,7 +160,7 @@ public class CapyClient implements ClientModInitializer {
 					Guard.run("tick " + module.id(), () -> tickable.onTick(client));
 				}
 			}
-		});
+		}));
 
 		// The world overlays are drawn after entities, inside the main world
 		// pass, and before translucent terrain. This point is load bearing in
@@ -198,6 +203,19 @@ public class CapyClient implements ClientModInitializer {
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anticheat_notifier"),
 				(graphics, deltaTracker) -> Guard.run("anticheat banner",
 						() -> antiCheatNotifier.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight())));
+
+		// The hand brackets are registered here, once, rather than from the
+		// module's toggle. A HUD id can only be added once, so adding it on every
+		// enable made the second enable throw inside the click handler that
+		// switched the module on - the game died on the second toggle. The
+		// renderer gates itself on isEnabled(), so this costs one early return
+		// per frame while the module is off.
+		HandAuraModule handAura = modules.get(HandAuraModule.class);
+		if (handAura != null) {
+			HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "hand_aura"),
+					(graphics, deltaTracker) -> Guard.run("hand aura",
+							() -> handAura.onHudRender(graphics, deltaTracker)));
+		}
 
 		// Transient detection state must not survive a world change or a
 		// disconnect: the players of the old world are gone.

@@ -67,12 +67,18 @@ public final class EspRenderer {
 	private static final float GLOW_SCALE = 3.1f;
 
 	/**
-	 * Own buffer instead of the world renderer's shared one: the geometry of
-	 * several hundred boxes does not fit in the 768 KiB shared buffer, and a
-	 * private source lets each layer be flushed on the spot instead of hoping
-	 * the world renderer flushes a type it has never heard of.
+	 * Own buffer instead of the world renderer's shared one: the geometry of a
+	 * thousand boxes does not fit in the 768 KiB shared buffer, and a private
+	 * source lets each layer be flushed on the spot instead of hoping the world
+	 * renderer flushes a type it has never heard of.
+	 *
+	 * <p>Sized from the worst case rather than guessed: an outlined box is 24
+	 * segments of two 32 byte vertices, and with tracers on it is 48. At
+	 * {@link EspModule#MAX_BOXES} boxes that is about 1.6 MiB of lines on its
+	 * own, with the fills counted separately, so 8 MiB leaves room for both and
+	 * for a module that submits its whole list before flushing.</p>
 	 */
-	private static final int BUFFER_BYTES = 2 * 1024 * 1024;
+	private static final int BUFFER_BYTES = 8 * 1024 * 1024;
 	private static MultiBufferSource.BufferSource batch;
 	/** The builder behind {@link #batch}, kept so a dropped one can be freed. */
 	private static ByteBufferBuilder buffer;

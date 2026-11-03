@@ -10,6 +10,7 @@ import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.esp.EspRenderTypes;
+import com.capy.client.util.Guard;
 import com.google.gson.JsonObject;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -98,8 +99,19 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 	protected void onToggle(boolean state) {
 		if (state) {
 			if (!listening) {
-				WorldRenderEvents.AFTER_ENTITIES.register(this::render);
-				UseBlockCallback.EVENT.register(this::onUseBlock);
+				// Both hooks run inside vanilla's own call stack - the world pass
+				// and the right click handler - so both are guarded at the
+				// listener. A throw in the world pass is a crash on the next frame,
+				// not a missing animation, and a throw out of the use callback
+				// cancels the click the player made.
+				WorldRenderEvents.AFTER_ENTITIES.register(
+						context -> Guard.run("block animation", () -> render(context)));
+				UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
+					Guard.run("block animation use", () -> onUseBlock(player, level, hand, hit));
+					// Whatever the module decided, the click is vanilla's: it only
+					// observes the placement, it never consumes it.
+					return InteractionResult.PASS;
+				});
 				listening = true;
 			}
 			return;

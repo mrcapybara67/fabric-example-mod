@@ -58,6 +58,9 @@ public final class HudEditorScreen extends Screen {
 		graphics.fill(0, 0, this.width, this.height, 0x66101018);
 
 		HudRenderer.prepare(this.width, this.height);
+		// The chips themselves, over the scrim: what is being placed has to be
+		// seen exactly as the game will draw it, not as a frame around a blur.
+		HudRenderer.drawPrepared(graphics);
 		int count = HudRenderer.slotCount();
 		int hovered = -1;
 		for (int i = 0; i < count; i++) {
@@ -168,9 +171,41 @@ public final class HudEditorScreen extends Screen {
 			dragging = null;
 			return true;
 		}
-		int targetX = (int) Math.round(event.x()) - grabX - HudRenderer.slotBaseX(index);
-		int targetY = (int) Math.round(event.y()) - grabY - HudRenderer.slotBaseY(index);
-		dragging.moveTo(targetX, targetY);
+		// Where the pointer wants the chip's top left corner, in pixels.
+		int wantX = (int) Math.round(event.x()) - grabX;
+		int wantY = (int) Math.round(event.y()) - grabY;
+		// Re-anchor to the nearest of the nine cells before writing the nudge.
+		// A nudge is capped at a couple of hundred pixels - right for a setting,
+		// wrong for a drag that crosses the window - so a drag that only wrote
+		// an offset would stop dead halfway while the pointer kept going.
+		int best = index;
+		long bestCost = Long.MAX_VALUE;
+		for (int anchor = 0; anchor < 9; anchor++) {
+			dragging.setAnchor(anchor);
+			HudRenderer.prepare(this.width, this.height);
+			int candidate = indexOf(dragging);
+			if (candidate < 0) {
+				dragging = null;
+				return true;
+			}
+			long dx = HudRenderer.slotBaseX(candidate) - wantX;
+			long dy = HudRenderer.slotBaseY(candidate) - wantY;
+			long cost = dx * dx + dy * dy;
+			if (cost < bestCost) {
+				bestCost = cost;
+				best = anchor;
+			}
+		}
+		dragging.setAnchor(best);
+		HudRenderer.prepare(this.width, this.height);
+		int settled = indexOf(dragging);
+		if (settled < 0) {
+			dragging = null;
+			return true;
+		}
+		// The residual after the best cell is at most half a cell, so this is
+		// inside the nudge range and the chip lands exactly under the pointer.
+		dragging.moveTo(wantX - HudRenderer.slotBaseX(settled), wantY - HudRenderer.slotBaseY(settled));
 		return true;
 	}
 

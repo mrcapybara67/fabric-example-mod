@@ -176,32 +176,37 @@ public final class UiTheme {
 	private static final Palette LIQUID_GLASS = new Palette(
 			"liquid_glass",
 			"Liquid Glass",
-			0x8C06101A,
-			0xFF1B2430,
-			0xFF111A24,
-			0xFF23303D,
-			0xFF1A2531,
-			0xFF2B3A49,
-			0xFF2A3846,
-			0xFF1F2B38,
-			0xFF37495C,
-			0xFF2A3948,
-			0xFF18232E,
-			0xFF131C26,
-			0xFF212E3B,
-			0xFF19242F,
-			0xFF5B7290,
-			0xFF7CD8FF,
-			0xFFBFEBFF,
-			0xFF2F9BC8,
-			0x447CD8FF,
-			0xFFD6F4FF,
-			0xFFEFFBFF,
-			0xFFF2F8FF,
-			0xFFB3C4D6,
-			0xFF93A5B9,
-			0xFF8599AD,
-			0xFF06222E
+			// A deeper scrim and a tighter value range: glass is read as an edge
+			// and a glow, not as a patch of colour, so the sheet stays close to
+			// the scene it covers and the hairlines do the talking.
+			0xA6040A12,
+			0xFF141F2B,
+			0xFF080F17,
+			0xFF1B2836,
+			0xFF111B26,
+			0xFF24333F,
+			0xFF223040,
+			0xFF16222E,
+			0xFF2E4256,
+			0xFF22313F,
+			0xFF0F1922,
+			0xFF0A121A,
+			0xFF1A2733,
+			0xFF121C26,
+			// A brighter rim: on a near black sheet this line is what defines
+			// the shape, so it carries more contrast than in the plum palettes.
+			0xFF6E8CAE,
+			0xFF7CE0FF,
+			0xFFC9F1FF,
+			0xFF1D86B4,
+			0x557CE0FF,
+			0xFFE2FAFF,
+			0xFFF4FDFF,
+			0xFFFBFFFF,
+			0xFFD3E2F0,
+			0xFFAFC0D2,
+			0xFF93A6BA,
+			0xFF04202C
 	);
 
 	private static final Map<String, Palette> PALETTES = new LinkedHashMap<>();

@@ -53,7 +53,9 @@ public final class BlockEspModule extends EspModule {
 	private int lastRange = -1;
 
 	public BlockEspModule() {
-		super("block_esp", 0xFF5CE1E6, 64, false);
+		// Every loaded chunk by default: the section palette check is what keeps
+		// a full range scan cheap, so there is no reason to start short.
+		super("block_esp", 0xFF5CE1E6, MAX_RANGE, false);
 		// A useful starting filter: the block ESP does something the first time
 		// it is switched on, and the list editor shows how to change it.
 		blocks.set(List.of("minecraft:diamond_ore", "minecraft:deepslate_diamond_ore",

@@ -1,5 +1,6 @@
 package com.capy.client.module;
 
+import com.capy.client.util.Guard;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -53,7 +54,14 @@ public abstract class Module {
 	public void setEnabled(boolean state) {
 		if (enabled != state) {
 			enabled = state;
-			onToggle(state);
+			// Toggling is the one hook with no safety net of its own: the switch
+			// is clicked from a screen, so an exception raised here runs inside
+			// vanilla's mouse handling and takes the game down instead of just
+			// failing the feature. Every other entry point this client installs
+			// (tick, HUD, world pass, packets) is guarded; this one is now too,
+			// which also covers the restore at startup, where a throwing
+			// onToggle used to mean the client could not boot.
+			Guard.run("toggle " + id, () -> onToggle(state));
 		}
 	}
 

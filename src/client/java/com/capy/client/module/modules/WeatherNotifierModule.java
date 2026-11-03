@@ -99,8 +99,12 @@ public class WeatherNotifierModule extends Module implements Tickable, Configura
 		State now = stateOf(level);
 		if (level != lastLevel) {
 			// A new world: record where the weather is, do not announce it.
+			// The gap timer is cleared with it, or a change in the first second
+			// on the new server would be swallowed by a notice sent on the old
+			// one - the two have nothing to do with each other.
 			lastLevel = level;
 			last = now;
+			lastAnnounceAt = 0L;
 			WeatherToast.hide();
 			return;
 		}

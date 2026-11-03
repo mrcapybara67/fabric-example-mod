@@ -13,11 +13,9 @@ import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.google.gson.JsonObject;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 
 /**
@@ -42,7 +40,6 @@ import net.minecraft.world.item.Item;
  *   </ul>
  */
 public class HandAuraModule extends Module implements Configurable, Tickable {
-	private static final Identifier HUD_ID = Identifier.fromNamespaceAndPath("capy", "hand_aura");
 	private static final int FLASH_TICKS = 12;
 
 	private final ColorSetting mainColor = setting(new ColorSetting("main_color", 0xFFFF6EB4));
@@ -63,29 +60,30 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 	private int offFlash;
 	private Item lastMain;
 	private Item lastOff;
-	private boolean registered;
 
 	public HandAuraModule() {
 		super(Category.VISUAL, "hand_aura");
 	}
 
+	/**
+	 * Resets the flash, and nothing else.
+	 *
+	 * <p>The HUD element used to be added on enable and removed on disable. That
+	 * put a write into a global registry inside a click handler, and a registry
+	 * keyed by id cannot survive that: a disable that did not remove the entry
+	 * (or an add that threw before the flag was set) left the id registered, and
+	 * the next enable then threw on the duplicate - which crashed the game on the
+	 * second toggle rather than on the first. The element is now registered once
+	 * at startup like every other Capy HUD layer, and gated by
+	 * {@link #isEnabled()} inside the renderer, so toggling is a pure state
+	 * change and cannot diverge from what the registry holds.
+	 */
 	@Override
 	protected void onToggle(boolean state) {
 		mainFlash = 0;
 		offFlash = 0;
 		lastMain = null;
 		lastOff = null;
-		if (state) {
-			if (!registered) {
-				HudElementRegistry.addLast(HUD_ID, this::renderHud);
-				registered = true;
-			}
-			return;
-		}
-		if (registered) {
-			HudElementRegistry.removeElement(HUD_ID);
-			registered = false;
-		}
 	}
 
 	@Override
@@ -113,7 +111,8 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 
 	// ------------------------------------------------------------------- hud
 
-	private void renderHud(GuiGraphics graphics, DeltaTracker delta) {
+	/** HUD hook, registered once by the client entrypoint and gated below. */
+	public void onHudRender(GuiGraphics graphics, DeltaTracker delta) {
 		if (!isEnabled()) {
 			return;
 		}

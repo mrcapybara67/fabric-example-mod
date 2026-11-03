@@ -149,6 +149,16 @@ public class CustomSkyModule extends Module implements Configurable {
 	 * of following the crosshair. See {@link #anchorOf(int)}.
 	 */
 	private float skyOriginYaw;
+	/**
+	 * Horizontal offset of the whole painting, in pixels, driven by the yaw.
+	 *
+	 * <p>This is what makes the sky a skybox instead of a decal on the lens:
+	 * the artwork is anchored to the theme's compass bearing, so turning the
+	 * camera slides the picture across the frame at exactly the rate the world
+	 * moves. Kept in {@code [-frameW, 0)} so the wrapped copy emitted by the
+	 * canvas always covers the right hand edge without a seam.
+	 */
+	private float panX;
 	/** The theme the last frame drew, so a change can re-anchor. */
 	private int lastTheme = -1;
 	/**
@@ -432,6 +442,20 @@ public class CustomSkyModule extends Module implements Configurable {
 		// The camera reports a negative pitch when it looks up, and looking up
 		// has to send the sky down, so the sign is reversed here.
 		skyPitch = -viewPitch * (frameH * 0.5f) / Math.max(0.02f, tanHalfV) * 0.0174533f;
+		// Yaw to pixels, through the frame's own horizontal tangent: a turn of
+		// one field of view has to carry the painting exactly one frame width,
+		// or the art slides at a different rate than the terrain it replaced and
+		// the eye reads it as a sticker again. Both the bearing and the camera's
+		// heading use the same convention (0 = south), so their difference is
+		// the pan.
+		float fovH = (float) Math.toDegrees(2.0 * Math.atan(Math.max(0.02f, tanHalfH)));
+		float pixelsPerDegree = frameW / Math.max(1f, fovH);
+		float yawDelta = wrapDegrees(viewYaw - skyOriginYaw);
+		float pan = -yawDelta * pixelsPerDegree;
+		// Fold into [-frameW, 0): the canvas emits the same painting once at
+		// pan and once at pan + frameW, so those two copies tile the frame with
+		// no gap and no band of doubled alpha at the join.
+		panX = (pan % frameW) - (pan % frameW < 0f ? 0f : frameW);
 
 		try {
 			// The painting is laid out in view space and each vertex is lifted into
@@ -441,7 +465,7 @@ public class CustomSkyModule extends Module implements Configurable {
 			PoseStack stack = new PoseStack();
 			VertexConsumer vc = batch().getBuffer(RenderTypes.debugQuads());
 			Canvas canvas = new Canvas(vc, stack.last(), w, h, halfW, halfH, depth,
-					rightX, rightY, rightZ, upX, upY, upZ, fwdX, fwdY, fwdZ);
+					rightX, rightY, rightZ, upX, upY, upZ, fwdX, fwdY, fwdZ, panX);
 			draw(canvas, index, w, h, alpha);
 			batch().endBatch();
 		} catch (Throwable e) {
@@ -510,13 +534,30 @@ public class CustomSkyModule extends Module implements Configurable {
 			// Behind the eye there is no projection at all. The body is put well
 			// outside the frame on the side it left by, so it leaves the screen
 			// instead of streaking across the middle as its depth crosses zero.
-			skyPoint[0] = frameW * 0.5f + (sx >= 0f ? 1f : -1f) * frameW * 2.5f;
+			// Well outside the frame before the pan is added, so the wrapped copy
+		// cannot drag a body that is behind the eye back into view.
+		skyPoint[0] = frameW * 0.5f + (sx >= 0f ? 1f : -1f) * frameW * 3.5f;
 			skyPoint[1] = clampSkyY(frameH * 0.5f - (sy / 0.10f) / tanHalfV * frameH * 0.5f);
 			return skyPoint;
 		}
-		skyPoint[0] = frameW * 0.5f + (sx / depth) / tanHalfH * frameW * 0.5f;
+		skyPoint[0] = wrapSkyX(frameW * 0.5f + (sx / depth) / tanHalfH * frameW * 0.5f);
 		skyPoint[1] = clampSkyY(frameH * 0.5f - (sy / depth) / tanHalfV * frameH * 0.5f);
 		return skyPoint;
+	}
+
+	/**
+	 * Turns a screen position in the painting's own space into where it is drawn
+	 * once the pan is applied.
+	 *
+	 * <p>Bodies are projected from their world direction, so they must not be
+	 * panned twice: the canvas adds {@code panX} to every vertex, and this
+	 * removes it again before wrapping. The result is that the artwork slides
+	 * with the camera while the sun, the moon and the black hole stay exactly
+	 * where the world puts them - both of them behave like part of the sky.</p>
+	 */
+	private float wrapSkyX(float x) {
+		float value = (x - panX) % frameW;
+		return value < 0f ? value + frameW : value;
 	}
 
 	/** True when every element of a matrix is a real number. */
@@ -1795,6 +1836,8 @@ public class CustomSkyModule extends Module implements Configurable {
 		private final PoseStack.Pose pose;
 		private final float width;
 		private final float height;
+		/** The panorama's yaw offset for this frame, in pixels. */
+		private final float panX;
 		private final double halfW;
 		private final double halfH;
 		private final float depth;
@@ -1813,7 +1856,8 @@ public class CustomSkyModule extends Module implements Configurable {
 				double halfW, double halfH, float depth,
 				float rightX, float rightY, float rightZ,
 				float upX, float upY, float upZ,
-				float fwdX, float fwdY, float fwdZ) {
+				float fwdX, float fwdY, float fwdZ, float panX) {
+			this.panX = panX;
 			this.vc = vc;
 			this.pose = pose;
 			this.width = width;
@@ -1845,6 +1889,15 @@ public class CustomSkyModule extends Module implements Configurable {
 		 * frame at every heading and the corners go black.</p>
 		 */
 		void vertex(float x, float y, int argb) {
+			// The painting is emitted twice, one frame width apart. The two
+			// copies tile the viewport exactly - they meet at a seam rather than
+			// overlapping - so the sky wraps as the player turns without any
+			// band of doubled alpha, and without the art leaving the screen.
+			emit(x + panX, y, argb);
+			emit(x + panX + width, y, argb);
+		}
+
+		private void emit(float x, float y, int argb) {
 			float nx = x / width * 2f - 1f;
 			float ny = 1f - y / height * 2f;
 			float sx = (float) (nx * halfW);

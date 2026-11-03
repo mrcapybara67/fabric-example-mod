@@ -36,10 +36,17 @@ public final class GltfReloadListener implements IdentifiableResourceReloadListe
 			Executor preparationExecutor, PreparableReloadListener.PreparationBarrier barrier,
 			Executor gameExecutor) {
 		return CompletableFuture.supplyAsync(() -> {
-					GltfCache.invalidate();
-					CustomKnifeModule module = ModuleManager.get().get(CustomKnifeModule.class);
-					if (module != null && module.isEnabled()) {
-						preload(state.resourceManager());
+					// A throw here fails the reload future, and the game comes back
+					// from F3+T with missing models, sounds and fonts. A knife cache
+					// is never worth that, so the failure is contained to the knife.
+					try {
+						GltfCache.invalidate();
+						CustomKnifeModule module = ModuleManager.get().get(CustomKnifeModule.class);
+						if (module != null && module.isEnabled()) {
+							preload(state.resourceManager());
+						}
+					} catch (Throwable failure) {
+						GltfLog.reloadFailure(failure);
 					}
 					return Boolean.TRUE;
 				}, preparationExecutor)

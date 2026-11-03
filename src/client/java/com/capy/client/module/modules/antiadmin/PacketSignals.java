@@ -468,10 +468,14 @@ public final class PacketSignals {
 		if (path.contains("armor.equip")) {
 			return "armor";
 		}
-		if (path.contains("item.pickup") || path.contains("item.pickup")) {
+		// Two spellings on purpose: vanilla sends `entity.item.pickup`, and the
+		// `item_pickup` form is what plugin sound packs use. The second test used
+		// to repeat the first, so a server using that spelling never matched.
+		if (path.contains("item.pickup") || path.contains("item_pickup")) {
 			return "pickup";
 		}
-		if (path.endsWith(".eat") || path.contains(".eat") || path.contains("burp")) {
+		// `contains` alone covers the suffix the old test listed separately.
+		if (path.contains(".eat") || path.contains("burp")) {
 			return "eat";
 		}
 		return null;

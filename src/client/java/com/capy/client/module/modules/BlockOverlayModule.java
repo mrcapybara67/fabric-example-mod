@@ -9,6 +9,7 @@ import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.modules.esp.EspRenderTypes;
+import com.capy.client.util.Guard;
 import com.google.gson.JsonObject;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -68,7 +69,11 @@ public class BlockOverlayModule extends Module implements Configurable {
 	protected void onToggle(boolean state) {
 		if (state) {
 			if (!listening) {
-				WorldRenderEvents.AFTER_ENTITIES.register(this::render);
+				// Guarded at the listener: this runs inside the world pass, where
+				// an escaped exception is a crash on the next frame rather than a
+				// frame without brackets.
+				WorldRenderEvents.AFTER_ENTITIES.register(
+						context -> Guard.run("block overlay", () -> render(context)));
 				listening = true;
 			}
 			lastNanos = 0L;

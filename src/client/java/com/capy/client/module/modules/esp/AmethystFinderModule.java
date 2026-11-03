@@ -38,16 +38,13 @@ import net.minecraft.world.phys.AABB;
  * player is mining; the clusters are the visible, harvestable proof, and a
  * geode always has several.
  *
- * <h2>The bypass</h2>
- * A geode search is only useful on a server that actually sends the clusters,
- * and on the networks this module is built for the clusters are hidden from a
- * distance: the block is simply not in the chunk data until the player is close
- * enough to see it. Scanning further out therefore does nothing except waste
- * ticks and produce stale boxes, so the scan never looks past
- * {@link #BYPASS_RADIUS} blocks. Standing inside a geode is exactly the
- * situation the bypass exists for, and there the clusters are all present. It
- * is automatic - there is no switch to get wrong - and it is also why the boxes
- * vanish when the player walks away: what is no longer sent is no longer shown.
+ * <h2>How far it looks</h2>
+ * As far as the client has chunks. A cluster the client was never sent cannot
+ * be drawn by any client, so the walk covers every loaded chunk inside the
+ * module's range - the whole view distance by default - and nothing further.
+ * There is no shorter cap and no switch: an earlier version stopped at 24
+ * blocks, which meant a geode forty blocks away was invisible until the player
+ * walked up to it even though its clusters were already in memory.
  *
  * <h2>What it draws</h2>
  * Each cluster gets a box in the module's colour, and every geode that reaches
@@ -74,8 +71,6 @@ public final class AmethystFinderModule extends EspModule {
 	 * reported. Groups are merged by distance instead of by cell.
 	 */
 	private static final double MERGE_GAP = 8.0;
-	/** How far out clusters are counted. See the class documentation. */
-	private static final int BYPASS_RADIUS = 24;
 	/** Most geodes remembered for the chat line before the memory is dropped. */
 	private static final int MAX_ANNOUNCED = 256;
 
@@ -98,7 +93,7 @@ public final class AmethystFinderModule extends EspModule {
 	private int lastRange = -1;
 
 	public AmethystFinderModule() {
-		super(Category.BASE_FINDER, "amethyst_finder", 0xFFB07CFF, 32, false);
+		super(Category.BASE_FINDER, "amethyst_finder", 0xFFB07CFF, MAX_RANGE, false);
 		// The threshold, the cluster switch, the announcement and the geode
 		// colour are what this card is opened for; the shared overlay rows come
 		// after them.
@@ -162,8 +157,9 @@ public final class AmethystFinderModule extends EspModule {
 		scratch.clear();
 		scratchGeodes.clear();
 		BlockPos center = mc.player.blockPosition();
-		// The bypass: never look further than the server is willing to show.
-		int limit = Math.min(range(), BYPASS_RADIUS);
+		// Every loaded chunk inside the range. What the server never sent is
+		// simply not there, so this is the largest useful walk, not a guess.
+		int limit = range();
 		double limitSq = (double) limit * limit;
 		int minY = level.getMinY();
 		double px = mc.player.getX();

@@ -64,6 +64,25 @@ public final class GltfRenderer {
 			"stiletto", 0xFF2FB8C6,   // cyan anodised
 			"katana", 0xFFD8B24A);    // gold
 
+	/**
+	 * The colour each style's blade and handle are multiplied by.
+	 *
+	 * <p>Without this every style is the same steel and the same brown wrap,
+	 * which at item scale reads as one knife with six silhouettes - the thing
+	 * players reported as "all my knives are white". The tint is deliberately
+	 * light: the vertex colour multiplies the sheet, so a saturated value would
+	 * paint over the material and a white one would do nothing. These are the
+	 * same hues as {@link #FINISH}, lifted to where the grain of the material
+	 * still shows through.
+	 */
+	private static final Map<String, Integer> STYLE_TINT = Map.of(
+			"karambit", 0xFFFFD7DE,
+			"cleaver", 0xFFD8E6F6,
+			"dagger", 0xFFE6DAFF,
+			"kukri", 0xFFFFE7C4,
+			"stiletto", 0xFFD2F5F9,
+			"katana", 0xFFFFEFC2);
+
 	private GltfRenderer() {
 	}
 
@@ -86,9 +105,8 @@ public final class GltfRenderer {
 	 * the blade keeps its material and the handle keeps its leather.
 	 */
 	private static int tintFor(int part, String style) {
-		// 0 blade, 1 grip, 4 honed edge, 5 cord wrap: all material, all untinted.
 		// 2 guard and 3+ (collars, pins, pommels) are the metal fittings, and
-		// those are what the style is finished in.
+		// those are finished in the style's own colour at full strength.
 		boolean hardware = part == 2
 				|| (part >= GltfLoader.PART_ACCENT && part != GltfLoader.PART_EDGE && part != 5);
 		if (hardware) {
@@ -97,7 +115,10 @@ public final class GltfRenderer {
 				return finish;
 			}
 		}
-		return 0xFFFFFFFF;
+		// Blade, grip, honed edge and cord wrap keep their material texture, but
+		// carry the style's hue so six knives are six objects in the hand.
+		Integer tint = style == null ? null : STYLE_TINT.get(style);
+		return tint != null ? tint : 0xFFFFFFFF;
 	}
 
 	/** The sheet a primitive draws with. */
@@ -147,8 +168,13 @@ public final class GltfRenderer {
 			if (manager == null) {
 				return true;
 			}
+			// The path already starts with "textures/": KnifeTextures builds a
+			// texture location, not a model sprite name. Prepending the folder
+			// again asked for "textures/textures/item/knife/...", which never
+			// exists, so every knife silently fell back to the iron block - the
+			// magenta-and-black checker and the plain grey blade players saw.
 			Identifier file = Identifier.fromNamespaceAndPath(texture.getNamespace(),
-					"textures/" + texture.getPath() + ".png");
+					texture.getPath() + ".png");
 			return manager.getResource(file).isPresent();
 		} catch (Throwable ignored) {
 			return true;
