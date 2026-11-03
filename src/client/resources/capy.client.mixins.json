@@ -13,7 +13,10 @@
 		"SmoothCameraMixin",
 		"FogRendererAccessor",
 		"MouseHandlerAccessor",
-		"GameRendererAccessor"
+		"GameRendererAccessor",
+		"FreecamCameraMixin",
+		"FreecamMouseMixin",
+		"FreecamInputMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

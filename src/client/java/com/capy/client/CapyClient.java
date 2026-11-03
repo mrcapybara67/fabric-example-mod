@@ -18,6 +18,7 @@ import com.capy.client.module.modules.BlockOverlayModule;
 import com.capy.client.module.modules.CustomFOVModule;
 import com.capy.client.module.modules.CustomKnifeModule;
 import com.capy.client.module.modules.CustomSkyModule;
+import com.capy.client.module.modules.FreecamModule;
 import com.capy.client.module.modules.FullbrightModule;
 import com.capy.client.module.modules.HandAuraModule;
 import com.capy.client.module.modules.SmoothCameraModule;
@@ -83,6 +84,9 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(new BlockOverlayModule());
 		modules.register(new HandAuraModule());
 		modules.register(new BlockAnimationModule());
+		// Freecam detaches the camera from the body: a viewer's tool for
+		// inspecting a build or a base without walking over to it.
+		modules.register(new FreecamModule());
 		// The HUD is a set of independent elements, not one panel.
 		HudElements.register(modules);
 

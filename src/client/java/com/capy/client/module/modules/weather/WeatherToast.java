@@ -29,18 +29,21 @@ public final class WeatherToast {
 		CLEAR
 	}
 
-	/** How long the card stays fully readable. */
-	private static final long LIFETIME_MS = 3_400L;
+	/**
+	 * How long the card stays up. Raised with the longer copy: two lines of
+	 * sentence need longer than two lines of label before they are readable.
+	 */
+	private static final long LIFETIME_MS = 5_200L;
 	/** Slide and fade in. */
 	private static final float FADE_IN_MS = 240f;
 	/** Fade out, a little longer so it leaves softly. */
 	private static final float FADE_OUT_MS = 620f;
 
-	private static final int HEIGHT = 46;
-	private static final int PAD = 11;
-	private static final int ICON = 18;
-	private static final int GAP = 8;
-	private static final int TOP = 34;
+	private static final int HEIGHT = 50;
+	private static final int PAD = 12;
+	private static final int ICON = 20;
+	private static final int GAP = 10;
+	private static final int TOP = 30;
 	/** How far the card travels while it fades in. */
 	private static final int SLIDE = 12;
 
@@ -115,19 +118,33 @@ public final class WeatherToast {
 
 		// A short accent bar down the leading edge ties the card to the modules
 		// and the HUD chips.
-		Ui.surface(c, x + 1, y + 8, 2, HEIGHT - 16, 1,
+		Ui.surface(c, x + 1, y + 10, 2, HEIGHT - 20, 1,
 				Ui.withAlpha(accent, a), Ui.withAlpha(UiTheme.ACCENT_DEEP, a));
 
-		UiIcons.draw(c, iconFor(kind), x + PAD, y + (HEIGHT - ICON) / 2, ICON,
+		// The icon sits in a tinted well so it reads as a badge at a glance,
+		// instead of a glyph floating next to two lines of text.
+		int iconCy = y + HEIGHT / 2;
+		Ui.circle(c, x + PAD + ICON / 2, iconCy, ICON / 2 + 5,
+				Ui.withAlpha(accent, Math.round(0x2E * alpha)));
+		UiIcons.draw(c, iconFor(kind), x + PAD, iconCy - ICON / 2, ICON,
 				Ui.withAlpha(accent, Math.round(240f * alpha)));
 
 		int textX = x + PAD + ICON + GAP;
 		int textW2 = w - (textX - x) - PAD;
 		int rowH = HEIGHT / 2;
-		Ui.drawEllipsized(c, medium, title, textX, Ui.centerTextY(y, rowH, medium), textW2,
+		Ui.drawEllipsized(c, medium, title, textX, Ui.centerTextY(y + 3, rowH, medium), textW2,
 				Ui.withAlpha(UiTheme.TEXT, a));
 		Ui.drawEllipsized(c, regular, detail, textX, Ui.centerTextY(y + rowH, rowH, regular), textW2,
 				Ui.withAlpha(accent, Math.round(235f * alpha)));
+
+		// A hairline that drains as the card runs out. It answers the one
+		// question a self dismissing notice raises - how long have I got - and
+		// it does so without a number the player has to read.
+		long remaining = Math.max(0L, LIFETIME_MS - (now - shownAt));
+		int trackW = Math.max(0, w - PAD * 2);
+		int leftW = Math.round(trackW * Math.min(1f, remaining / (float) LIFETIME_MS));
+		Ui.surface(c, x + PAD, y + HEIGHT - 3, leftW, 1, 0,
+				Ui.withAlpha(accent, Math.round(150f * alpha)));
 	}
 
 	private static int accentFor(Kind kind) {

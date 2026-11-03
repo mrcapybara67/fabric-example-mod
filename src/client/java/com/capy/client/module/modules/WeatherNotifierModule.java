@@ -169,34 +169,34 @@ public class WeatherNotifierModule extends Module implements Tickable, Configura
 					? new Notice("capy.weather.thunder_from_rain",
 							"capy.weather.thunder_from_rain.title",
 							"capy.weather.thunder_from_rain.detail",
-							"THE RAIN TURNED TO A STORM", "thunder is rolling in",
+							"RAIN TURNS TO STORM", "the rain got serious - thunder is rolling in",
 							WeatherToast.Kind.THUNDER, SoundEvents.UI_TOAST_IN, 0.55f)
 					: new Notice("capy.weather.thunder_start",
 							"capy.weather.thunder_start.title",
 							"capy.weather.thunder_start.detail",
-							"A THUNDERSTORM HAS STARTED", "stay out of the open",
+							"THUNDERSTORM OVERHEAD", "lightning is live - get out of the open",
 							WeatherToast.Kind.THUNDER, SoundEvents.UI_TOAST_IN, 0.55f);
 			case RAIN -> from == State.THUNDER
 					? new Notice("capy.weather.thunder_end",
 							"capy.weather.thunder_end.title",
 							"capy.weather.thunder_end.detail",
-							"THE THUNDER HAS STOPPED", "the storm is easing",
+							"THE THUNDER PASSES", "the storm is easing - only rain is left",
 							WeatherToast.Kind.RAIN, SoundEvents.UI_TOAST_OUT, 0.85f)
 					: new Notice("capy.weather.rain_start",
 							"capy.weather.rain_start.title",
 							"capy.weather.rain_start.detail",
-							"RAIN HAS STARTED", "the sky is closing in",
+							"THE SKY OPENS", "rain is falling - keep an eye on the horizon",
 							WeatherToast.Kind.RAIN, SoundEvents.UI_TOAST_IN, 0.80f);
 			case CLEAR -> from == State.THUNDER
 					? new Notice("capy.weather.clear_after_storm",
 							"capy.weather.clear_after_storm.title",
 							"capy.weather.clear_after_storm.detail",
-							"THE STORM HAS CLEARED", "clear skies ahead",
+							"THE STORM CLEARS", "clear skies - the worst of it is behind you",
 							WeatherToast.Kind.CLEAR, SoundEvents.UI_TOAST_OUT, 1.05f)
 					: new Notice("capy.weather.rain_end",
 							"capy.weather.rain_end.title",
 							"capy.weather.rain_end.detail",
-							"THE RAIN HAS STOPPED", "the clouds are thinning",
+							"THE RAIN LETS UP", "the clouds are thinning - the world dries off",
 							WeatherToast.Kind.CLEAR, SoundEvents.UI_TOAST_OUT, 0.90f);
 			default -> null;
 		};
