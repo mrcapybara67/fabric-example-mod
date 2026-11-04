@@ -92,6 +92,10 @@ public final class GuiFrame {
 	private GuiStyle style = GuiStyle.NORMAL;
 	/** Set by the header while the style button is under the pointer. */
 	private boolean styleHovered;
+	/** True while the header's theme chip is under the pointer. */
+	private boolean themeHovered;
+	private int themeBtnX;
+	private int themeBtnY;
 	private int styleBtnX;
 	private int styleBtnY;
 	private boolean accentHovered;
@@ -457,6 +461,20 @@ public final class GuiFrame {
 		accentPanel.render(c, type, width, height, mouseX, mouseY, delta);
 	}
 
+	/** Moves to the next interface palette and remembers it. */
+	private void cycleTheme() {
+		List<UiTheme.Palette> palettes = UiTheme.palettes();
+		if (palettes.isEmpty()) {
+			return;
+		}
+		int next = (indexOfTheme(UiTheme.palette().id()) + 1) % palettes.size();
+		// Written through the same dropdown the footer shows, so the two
+		// controls cannot disagree about which theme is selected.
+		themePicker.setOptions(themeLabels(), next);
+		applyThemeIfChanged();
+		clearAllTextFocus();
+	}
+
 	/** Moves to the next GUI style and remembers it. */
 	private void cycleStyle() {
 		style = style.next();
@@ -532,6 +550,7 @@ public final class GuiFrame {
 
 		// The palette and the style switch sit between the page title and the
 		// search field.
+		renderThemeButton(c, type, wx, wy, ww, mouseX, mouseY);
 		renderAccentButton(c, type, wx, wy, ww, mouseX, mouseY);
 		renderStyleButton(c, type, wx, wy, ww, mouseX, mouseY);
 
@@ -580,9 +599,21 @@ public final class GuiFrame {
 		return searchX(wx, ww) - UiTheme.SP_3 - styleButtonWidth();
 	}
 
-	/** The palette chip is one spacing step left of the style chip. */
+	/**
+	 * The palette chip is one spacing step left of the style chip.
+	 */
 	private int accentX(int wx, int ww) {
 		return styleX(wx, ww) - UiTheme.SP_3 - UiTheme.SEARCH_H;
+	}
+
+	/** The theme chip sits left of the palette swatch. */
+	private int themeX(int wx, int ww) {
+		return accentX(wx, ww) - UiTheme.SP_3 - themeButtonWidth();
+	}
+
+	/** Theme chip width: the swatch alone when the header is compact. */
+	private int themeButtonWidth() {
+		return compactHeader() ? UiTheme.SEARCH_H : 108;
 	}
 
 	/**
@@ -591,6 +622,46 @@ public final class GuiFrame {
 	 * control that makes the "the GUI colour is mine" idea discoverable in the
 	 * window styles.
 	 */
+	/**
+	 * The button that switches the interface palette.
+	 *
+	 * <p>It sits in the header, beside the style chip, because that is where a
+	 * theme is looked for. The footer picker is still there on a tall window,
+	 * but the footer is dropped on a short one - which is exactly how a player
+	 * ended up with no way to change the theme at all. A header chip is always
+	 * on screen, always labelled with the palette in use, and clicking it moves
+	 * to the next one, the same gesture the style chip already uses.
+	 */
+	private void renderThemeButton(UiCanvas c, UiType type, int wx, int wy, int ww,
+			int mouseX, int mouseY) {
+		int x = themeX(wx, ww);
+		int y = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
+		int w = themeButtonWidth();
+		int h = UiTheme.SEARCH_H;
+		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+		themeHovered = hovered;
+		themeBtnX = x;
+		themeBtnY = y;
+
+		Ui.surface(c, x, y, w, h, UiTheme.RADIUS,
+				hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
+				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, x, y, w, h, UiTheme.RADIUS, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
+		// A dot in the palette's own accent, so the chip previews the theme it
+		// names rather than only spelling it.
+		Ui.circle(c, x + 10, y + h / 2, 3, UiTheme.palette().accent());
+
+		if (compactHeader()) {
+			return;
+		}
+		UiText font = type.regular();
+		Ui.drawEllipsized(c, font, UiTheme.palette().label(), x + 17,
+				Ui.centerTextY(y, h, font), w - 17 - 16,
+				hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+		UiIcons.draw(c, UiIcons.Icon.CHEVRON, x + w - 14, y + h / 2 - 3, 8,
+				hovered ? UiTheme.TEXT : UiTheme.TEXT_3);
+	}
+
 	private void renderAccentButton(UiCanvas c, UiType type, int wx, int wy, int ww,
 			int mouseX, int mouseY) {
 		int x = accentX(wx, ww);
@@ -754,6 +825,9 @@ public final class GuiFrame {
 			tooltip.show("Esc closes the GUI. Rebind the key in Options - Controls.", hintX, hintY);
 		} else if (accentHovered) {
 			tooltip.show("GUI colours", accentBtnX - 4, accentBtnY + UiTheme.SEARCH_H + 4);
+		} else if (themeHovered) {
+			tooltip.show("Theme: " + UiTheme.palette().label() + " — click to switch.",
+					themeBtnX, themeBtnY + UiTheme.SEARCH_H);
 		} else if (styleHovered) {
 			tooltip.show("GUI style: " + style.label() + " — click to switch.",
 					styleBtnX, styleBtnY + UiTheme.SEARCH_H);
@@ -947,6 +1021,11 @@ public final class GuiFrame {
 			int ax = accentX(windowX(), windowWidth());
 			if (mx >= ax && mx < ax + UiTheme.SEARCH_H && my >= sy && my < sy + UiTheme.SEARCH_H) {
 				accentPanel.toggle();
+				return true;
+			}
+			int tx = themeX(windowX(), windowWidth());
+			if (mx >= tx && mx < tx + themeButtonWidth() && my >= sy && my < sy + UiTheme.SEARCH_H) {
+				cycleTheme();
 				return true;
 			}
 		}

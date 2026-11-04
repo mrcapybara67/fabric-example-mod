@@ -22,6 +22,7 @@ import com.capy.client.module.modules.FreecamModule;
 import com.capy.client.module.modules.FullbrightModule;
 import com.capy.client.module.modules.HandAuraModule;
 import com.capy.client.module.modules.SmoothCameraModule;
+import com.capy.client.module.modules.StaffListModule;
 import com.capy.client.module.modules.SwingSpeedModule;
 import com.capy.client.module.modules.WeatherNotifierModule;
 import com.capy.client.module.modules.esp.AmethystFinderModule;
@@ -87,6 +88,9 @@ public class CapyClient implements ClientModInitializer {
 		// Freecam detaches the camera from the body: a viewer's tool for
 		// inspecting a build or a base without walking over to it.
 		modules.register(new FreecamModule());
+		// The staff list is the display half of a watchlist: a glass box of the
+		// accounts the player named, placed wherever they want it.
+		modules.register(new StaffListModule());
 		// The HUD is a set of independent elements, not one panel.
 		HudElements.register(modules);
 
@@ -148,6 +152,17 @@ public class CapyClient implements ClientModInitializer {
 			boolean editHud = ClientKeybinds.consumeHudEditorClick();
 			if (editHud && client.screen == null && client.player != null) {
 				client.setScreen(new HudEditorScreen());
+		}
+			// Freecam's own key. Toggling rather than opening anything: the point
+			// of the module is to look around while flying, and the moment you
+			// want it is the moment you are moving. Rebound in Controls, so the
+			// key shown on the module card is the key that works.
+			boolean freecamKey = ClientKeybinds.consumeFreecamClick();
+			if (freecamKey && client.screen == null && client.player != null) {
+				FreecamModule freecamModule = modules.get(FreecamModule.class);
+				if (freecamModule != null) {
+					freecamModule.toggle();
+				}
 			}
 			boolean inspect = ClientKeybinds.consumeInspectClick();
 			if (inspect && client.screen == null) {

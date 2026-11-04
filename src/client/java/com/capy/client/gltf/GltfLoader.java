@@ -7,8 +7,13 @@ import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Turns a binary glTF file into a list of {@link GltfMesh} triangle lists.
@@ -136,10 +141,182 @@ public final class GltfLoader {
 				if (indices != null && indices.length < 3) {
 					continue;
 				}
-				out.add(new GltfMesh(positions, normals, uvs, indices, out.size()));
+				out.add(capped(positions, normals, uvs, indices, out.size()));
 			}
 		}
 		return out;
+	}
+
+	/**
+	 * Closes the open edges of a primitive.
+	 *
+	 * <p>A hand authored mesh is rarely watertight. The handles in these models
+	 * are tubes with open ends and several parts are single sheets, which is what
+	 * players saw as a tiny hole in the knife: the surface simply stops, and with
+	 * the world behind it showing through, it reads as a gap in the model. The
+	 * renderer cannot fix that by drawing both sides - an open edge has no
+	 * geometry on either side of it at all.</p>
+	 *
+	 * <p>So the boundary is measured and closed here, once, at load time: every
+	 * edge that only one triangle uses is found, the edges are grouped into
+	 * connected rims, and each rim is fanned shut from a vertex at its centre.
+	 * The result is a closed surface, a few hundred triangles heavier at most,
+	 * and no holes - while the rim's own shape, which is what the silhouette is
+	 * made of, is untouched.</p>
+	 *
+	 * <p>Nothing is closed when the mesh is already watertight, which is the
+	 * common case, so a replacement model pays nothing for this.</p>
+	 */
+	private static GltfMesh capped(float[] positions, float[] normals, float[] uvs, int[] indices, int part) {
+		if (positions == null || positions.length < 9) {
+			return new GltfMesh(positions, normals, uvs, indices, part);
+		}
+		int[] source = indices;
+		if (source == null) {
+			source = new int[positions.length / 3];
+			for (int i = 0; i < source.length; i++) {
+				source[i] = i;
+			}
+		}
+		int triangles = source.length / 3;
+		if (triangles == 0) {
+			return new GltfMesh(positions, normals, uvs, indices, part);
+		}
+		// Every directed edge a triangle walks, counted. An edge whose reverse
+		// was never walked is on the boundary of the surface.
+		Map<Long, Integer> directed = new HashMap<>();
+		for (int t = 0; t < triangles; t++) {
+			int a = source[t * 3];
+			int b = source[t * 3 + 1];
+			int c = source[t * 3 + 2];
+			addEdge(directed, a, b);
+			addEdge(directed, b, c);
+			addEdge(directed, c, a);
+		}
+		List<int[]> boundary = new ArrayList<>();
+		for (Long key : directed.keySet()) {
+			int a = (int) (key >>> 32);
+			int b = (int) (long) key;
+			if (a < 0 || b < 0 || a >= positions.length / 3 || b >= positions.length / 3) {
+				continue;
+			}
+			if (!directed.containsKey(edgeKey(b, a))) {
+				boundary.add(new int[]{a, b});
+			}
+		}
+		if (boundary.isEmpty()) {
+			return new GltfMesh(positions, normals, uvs, indices, part);
+		}
+
+		// Group the boundary into rims: edges that share a vertex belong to the
+		// same opening, so each opening gets one fan and two separate holes never
+		// get bridged to each other.
+		Map<Integer, List<Integer>> touchingVertices = new HashMap<>();
+		for (int i = 0; i < boundary.size(); i++) {
+			touchingVertices.computeIfAbsent(boundary.get(i)[0], k -> new ArrayList<>()).add(i);
+			touchingVertices.computeIfAbsent(boundary.get(i)[1], k -> new ArrayList<>()).add(i);
+		}
+		boolean[] used = new boolean[boundary.size()];
+		List<List<Integer>> rims = new ArrayList<>();
+		ArrayDeque<Integer> queue = new ArrayDeque<>();
+		for (int start = 0; start < boundary.size(); start++) {
+			if (used[start]) {
+				continue;
+			}
+			List<Integer> rim = new ArrayList<>();
+			used[start] = true;
+			queue.add(start);
+			while (!queue.isEmpty()) {
+				int edge = queue.poll();
+				rim.add(edge);
+				int[] pair = boundary.get(edge);
+				for (int v : pair) {
+					List<Integer> neighbours = touchingVertices.get(v);
+					if (neighbours == null) {
+						continue;
+					}
+					for (int other : neighbours) {
+						if (!used[other]) {
+							used[other] = true;
+							queue.add(other);
+						}
+					}
+				}
+			}
+			rims.add(rim);
+		}
+
+		int vertexCount = positions.length / 3;
+		int extra = rims.size();
+		float[] outPositions = java.util.Arrays.copyOf(positions, positions.length + extra * 3);
+		float[] outNormals = normals == null ? null
+				: java.util.Arrays.copyOf(normals, normals.length + extra * 3);
+		float[] outUvs = uvs == null ? null : java.util.Arrays.copyOf(uvs, uvs.length + extra * 2);
+		int[] outIndices = java.util.Arrays.copyOf(source, source.length + boundary.size() * 3);
+		int next = vertexCount;
+		int write = source.length;
+		for (List<Integer> rim : rims) {
+			Set<Integer> vertices = new HashSet<>();
+			for (int edge : rim) {
+				int[] pair = boundary.get(edge);
+				vertices.add(pair[0]);
+				vertices.add(pair[1]);
+			}
+			if (vertices.isEmpty()) {
+				continue;
+			}
+			double px = 0;
+			double py = 0;
+			double pz = 0;
+			double nx = 0;
+			double ny = 0;
+			double nz = 0;
+			double u = 0;
+			double v = 0;
+			for (int vertex : vertices) {
+				px += positions[vertex * 3];
+				py += positions[vertex * 3 + 1];
+				pz += positions[vertex * 3 + 2];
+				if (outNormals != null) {
+					nx += normals[vertex * 3];
+					ny += normals[vertex * 3 + 1];
+					nz += normals[vertex * 3 + 2];
+				}
+				if (outUvs != null) {
+					u += uvs[vertex * 2];
+					v += uvs[vertex * 2 + 1];
+				}
+			}
+			int count = vertices.size();
+			outPositions[next * 3] = (float) (px / count);
+			outPositions[next * 3 + 1] = (float) (py / count);
+			outPositions[next * 3 + 2] = (float) (pz / count);
+			if (outNormals != null) {
+				outNormals[next * 3] = (float) (nx / count);
+				outNormals[next * 3 + 1] = (float) (ny / count);
+				outNormals[next * 3 + 2] = (float) (nz / count);
+			}
+			if (outUvs != null) {
+				outUvs[next * 2] = (float) (u / count);
+				outUvs[next * 2 + 1] = (float) (v / count);
+			}
+			for (int edge : rim) {
+				int[] pair = boundary.get(edge);
+				outIndices[write++] = pair[0];
+				outIndices[write++] = pair[1];
+				outIndices[write++] = next;
+			}
+			next++;
+		}
+		return new GltfMesh(outPositions, outNormals, outUvs, outIndices, part);
+	}
+
+	private static long edgeKey(int a, int b) {
+		return ((long) a << 32) | (b & 0xFFFFFFFFL);
+	}
+
+	private static void addEdge(Map<Long, Integer> edges, int a, int b) {
+		edges.merge(edgeKey(a, b), 1, Integer::sum);
 	}
 
 	// ------------------------------------------------------------------ buffers

@@ -74,6 +74,15 @@ public final class HudRenderer {
 	private static int[] scratchBaseY = new int[16];
 	private static int scratchSize;
 
+	// Panels are laid out by the same pass as the chips, into their own slots.
+	// A panel has its own size, so its width and height are stored beside it.
+	private static HudPanel[] scratchPanels = new HudPanel[4];
+	private static int[] panelWidths = new int[4];
+	private static int[] panelHeights = new int[4];
+	private static int[] panelBaseX = new int[4];
+	private static int[] panelBaseY = new int[4];
+	private static int scratchPanelsSize;
+
 	private HudRenderer() {
 	}
 
@@ -109,6 +118,19 @@ public final class HudRenderer {
 					scratchBaseX[i] + hud.offsetX(), scratchBaseY[i] + hud.offsetY(),
 					scratchWidths[i], hud, sheen);
 		}
+		// Panels last, so a box always paints over the chips it shares a cell
+		// with instead of being cut into by one.
+		for (int i = 0; i < scratchPanelsSize; i++) {
+			HudPanel panel = scratchPanels[i];
+			try {
+				panel.renderPanel(graphics, panelBaseX[i] + panel.offsetX(),
+						panelBaseY[i] + panel.offsetY(), panelWidths[i], panelHeights[i]);
+			} catch (Throwable failure) {
+				// The HUD is drawn on the first frame in a world; one broken panel
+				// must not take the whole HUD - or the frame - with it.
+				com.capy.client.util.Guard.report("hud panel", failure);
+			}
+		}
 	}
 
 	// ----------------------------------------------------------------- layout
@@ -132,42 +154,68 @@ public final class HudRenderer {
 	 */
 	private static void prepare(Minecraft mc, int screenW, int screenH, UiText regular, UiText medium) {
 		scratchSize = 0;
+		scratchPanelsSize = 0;
 		for (Module module : ModuleManager.get().modules()) {
-			if (!(module instanceof HudElementModule hud) || !hud.isEnabled()) {
+			if (!module.isEnabled()) {
 				continue;
 			}
-			if (scratchSize == scratchModules.length) {
-				grow();
+			if (module instanceof HudElementModule hud) {
+				if (scratchSize == scratchModules.length) {
+					grow();
+				}
+				String value = hud.value(mc);
+				String label = hud.labelVisible() ? hud.label() : "";
+				scratchModules[scratchSize] = hud;
+				scratchValues[scratchSize] = value == null ? "" : value;
+				scratchLabels[scratchSize] = label == null ? "" : label;
+				scratchWidths[scratchSize] = chipWidth(regular, medium, scratchLabels[scratchSize],
+						scratchValues[scratchSize], hud.accentBarVisible());
+				scratchSize++;
+			} else if (module instanceof HudPanel panel) {
+				if (scratchPanelsSize == scratchPanels.length) {
+					growPanels();
+				}
+				// A panel with no size this frame (an empty list, no player) still
+				// needs a slot, or the editor could not select it to move it.
+				int w = Math.max(0, panel.panelWidth(mc));
+				int h = Math.max(0, panel.panelHeight(mc));
+				scratchPanels[scratchPanelsSize] = panel;
+				panelWidths[scratchPanelsSize] = w;
+				panelHeights[scratchPanelsSize] = h;
+				scratchPanelsSize++;
 			}
-			String value = hud.value(mc);
-			String label = hud.labelVisible() ? hud.label() : "";
-			scratchModules[scratchSize] = hud;
-			scratchValues[scratchSize] = value == null ? "" : value;
-			scratchLabels[scratchSize] = label == null ? "" : label;
-			scratchWidths[scratchSize] = chipWidth(regular, medium, scratchLabels[scratchSize],
-					scratchValues[scratchSize], hud.accentBarVisible());
-			scratchSize++;
 		}
-		if (scratchSize == 0) {
+		if (scratchSize == 0 && scratchPanelsSize == 0) {
 			return;
 		}
 		// One cell at a time: the column is the anchor modulo three, the row is
-		// the anchor divided by three, and the chips of a cell stack downwards
-		// from the edge that cell belongs to.
+		// the anchor divided by three, and the contents of a cell stack
+		// downwards from the edge that cell belongs to. Chips and panels share
+		// the stack, so the two kinds are laid out as one column and cannot
+		// land on top of each other.
 		for (int anchor = 0; anchor < CELLS; anchor++) {
-			int count = 0;
-			int totalH = 0;
+			int chips = 0;
+			int panels = 0;
+			int chipH = 0;
+			int panelH = 0;
 			for (int i = 0; i < scratchSize; i++) {
-				if (scratchModules[i].anchor() != anchor) {
-					continue;
+				if (scratchModules[i].anchor() == anchor) {
+					chips++;
+					chipH += CHIP_H;
 				}
-				count++;
-				totalH += CHIP_H + GAP;
 			}
-			if (count == 0) {
+			for (int i = 0; i < scratchPanelsSize; i++) {
+				if (scratchPanels[i].anchor() == anchor) {
+					panels++;
+					panelH += panelHeights[i];
+				}
+			}
+			if (chips == 0 && panels == 0) {
 				continue;
 			}
-			totalH -= GAP;
+			int gaps = Math.max(0, chips - 1) + Math.max(0, panels - 1)
+					+ (chips > 0 && panels > 0 ? 1 : 0);
+			int totalH = chipH + panelH + gaps * GAP;
 			int column = anchor % 3;
 			int row = anchor / 3;
 			int y = row == 0 ? MARGIN : row == 1 ? (screenH - totalH) / 2 : screenH - MARGIN - totalH;
@@ -175,13 +223,34 @@ public final class HudRenderer {
 				if (scratchModules[i].anchor() != anchor) {
 					continue;
 				}
-				int w = scratchWidths[i];
-				scratchBaseX[i] = column == 0 ? MARGIN
-						: column == 1 ? (screenW - w) / 2 : screenW - MARGIN - w;
+				scratchBaseX[i] = columnX(column, screenW, scratchWidths[i]);
 				scratchBaseY[i] = y;
 				y += CHIP_H + GAP;
 			}
+			for (int i = 0; i < scratchPanelsSize; i++) {
+				if (scratchPanels[i].anchor() != anchor) {
+					continue;
+				}
+				panelBaseX[i] = columnX(column, screenW, panelWidths[i]);
+				panelBaseY[i] = y;
+				y += panelHeights[i] + GAP;
+			}
 		}
+	}
+
+	/** Left, centre or right edge of a column, for a box of the given width. */
+	private static int columnX(int column, int screenW, int w) {
+		return column == 0 ? MARGIN
+				: column == 1 ? (screenW - w) / 2 : screenW - MARGIN - w;
+	}
+
+	private static void growPanels() {
+		int size = scratchPanels.length * 2;
+		scratchPanels = java.util.Arrays.copyOf(scratchPanels, size);
+		panelWidths = java.util.Arrays.copyOf(panelWidths, size);
+		panelHeights = java.util.Arrays.copyOf(panelHeights, size);
+		panelBaseX = java.util.Arrays.copyOf(panelBaseX, size);
+		panelBaseY = java.util.Arrays.copyOf(panelBaseY, size);
 	}
 
 	private static void grow() {
@@ -230,6 +299,41 @@ public final class HudRenderer {
 
 	public static int chipHeight() {
 		return CHIP_H;
+	}
+
+	/** How many panels the last {@link #prepare} laid out. */
+	public static int panelCount() {
+		return scratchPanelsSize;
+	}
+
+	/** The panel behind a laid out box. */
+	public static HudPanel panelAt(int index) {
+		return scratchPanels[index];
+	}
+
+	public static int panelBaseX(int index) {
+		return panelBaseX[index];
+	}
+
+	public static int panelBaseY(int index) {
+		return panelBaseY[index];
+	}
+
+	/** Where the panel is actually drawn, nudge included. */
+	public static int panelX(int index) {
+		return panelBaseX[index] + scratchPanels[index].offsetX();
+	}
+
+	public static int panelY(int index) {
+		return panelBaseY[index] + scratchPanels[index].offsetY();
+	}
+
+	public static int panelWidth(int index) {
+		return panelWidths[index];
+	}
+
+	public static int panelHeight(int index) {
+		return panelHeights[index];
 	}
 
 	private static int chipWidth(UiText regular, UiText medium, String label, String value,

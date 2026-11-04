@@ -34,10 +34,12 @@ public final class ClientKeybinds {
 	private static final String OPEN_GUI_KEY = "key.capy.open_gui";
 	private static final String INSPECT_KEY = "key.capy.inspect_knife";
 	private static final String HUD_EDITOR_KEY = "key.capy.hud_editor";
+	private static final String FREECAM_KEY = "key.capy.freecam";
 
 	private static KeyMapping openClickGui;
 	private static KeyMapping inspectKnife;
 	private static KeyMapping hudEditor;
+	private static KeyMapping toggleFreecam;
 
 	/** Ticks left to keep trying to hand input back; negative means idle. */
 	private static int restoreTicks = -1;
@@ -65,6 +67,16 @@ public final class ClientKeybinds {
 				HUD_EDITOR_KEY,
 				InputConstants.Type.KEYSYM,
 				GLFW.GLFW_KEY_H,
+				category
+		));
+		// Freecam's own switch, on V rather than inside the GUI: the module is
+		// reached for mid-flight, and opening a window to find it would defeat
+		// the point. Registered here like the rest, so it is rebound in Options
+		// -&gt; Controls and persists with the other keys.
+		toggleFreecam = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+				FREECAM_KEY,
+				InputConstants.Type.KEYSYM,
+				GLFW.GLFW_KEY_V,
 				category
 		));
 	}
@@ -107,6 +119,26 @@ public final class ClientKeybinds {
 			clicked = true;
 		}
 		return clicked;
+	}
+
+	/**
+	 * True on the tick after the freecam key was pressed.
+	 *
+	 * <p>Drained every tick whether or not it is acted on, so a press made while
+	 * a screen was open is dropped rather than replayed on the next tick with
+	 * the world behind it.</p>
+	 */
+	public static boolean consumeFreecamClick() {
+		boolean clicked = false;
+		while (toggleFreecam != null && toggleFreecam.consumeClick()) {
+			clicked = true;
+		}
+		return clicked;
+	}
+
+	/** The freecam binding, so the module card can show the current key. */
+	public static KeyMapping toggleFreecam() {
+		return toggleFreecam;
 	}
 
 	/** The HUD editor binding, so the editor can show the current key. */

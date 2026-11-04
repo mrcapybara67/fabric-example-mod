@@ -76,12 +76,12 @@ public final class GltfRenderer {
 	 * still shows through.
 	 */
 	private static final Map<String, Integer> STYLE_TINT = Map.of(
-			"karambit", 0xFFFFD7DE,
-			"cleaver", 0xFFD8E6F6,
-			"dagger", 0xFFE6DAFF,
-			"kukri", 0xFFFFE7C4,
-			"stiletto", 0xFFD2F5F9,
-			"katana", 0xFFFFEFC2);
+			"karambit", 0xFFFFC2CE,
+			"cleaver", 0xFFBFD6F2,
+			"dagger", 0xFFD6C2FF,
+			"kukri", 0xFFFFD79A,
+			"stiletto", 0xFFB8EEF6,
+			"katana", 0xFFFFE29A);
 
 	private GltfRenderer() {
 	}

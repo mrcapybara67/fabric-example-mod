@@ -11,10 +11,11 @@ import net.minecraft.world.level.block.state.BlockState;
  *
  * A base full of chests next to a wall of shulker boxes is only useful if the
  * two read differently at a glance, so the classification is coarse on purpose:
- * nine kinds, each with its own colour row in the card, rather than a hue per
- * block id. Anything that is storage and is not one of the named kinds falls
- * into {@link #OTHER}, which is also where brewing stands, campfires and
- * chiseled bookshelves land.
+ * eight named kinds, each with its own colour row in the card, rather than a
+ * hue per block id. Anything that is storage and is not one of the named kinds
+ * falls into {@link #OTHER}, which is also where brewing stands, campfires and
+ * chiseled bookshelves land - and which deliberately has no row, so the card
+ * holds only colours the player asked for.
  *
  * <p>A monster spawner is here even though it holds no items: it is the block a
  * mob farm is built around, and finding one is the reason the overlay is open.
@@ -24,22 +25,35 @@ import net.minecraft.world.level.block.state.BlockState;
  * and the rest are an explicit id list.
  */
 public enum StorageKind {
-	CHEST("color_chest", 0xFFF7A93B),
-	SHULKER("color_shulker", 0xFFB07CF2),
-	ENDER_CHEST("color_ender_chest", 0xFF7E6BFF),
-	FURNACE("color_furnace", 0xFFE86A5C),
-	HOPPER("color_hopper", 0xFF6FA8DC),
-	SPAWNER("color_spawner", 0xFFE45CFF),
-	PISTON("color_piston", 0xFF9FB3C8),
-	STICKY_PISTON("color_sticky_piston", 0xFF9BD65B),
-	OTHER("color_other", 0xFF5CE1E6);
+	CHEST("color_chest", 0xFFF7A93B, true),
+	SHULKER("color_shulker", 0xFFB07CF2, true),
+	ENDER_CHEST("color_ender_chest", 0xFF7E6BFF, true),
+	FURNACE("color_furnace", 0xFFE86A5C, true),
+	HOPPER("color_hopper", 0xFF6FA8DC, true),
+	SPAWNER("color_spawner", 0xFFE45CFF, true),
+	PISTON("color_piston", 0xFF9FB3C8, true),
+	STICKY_PISTON("color_sticky_piston", 0xFF9BD65B, true),
+	/**
+	 * Storage that matched no named kind: brewing stands, campfires, chiseled
+	 * bookshelves. Drawn in the overlay's own colour and given no row of its
+	 * own, because a colour for "everything else" is a row the player has to
+	 * manage to say nothing. Still highlighted, just not named.
+	 */
+	OTHER("color_other", 0xFF5CE1E6, false);
 
 	private final String settingKey;
 	private final int defaultColor;
+	private final boolean colorRow;
 
-	StorageKind(String settingKey, int defaultColor) {
+	StorageKind(String settingKey, int defaultColor, boolean colorRow) {
 		this.settingKey = settingKey;
 		this.defaultColor = defaultColor;
+		this.colorRow = colorRow;
+	}
+
+	/** True when this kind gets its own colour row in the module card. */
+	public boolean hasColorRow() {
+		return colorRow;
 	}
 
 	/** The setting key this kind's colour row is stored under. */

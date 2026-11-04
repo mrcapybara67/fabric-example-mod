@@ -76,6 +76,11 @@ public final class StorageEspModule extends EspModule {
 		// costs almost nothing here.
 		super("storage_esp", MAX_RANGE, false);
 		for (StorageKind kind : StorageKind.values()) {
+			if (!kind.hasColorRow()) {
+				// A fallback kind is not a kind the player picks a colour for: it
+				// would be one more row for the container that matched nothing.
+				continue;
+			}
 			colors.put(kind, setting(new ColorSetting(kind.settingKey(), kind.defaultColor())));
 		}
 		// The colour rows belong at the top of the card, where every other
@@ -105,6 +110,9 @@ public final class StorageEspModule extends EspModule {
 	public int colorFor(AABB box) {
 		StorageKind kind = kinds.get(box);
 		ColorSetting setting = kind == null ? null : colors.get(kind);
+		// Anything without a row of its own - the fallback kind - is drawn in
+		// the overlay's own colour, so it is still highlighted and still one
+		// colour rather than an unset one.
 		return setting == null ? super.colorFor(box) : setting.argb();
 	}
 

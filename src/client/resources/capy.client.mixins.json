@@ -15,8 +15,7 @@
 		"MouseHandlerAccessor",
 		"GameRendererAccessor",
 		"FreecamCameraMixin",
-		"FreecamMouseMixin",
-		"FreecamInputMixin"
+		"FreecamMouseMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

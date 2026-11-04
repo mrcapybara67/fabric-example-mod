@@ -10,8 +10,8 @@ import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -21,58 +21,59 @@ import net.minecraft.world.phys.Vec3;
  * Nothing but the camera. There is no second entity, no teleport and no packet:
  * {@code Camera.setup} is where vanilla decides where the view is for the
  * frame, and this module overwrites the position and the rotation at the end of
- * it. The level keeps streaming around the player, the body keeps standing
- * where it stood, and switching the module off restores vanilla's view on the
- * very next frame because nothing was ever changed to undo.
+ * it. The level keeps streaming around the player, the body keeps doing exactly
+ * what its keys say, and switching the module off restores vanilla's view on
+ * the very next frame because nothing was ever changed to undo.
  *
- * <h2>Why it is quiet on a server</h2>
- * A server only knows what the client tells it: position, rotation and input.
- * This module tells it nothing new. The body does not move, so no position
- * changes and no movement packet is produced; the mouse never reaches
- * {@code LocalPlayer.turn}, so no look packet is produced either; and the
- * camera that the player sees is purely local state that is never transmitted.
- * From the server's side the player is standing still and looking straight
- * ahead, which is exactly what they are doing.
+ * <h2>The body is not the camera's business</h2>
+ * Input is never taken away. A player who was sprinting across a field is
+ * still sprinting across it while the camera goes on ahead, and a player who
+ * was standing still is still standing still; the camera is a second viewpoint,
+ * not a replacement for the player. That is also why there is no setting for
+ * it: an input freeze reads as a broken client, and the body was never under
+ * the camera's control to begin with.
  *
- * <p>That is the whole of what a client can do. A camera is never described to
- * a server, so there is nothing to spoof — and equally, no client can promise
- * that a server will not draw its own conclusions from behaviour. Freecam is a
- * viewing tool: it cannot move the body, open containers, reach entities or act
- * at a distance, and anything that claims otherwise is not a camera.</p>
+ * <h2>Looking through walls</h2>
+ * The camera has no collision, and nothing here needs to remove any: it is a
+ * position handed to the renderer, not an entity the world solves movement
+ * against. Stone cannot stop it. From inside a wall it renders exactly what a
+ * viewpoint inside a wall should - the wall around it, the world beyond it,
+ * and no body in the frame.
  *
- * <h2>The feel</h2>
- * Flight is velocity based, not position based. The keys ask for a velocity and
- * the camera eases towards it, so it accelerates out of a standstill and
- * glides to a stop instead of snapping between speeds — the easing is resolved
- * against the frame time, so it feels identical at 30 and at 300 frames per
- * second. Position is integrated from that velocity and interpolated to the
- * frame, so motion is continuous rather than stepping at twenty hertz.
+ * <h2>Why the movement is driven from the frame, not the tick</h2>
+ * An earlier version integrated the flight from {@code onTick}. That put the
+ * camera's only source of motion on a second path that can be starved — a
+ * paused client thread, a launcher that throttles ticks on a phone — and the
+ * symptom was a camera that sat still while the mouse no longer turned the
+ * player: a freeze. The clock here is the render frame's own, so if the world
+ * is being drawn, the camera is being moved. Ticks are used only to notice the
+ * states that should switch the module off.
  *
- * <h2>The three hooks</h2>
- * <ul>
- *   <li><b>where</b> — {@code FreecamCameraMixin}, at the tail of
- *       {@code Camera.setup};</li>
- *   <li><b>where it looks</b> — {@code FreecamMouseMixin}, at the head of
- *       {@code MouseHandler.handleAccumulatedMovement}, which spends the delta
- *       on the camera and swallows it so the body never turns;</li>
- *   <li><b>what the body does</b> — {@code FreecamInputMixin}, at the head of
- *       {@code LocalPlayer.applyInput}, so the same keys cannot walk the
- *       body away underneath the camera.</li>
- * </ul>
+ * <h2>Why it works on a phone</h2>
+ * Android launchers report the window as inactive in ways a desktop window
+ * never does, and the look path used to require an active window. On a phone
+ * that meant every mouse delta was thrown away and the view never turned. Look
+ * is now applied whenever the camera is flying, with no window check and no
+ * screen check: a delta that reached the mouse handler is a delta the player
+ * made.
  *
- * <h2>When it switches itself off</h2>
- * A detached camera outlives its usefulness the moment the player is no longer
- * standing in the world: a respawn, a death, a bed or a level change would
- * otherwise leave the view parked over the old position. Those states turn the
- * module off rather than drawing something wrong, and a new world re-primes the
- * camera at the player's eye instead of at coordinates from the old one.
+ * <h2>What a server sees</h2>
+ * A server only knows what the client tells it. The body moves exactly as it
+ * would have moved with the module off, so its position and look packets are
+ * the ones the player produced by playing; the mouse never reaches
+ * {@code LocalPlayer.turn}, so the body's own heading does not spin with the
+ * camera. The camera's flight is not described on the wire at all - a camera is
+ * a client-side concept the protocol has no field for. What that cannot do is
+ * hide from behavioural inference, and it cannot move the body, open containers
+ * or reach anything at range: the camera is a viewpoint, not a second player.
  */
 public class FreecamModule extends Module implements Tickable, Configurable {
 	/** Just short of straight up and down: a camera that flips over is useless. */
 	private static final float MIN_PITCH = -89.9f;
 	private static final float MAX_PITCH = 89.9f;
-	/** One tick in seconds: velocity is in blocks per second, so this converts. */
-	private static final double TICK_SECONDS = 1.0 / 20.0;
+	/** Bounds on the frame delta, so a stalled frame cannot teleport the camera. */
+	private static final float MIN_FRAME = 0.001f;
+	private static final float MAX_FRAME = 0.05f;
 	/** How much faster the flight is while the sprint key is held. */
 	private static final double SPRINT_FACTOR = 2.5;
 	/** Velocity kept after the distance guard pulls the camera back in. */
@@ -92,101 +93,107 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	 *
 	 * <p>Not a restriction for its own sake. A camera outside the loaded chunks
 	 * is looking at terrain the client does not have, so it renders the edge of
-	 * the world — and the further it goes, the more of the view is nothing.
-	 * Staying near the body keeps the picture complete on any server, whatever
-	 * its view distance, and keeps the camera inside the area the player can
-	 * legitimately see.</p>
+	 * the world. Staying near the body keeps the picture complete on any server,
+	 * whatever its view distance.</p>
 	 */
 	private final SliderSetting maxDistance =
 			setting(new SliderSetting("max_distance", 96, 0, 256, 0));
-	private final BooleanSetting freezePlayer = setting(new BooleanSetting("freeze_player", true));
 	private final BooleanSetting sprintBoost = setting(new BooleanSetting("sprint_boost", true));
 
-	// Velocity in blocks per second, and the resulting position. The previous
-	// tick's position is kept so a frame can interpolate between the two.
+	// Velocity in blocks per second, and the resulting position.
 	private double vx;
 	private double vy;
 	private double vz;
 	private double x;
 	private double y;
 	private double z;
-	private double prevX;
-	private double prevY;
-	private double prevZ;
-	/** Rotation is frame-live: the mouse writes it, so interpolation would lag. */
 	private float yaw;
 	private float pitch;
+	private long lastFrameNanos;
 	/** False until the camera has been placed at the player's eye. */
 	private boolean primed;
 	/** The level the camera was primed in, so a new world re-primes. */
-	private ClientLevel lastLevel;
+	private Level lastLevel;
 
 	public FreecamModule() {
 		super(Category.DONUT_SMP, "freecam");
 	}
 
-	/**
-	 * True while the camera should be drawn from this module.
-	 *
-	 * <p>Requires a primed position as well as the toggle: a module restored
-	 * from the config before a world exists must not park the camera at 0,0,0
-	 * once one does.</p>
-	 */
+	/** True while the camera should be drawn from this module. */
 	public boolean isActive() {
 		return isEnabled() && primed;
-	}
-
-	/** True while the body should ignore its own movement input. */
-	public boolean shouldFreezePlayer() {
-		return isActive() && freezePlayer.value();
 	}
 
 	@Override
 	protected void onToggle(boolean state) {
 		primed = false;
 		lastLevel = null;
+		lastFrameNanos = 0L;
 		stop();
 	}
 
+	/**
+	 * Lifecycle only: the flight itself runs from {@link #updateCamera}.
+	 *
+	 * <p>Death, sleep, removal and a world change are all states where a
+	 * detached camera would be left hanging over a body that has moved on, so
+	 * they are noticed here and the module switches itself off.</p>
+	 */
 	@Override
 	public void onTick(Minecraft mc) {
-		if (!isEnabled() || mc == null || mc.player == null || mc.level == null) {
+		if (!isEnabled()) {
+			return;
+		}
+		if (mc == null || mc.player == null || mc.level == null) {
 			primed = false;
 			return;
 		}
 		LocalPlayer player = mc.player;
-		// States where a detached camera is worse than no freecam: the player
-		// is not standing in the world any more, so the view would be left over
-		// a body that has moved on (or died).
 		if (player.isDeadOrDying() || player.isSleeping() || player.isRemoved()) {
 			setEnabled(false);
 			return;
 		}
 		if (mc.level != lastLevel) {
-			// A new world (or the first one): start at the player's eye rather
-			// than at coordinates that belong to the previous world.
-			lastLevel = mc.level;
 			prime(player);
-			return;
 		}
-		if (!primed) {
+	}
+
+	/**
+	 * Advances the camera by one rendered frame and reports whether it should be
+	 * used. Called from the camera hook, which is the one place that is
+	 * guaranteed to run once per frame while the world is visible.
+	 */
+	public boolean updateCamera(Minecraft mc) {
+		if (!isEnabled() || mc == null || mc.player == null || mc.level == null) {
+			return false;
+		}
+		LocalPlayer player = mc.player;
+		if (player.isDeadOrDying() || player.isSleeping() || player.isRemoved()) {
+			setEnabled(false);
+			return false;
+		}
+		if (!primed || mc.level != lastLevel) {
 			prime(player);
-			return;
 		}
-		prevX = x;
-		prevY = y;
-		prevZ = z;
-		fly(mc, player);
+		long now = System.nanoTime();
+		float dt = lastFrameNanos == 0L ? 1f / 60f : (now - lastFrameNanos) / 1.0e9f;
+		lastFrameNanos = now;
+		dt = Math.max(MIN_FRAME, Math.min(MAX_FRAME, dt));
+		fly(mc, dt);
+		keepNearBody(player);
+		return true;
 	}
 
 	/** Places the camera at the player's eye, looking where they look. */
 	private void prime(LocalPlayer player) {
+		lastLevel = player.level();
 		Vec3 eye = player.getEyePosition();
-		x = prevX = eye.x;
-		y = prevY = eye.y;
-		z = prevZ = eye.z;
+		x = eye.x;
+		y = eye.y;
+		z = eye.z;
 		yaw = player.getYRot();
 		pitch = player.getXRot();
+		lastFrameNanos = 0L;
 		stop();
 		primed = true;
 	}
@@ -198,14 +205,14 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	}
 
 	/**
-	 * One tick of flight.
+	 * One frame of flight.
 	 *
 	 * <p>The keys are read straight from the vanilla mappings, so a rebound key
-	 * works without this module knowing anything about keybinds. Diagonal
-	 * movement is normalised, or holding two keys would fly 1.41 times as fast
-	 * as holding one — the classic freecam speed bug.</p>
+	 * — and an on-screen button a launcher maps to one — works without this
+	 * module knowing anything about either. Diagonal movement is normalised, or
+	 * holding two keys would fly 1.41 times as fast as holding one.</p>
 	 */
-	private void fly(Minecraft mc, LocalPlayer player) {
+	private void fly(Minecraft mc, float dt) {
 		double speedH = horizontalSpeed.real();
 		double speedV = verticalSpeed.real();
 		boolean boosting = sprintBoost.value() && mc.options != null && mc.options.keySprint.isDown();
@@ -214,16 +221,9 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 			speedV *= SPRINT_FACTOR;
 		}
 
-		boolean up = mc.options != null && mc.options.keyUp.isDown();
-		boolean down = mc.options != null && mc.options.keyDown.isDown();
-		boolean right = mc.options != null && mc.options.keyRight.isDown();
-		boolean left = mc.options != null && mc.options.keyLeft.isDown();
-		boolean jump = mc.options != null && mc.options.keyJump.isDown();
-		boolean sneak = mc.options != null && mc.options.keyShift.isDown();
-
-		double forward = axis(up, down);
-		double strafe = axis(right, left);
-		double lift = axis(jump, sneak);
+		double forward = axis(down(mc, 0), down(mc, 1));
+		double strafe = axis(down(mc, 2), down(mc, 3));
+		double lift = axis(down(mc, 4), down(mc, 5));
 		double length = Math.sqrt(forward * forward + strafe * strafe);
 		if (length > 1.0) {
 			forward /= length;
@@ -233,23 +233,41 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		double radians = Math.toRadians(yaw);
 		double sin = Math.sin(radians);
 		double cos = Math.cos(radians);
-		// Yaw 0 faces +Z, so forward is (-sin, cos) and right is (cos, sin).
-		double wantX = (-sin * forward + cos * strafe) * speedH;
-		double wantZ = (cos * forward + sin * strafe) * speedH;
+		// Yaw 0 faces +Z, so forward is (-sin, cos). The right hand of a facing
+		// is that vector turned a quarter turn clockwise, which is (-cos, -sin):
+		// the mirrored form made D fly left and A fly right.
+		double rightX = -cos;
+		double rightZ = -sin;
+		double wantX = (-sin * forward + rightX * strafe) * speedH;
+		double wantZ = (cos * forward + rightZ * strafe) * speedH;
 		double wantY = lift * speedV;
 
 		// Easing towards the wanted velocity rather than setting it: the camera
-		// leans into a movement and coasts out of it, and because the easing is
-		// resolved against the tick length the feel does not change with fps.
+		// leans into a movement and coasts out of it, resolved against the real
+		// frame time so the feel does not change with the refresh rate.
 		float ease = (float) Math.max(1.0, acceleration.real());
-		vx = Motion.approach((float) vx, (float) wantX, ease, (float) TICK_SECONDS);
-		vy = Motion.approach((float) vy, (float) wantY, ease, (float) TICK_SECONDS);
-		vz = Motion.approach((float) vz, (float) wantZ, ease, (float) TICK_SECONDS);
+		vx = Motion.approach((float) vx, (float) wantX, ease, dt);
+		vy = Motion.approach((float) vy, (float) wantY, ease, dt);
+		vz = Motion.approach((float) vz, (float) wantZ, ease, dt);
 
-		x += vx * TICK_SECONDS;
-		y += vy * TICK_SECONDS;
-		z += vz * TICK_SECONDS;
-		keepNearBody(player);
+		x += vx * dt;
+		y += vy * dt;
+		z += vz * dt;
+	}
+
+	/** Index into the movement keys: 0 up, 1 down, 2 right, 3 left, 4 jump, 5 sneak. */
+	private static boolean down(Minecraft mc, int key) {
+		if (mc.options == null) {
+			return false;
+		}
+		return switch (key) {
+			case 0 -> mc.options.keyUp.isDown();
+			case 1 -> mc.options.keyDown.isDown();
+			case 2 -> mc.options.keyRight.isDown();
+			case 3 -> mc.options.keyLeft.isDown();
+			case 4 -> mc.options.keyJump.isDown();
+			default -> mc.options.keyShift.isDown();
+		};
 	}
 
 	/**
@@ -291,18 +309,17 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	 * Steers the camera from a frame's mouse delta.
 	 *
 	 * <p>Called instead of vanilla turning the player, with the same accumulated
-	 * delta vanilla would have used, so the sensitivity and the feel are the
-	 * ones the player already has — scaled by the look speed setting. The yaw is
-	 * kept in -180..180 so a long session cannot accumulate it into a value the
-	 * camera math has to cope with.</p>
+	 * delta vanilla would have used, so the sensitivity is the one the player
+	 * already has — scaled by the look speed setting. The yaw is kept in
+	 * -180..180 so a long session cannot accumulate it into a value the camera
+	 * math has to cope with.</p>
 	 */
 	public void applyLook(double deltaX, double deltaY) {
 		if (deltaX == 0.0 && deltaY == 0.0) {
 			return;
 		}
 		float factor = (float) lookSpeed.real() / 100f;
-		yaw += (float) (deltaX * factor);
-		yaw = wrapDegrees(yaw);
+		yaw = wrapDegrees(yaw + (float) (deltaX * factor));
 		pitch += (float) (deltaY * factor);
 		pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, pitch));
 	}
@@ -318,10 +335,9 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		return wrapped;
 	}
 
-	/** The camera position for a frame, interpolated between the last two ticks. */
-	public Vec3 cameraPosition(float partialTick) {
-		float t = Math.max(0f, Math.min(1f, partialTick));
-		return new Vec3(prevX + (x - prevX) * t, prevY + (y - prevY) * t, prevZ + (z - prevZ) * t);
+	/** The camera position this frame. */
+	public Vec3 cameraPosition() {
+		return new Vec3(x, y, z);
 	}
 
 	public float cameraYaw() {
@@ -330,11 +346,6 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 
 	public float cameraPitch() {
 		return pitch;
-	}
-
-	/** True when the player is looking through the detached camera. */
-	public boolean isFlying() {
-		return isActive();
 	}
 
 	// ---------------------------------------------------------- persistence
@@ -346,7 +357,6 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		lookSpeed.set(ConfigValues.intValue(json, "look_speed", 100));
 		acceleration.set(ConfigValues.intValue(json, "acceleration", 14));
 		maxDistance.set(ConfigValues.intValue(json, "max_distance", 96));
-		freezePlayer.set(ConfigValues.boolValue(json, "freeze_player", true));
 		sprintBoost.set(ConfigValues.boolValue(json, "sprint_boost", true));
 	}
 
@@ -357,7 +367,6 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		json.addProperty("look_speed", lookSpeed.get());
 		json.addProperty("acceleration", acceleration.get());
 		json.addProperty("max_distance", maxDistance.get());
-		json.addProperty("freeze_player", freezePlayer.value());
 		json.addProperty("sprint_boost", sprintBoost.value());
 	}
 }

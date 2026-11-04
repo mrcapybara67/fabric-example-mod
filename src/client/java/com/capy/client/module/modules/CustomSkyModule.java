@@ -418,6 +418,15 @@ public class CustomSkyModule extends Module implements Configurable {
 			fov = 70f;
 		}
 		fov = Math.max(30f, Math.min(150f, fov));
+		// The projection the frame was drawn with.
+		//
+		// The field of view above is the one {@code GameRenderer.getFov} settled
+		// on for this very frame - recorded there, not guessed by the module -
+		// so rebuilding the projection from it gives the tangents the pass is
+		// actually using. Sizing the painting from a stale field of view is what
+		// stretches every theme around the middle of the screen and makes it
+		// slide at the wrong rate during a turn, and this is the only handle on
+		// the frame's projection 1.21.11 exposes to a world render listener.
 		Matrix4f projection = null;
 		try {
 			projection = mc.gameRenderer.getProjectionMatrix(fov);
@@ -441,7 +450,14 @@ public class CustomSkyModule extends Module implements Configurable {
 		// Pitch to pixels, through the same tangent the frame is projected with.
 		// The camera reports a negative pitch when it looks up, and looking up
 		// has to send the sky down, so the sign is reversed here.
-		skyPitch = -viewPitch * (frameH * 0.5f) / Math.max(0.02f, tanHalfV) * 0.0174533f;
+		//
+		// The tangent, not the angle: a projected offset is proportional to
+		// tan(pitch), and using the angle directly made a star field slide at
+		// the wrong rate as the player looked up - slowly near the horizon,
+		// then far faster than the terrain - which reads as the sky warping
+		// rather than as a sky.
+		skyPitch = (float) (-Math.tan(Math.toRadians(Math.max(-89.0, Math.min(89.0, viewPitch))))
+				* (frameH * 0.5f) / Math.max(0.02f, tanHalfV));
 		// Yaw to pixels, through the frame's own horizontal tangent: a turn of
 		// one field of view has to carry the painting exactly one frame width,
 		// or the art slides at a different rate than the terrain it replaced and
@@ -955,8 +971,12 @@ public class CustomSkyModule extends Module implements Configurable {
 		// out from the current field of view, so the field slides at exactly the
 		// rate the terrain does and the stars stay where they belong when the
 		// player turns.
-		float pixelsPerDegree = (frameW * 0.5f) / tanHalfH * 0.0174533f;
-		x -= wrapDegrees(viewYaw) * pixelsPerDegree;
+		// A field is offset by tan(yaw), not by yaw: the screen distance to a
+		// bearing grows faster than the bearing does. The linear form made the
+		// stars race at the edges of a turn and lag in the middle, so the sky
+		// looked sheared for as long as the camera was moving.
+		double panYaw = Math.toRadians(Math.max(-89.0, Math.min(89.0, wrapDegrees(viewYaw))));
+		x -= (float) (Math.tan(panYaw) * (frameW * 0.5f) / Math.max(0.02f, tanHalfH));
 		x = x % frameW;
 		if (x < 0f) {
 			x += frameW;

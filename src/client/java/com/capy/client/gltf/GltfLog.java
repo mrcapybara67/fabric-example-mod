@@ -17,8 +17,22 @@ final class GltfLog {
 	private GltfLog() {
 	}
 
+	/**
+	 * Styles already reported, so a repeated failure is said once.
+	 *
+	 * <p>The cache deliberately does not remember a failure: a transient read
+	 * during a resource reload must not cost a style until the module is
+	 * rebound. The consequence is that a style with no file is asked for on
+	 * every frame the item is visible - which, without this set, was a warning
+	 * log line per frame, per knife in the inventory. The retry still happens;
+	 * only the message is deduplicated.</p>
+	 */
+	private static final java.util.Set<String> REPORTED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
 	static void missing(String style) {
-		LOGGER.warn("No GLTF model for knife style '{}'; using the cuboid model", style);
+		if (REPORTED.add("missing:" + style)) {
+			LOGGER.warn("No GLTF model for knife style '{}'; using the cuboid model", style);
+		}
 	}
 
 	static void loaded(String style, java.util.List<GltfMesh> meshes) {
@@ -30,7 +44,9 @@ final class GltfLog {
 	}
 
 	static void failed(String style, Throwable failure) {
-		LOGGER.warn("Could not read the GLTF model for knife style '{}'", style, failure);
+		if (REPORTED.add("failed:" + style)) {
+			LOGGER.warn("Could not read the GLTF model for knife style '{}'", style, failure);
+		}
 	}
 
 	static void reloadFailure(Throwable failure) {

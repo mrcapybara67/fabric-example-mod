@@ -4,6 +4,7 @@
 	"key.capy.open_gui": "Open Capy GUI",
 	"key.capy.inspect_knife": "Inspect Knife",
 	"key.capy.hud_editor": "HUD Editor",
+	"key.capy.freecam": "Toggle Freecam",
 	"key.category.capy.keybind": "Capy Keybind",
 	"capy.module.swing_speed.name": "Swing Speed",
 	"capy.module.swing_speed.desc": "Retimes the first person swing animation, faster or slower. Attack and mining speed untouched.",
@@ -79,7 +80,6 @@
 	"capy.module.storage_esp.color_spawner": "Spawner colour",
 	"capy.module.storage_esp.color_piston": "Piston colour",
 	"capy.module.storage_esp.color_sticky_piston": "Sticky piston colour",
-	"capy.module.storage_esp.color_other": "Other storage colour",
 	"capy.module.storage_esp.range": "Range",
 	"capy.module.storage_esp.range.unit": "blocks",
 	"capy.module.storage_esp.fill": "Filled box",
@@ -282,6 +282,13 @@
 	"capy.module.freecam.acceleration": "Acceleration",
 	"capy.module.freecam.max_distance": "Distance from body",
 	"capy.module.freecam.max_distance.unit": "blocks",
-	"capy.module.freecam.freeze_player": "Freeze player",
-	"capy.module.freecam.sprint_boost": "Sprint boost"
+	"capy.module.freecam.sprint_boost": "Sprint boost",
+	"capy.module.staff_list.name": "Staff List",
+	"capy.module.staff_list.desc": "A glass box holding the players you watch: their head and the name you typed, placed wherever you like.",
+	"capy.module.staff_list.watchlist": "Players",
+	"capy.module.staff_list.show_header": "Show header",
+	"capy.module.staff_list.background": "Background",
+	"capy.module.staff_list.anchor": "Anchor",
+	"capy.module.staff_list.offset_x": "Offset X",
+	"capy.module.staff_list.offset_y": "Offset Y"
 }
