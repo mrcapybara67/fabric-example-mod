@@ -47,6 +47,8 @@ public final class GuiFrame {
 	private static final int CATEGORY_H_MIN = 15;
 	/** Width of the header button that switches the window style. */
 	private static final int STYLE_BTN_W = 68;
+	/** Width of the header's HUD editor chip when it carries its label. */
+	private static final int HUD_BTN_W = 96;
 
 	/**
 	 * The page the window was last showing.
@@ -101,6 +103,16 @@ public final class GuiFrame {
 	private boolean accentHovered;
 	private int accentBtnX;
 	private int accentBtnY;
+	/** True while the header's HUD editor chip is under the pointer. */
+	private boolean hudHovered;
+	private int hudBtnX;
+	private int hudBtnY;
+	/**
+	 * Opens the drag editor. Supplied by the screen, because the frame is also
+	 * rendered outside Minecraft by the preview tool and must not depend on
+	 * the game's classes.
+	 */
+	private Runnable openHudEditor = () -> {};
 	private int width;
 	private int height;
 	private boolean closeRequested;
@@ -111,6 +123,11 @@ public final class GuiFrame {
 		themeIndex = indexOfTheme(ClientConfig.get().theme());
 		themePicker.setOptions(themeLabels(), themeIndex);
 		style = GuiStyle.byId(ClientConfig.get().guiStyle());
+	}
+
+	/** Wires the header's HUD editor chip to the screen that owns Minecraft. */
+	public void setOpenHudEditor(Runnable action) {
+		openHudEditor = action == null ? () -> {} : action;
 	}
 
 	/** Rebuilds the card list from the registered modules. */
@@ -547,8 +564,9 @@ public final class GuiFrame {
 
 		int fieldX = searchX(wx, ww);
 
-		// The palette and the style switch sit between the page title and the
-		// search field.
+		// The editor, palette and style switches sit between the page title and
+		// the search field.
+		renderHudButton(c, type, wx, wy, ww, mouseX, mouseY);
 		renderThemeButton(c, type, wx, wy, ww, mouseX, mouseY);
 		renderAccentButton(c, type, wx, wy, ww, mouseX, mouseY);
 		renderStyleButton(c, type, wx, wy, ww, mouseX, mouseY);
@@ -615,12 +633,66 @@ public final class GuiFrame {
 		return compactHeader() ? UiTheme.SEARCH_H : 108;
 	}
 
+	/** The HUD editor chip sits one spacing step left of the theme chip. */
+	private int hudX(int wx, int ww) {
+		return themeX(wx, ww) - UiTheme.SP_3 - hudButtonWidth();
+	}
+
+	/**
+	 * The editor chip's width: its name while there is room, the layout icon
+	 * when the header is too narrow to carry another label. The threshold is
+	 * higher than the other chips' because this one is the newest addition and
+	 * must not be the chip that pushes the page title off the band.
+	 */
+	private int hudButtonWidth() {
+		return hudLabelled() ? HUD_BTN_W : UiTheme.SEARCH_H;
+	}
+
+	private boolean hudLabelled() {
+		return !compactHeader() && windowWidth() >= 620;
+	}
+
 	/**
 	 * The accent swatch in the header: a disc in the current window accent,
 	 * inside the same chip the style and close buttons use. It is the one
 	 * control that makes the "the GUI colour is mine" idea discoverable in the
 	 * window styles.
 	 */
+	/**
+	 * The HUD editor chip: a labelled button that opens the drag editor.
+	 *
+	 * <p>The editor already had a keybind, but a keybind is only found by the
+	 * player who reads the controls list. The window is where a HUD is thought
+	 * about, so the door is here as well. The editor opens over the world, not
+	 * inside the GUI: placing a chip means judging it against the scene it will
+	 * sit on.</p>
+	 */
+	private void renderHudButton(UiCanvas c, UiType type, int wx, int wy, int ww,
+			int mouseX, int mouseY) {
+		int x = hudX(wx, ww);
+		int y = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
+		int w = hudButtonWidth();
+		int h = UiTheme.SEARCH_H;
+		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+		hudHovered = hovered;
+		hudBtnX = x;
+		hudBtnY = y;
+
+		Ui.surface(c, x, y, w, h, UiTheme.RADIUS,
+				hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
+				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, x, y, w, h, UiTheme.RADIUS, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
+		int ink = hovered ? UiTheme.TEXT : UiTheme.TEXT_2;
+
+		if (!hudLabelled()) {
+			UiIcons.draw(c, UiIcons.Icon.LAYOUT, x + (w - 8) / 2, y + (h - 8) / 2, 8, ink);
+			return;
+		}
+		UiIcons.draw(c, UiIcons.Icon.LAYOUT, x + 9, y + (h - 8) / 2, 8, ink);
+		UiText font = type.regular();
+		font.draw(c, "Edit HUD", x + 22, Ui.centerTextY(y, h, font), ink);
+	}
+
 	/**
 	 * The button that switches the interface palette.
 	 *
@@ -822,6 +894,9 @@ public final class GuiFrame {
 				&& mouseY >= hintY - 2 && mouseY < hintY + type.regular().lineHeight() + 2;
 		if (hintHovered) {
 			tooltip.show("Esc closes the GUI. Rebind the key in Options - Controls.", hintX, hintY);
+		} else if (hudHovered) {
+			tooltip.show("HUD Editor - drag chips and boxes to place them.",
+					hudBtnX, hudBtnY + UiTheme.SEARCH_H);
 		} else if (accentHovered) {
 			tooltip.show("GUI colours", accentBtnX - 4, accentBtnY + UiTheme.SEARCH_H + 4);
 		} else if (themeHovered) {
@@ -1013,6 +1088,14 @@ public final class GuiFrame {
 		if (button == 0) {
 			int sx = styleX(windowX(), windowWidth());
 			int sy = windowY() + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
+			int hx = hudX(windowX(), windowWidth());
+			if (mx >= hx && mx < hx + hudButtonWidth() && my >= sy && my < sy + UiTheme.SEARCH_H) {
+				// The screen closes through its own outro first; the editor is
+				// opened when that finishes, so the player never sees two screens
+				// fight over the mouse.
+				openHudEditor.run();
+				return true;
+			}
 			if (mx >= sx && mx < sx + styleButtonWidth() && my >= sy && my < sy + UiTheme.SEARCH_H) {
 				cycleStyle();
 				return true;

@@ -63,6 +63,15 @@ public class ClickGuiScreen extends Screen {
 	private float closingFrom = 1f;
 	/** True once the screen is really closed; keeps the close idempotent. */
 	private boolean finished;
+	/**
+	 * True when the close was asked for by the header's HUD editor chip.
+	 *
+	 * <p>The editor is opened after the outro, not during it: a screen swapped
+	 * in from the middle of the close leaves the click GUI drawing a window it
+	 * no longer owns. This way the close saves the config, restores the input
+	 * and then hands the frame to the editor.</p>
+	 */
+	private boolean openEditorOnClose;
 
 	/** When the previous frame was drawn, in {@link System#nanoTime()} units. */
 	private long lastFrameAt;
@@ -72,6 +81,10 @@ public class ClickGuiScreen extends Screen {
 
 	public ClickGuiScreen() {
 		super(Component.translatable("capy.gui.title"));
+		frame.setOpenHudEditor(() -> {
+			openEditorOnClose = true;
+			onClose();
+		});
 	}
 
 	@Override
@@ -217,6 +230,12 @@ public class ClickGuiScreen extends Screen {
 		finished = true;
 		ClientConfig.saveNow();
 		super.onClose();
+		if (openEditorOnClose) {
+			openEditorOnClose = false;
+			if (minecraft != null && minecraft.player != null) {
+				minecraft.setScreen(new HudEditorScreen());
+			}
+		}
 		// Vanilla re-grabs the mouse and restores the *toggle* keys, but it does
 		// not read a held movement key back into its mapping, and it skips the
 		// mouse entirely when the window is not focused. The restore is done
