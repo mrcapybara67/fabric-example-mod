@@ -455,6 +455,18 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		return probe.value();
 	}
 
+	/**
+	 * The evidence the module currently holds for one account.
+	 *
+	 * <p>Read-only and copied, because the staff list asks for it a few times a
+	 * second while packets keep arriving. Empty when the module is off, so a
+	 * reader degrades to its own live scans rather than showing stale tags from
+	 * a session that stopped watching.</p>
+	 */
+	public List<Observation> evidenceFor(UUID subject) {
+		return isEnabled() ? buffer.window(subject) : List.of();
+	}
+
 	/** A one line state summary, used by the log when a session starts. */
 	public String summary() {
 		return String.format(Locale.ROOT, "%s · %s · %d watched · %d detectors",

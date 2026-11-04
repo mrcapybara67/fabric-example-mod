@@ -166,8 +166,15 @@ public final class Correlator {
 		return Confidence.LOW;
 	}
 
-	/** The wording the face alert uses, picked by the strongest thing proven. */
-	private static AdminAlert.Kind kindFor(List<Observation> observations) {
+	/**
+	 * The wording the face alert uses, picked by the strongest thing proven.
+	 *
+	 * <p>Public because the staff list labels its rows with the same evidence:
+	 * a probe hit, a silent tab removal or an unlisted entity has to read the
+	 * same way in the box as it does in an alert, and two copies of this
+	 * precedence would drift the first time a kind was added.</p>
+	 */
+	public static AdminAlert.Kind kindFor(List<Observation> observations) {
 		boolean ghost = false;
 		boolean vanished = false;
 		boolean hiddenTag = false;

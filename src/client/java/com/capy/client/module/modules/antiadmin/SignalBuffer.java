@@ -105,6 +105,52 @@ public final class SignalBuffer {
 		return out;
 	}
 
+	/**
+	 * The evidence held for one subject, oldest first, or an empty list.
+	 *
+	 * <p>The window is applied to the copy, so a caller reading the staff list a
+	 * few times a second never sees an observation the correlator would already
+	 * have aged out. Nothing is consumed: the correlator's own snapshot is a
+	 * separate read of the same buffer.</p>
+	 */
+	public List<Observation> window(UUID subject) {
+		if (subject == null) {
+			return List.of();
+		}
+		long oldest = tick - WINDOW_TICKS;
+		List<Observation> out = new ArrayList<>();
+		buffers.computeIfPresent(subject, (key, deque) -> {
+			for (Observation observation : deque) {
+				if (observation.tick() >= oldest) {
+					out.add(observation);
+				}
+			}
+			return deque.isEmpty() ? null : deque;
+		});
+		return out.isEmpty() ? List.of() : List.copyOf(out);
+	}
+
+	/**
+	 * The subject remembered under a name, or null.
+	 *
+	 * <p>A fully hidden account has no player info entry left, so the name is
+	 * the only identity the client holds for it; detectors that confirm such an
+	 * account key its evidence by a derived id and register the name here. This
+	 * is what lets the staff list find that evidence from a name the user
+	 * typed.</p>
+	 */
+	public static UUID namedSubject(String name) {
+		if (name == null || name.isBlank()) {
+			return null;
+		}
+		for (Map.Entry<UUID, String> entry : SUBJECT_NAMES.entrySet()) {
+			if (entry.getValue() != null && entry.getValue().equalsIgnoreCase(name)) {
+				return entry.getKey();
+			}
+		}
+		return null;
+	}
+
 	/** Drops everything. Called on a world change, a disconnect or a toggle. */
 	public void clear() {
 		buffers.clear();

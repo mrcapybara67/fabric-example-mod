@@ -288,6 +288,7 @@
 	"capy.module.staff_list.watchlist": "Players",
 	"capy.module.staff_list.show_header": "Show header",
 	"capy.module.staff_list.background": "Background",
+	"capy.module.staff_list.evidence": "Use Anti Admin evidence",
 	"capy.module.staff_list.anchor": "Anchor",
 	"capy.module.staff_list.offset_x": "Offset X",
 	"capy.module.staff_list.offset_y": "Offset Y"

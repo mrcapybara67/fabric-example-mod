@@ -12,9 +12,15 @@ import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
+import com.capy.client.module.ModuleManager;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.WatchlistSetting;
+import com.capy.client.module.modules.antiadmin.AdminAlert;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
+import com.capy.client.module.modules.antiadmin.Correlator;
+import com.capy.client.module.modules.antiadmin.DetectionKind;
+import com.capy.client.module.modules.antiadmin.Observation;
+import com.capy.client.module.modules.antiadmin.SignalBuffer;
 import com.capy.client.module.modules.hud.HudElementModule;
 import com.capy.client.module.modules.hud.HudPanel;
 import com.google.gson.JsonArray;
@@ -27,9 +33,11 @@ import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.level.GameType;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -80,6 +88,15 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 			HudElementModule.ANCHOR_TOP_LEFT, HudElementModule.ANCHOR_BOTTOM_RIGHT));
 	private final SliderSetting offsetX = setting(new SliderSetting("offset_x", 0, -MAX_NUDGE, MAX_NUDGE));
 	private final SliderSetting offsetY = setting(new SliderSetting("offset_y", 0, -MAX_NUDGE, MAX_NUDGE));
+	/**
+	 * Whether the Anti Admin evidence may label a row.
+	 *
+	 * <p>On by default: the whole point of watching a name is to be told when
+	 * the server is hiding them. It is a setting because the evidence comes from
+	 * another module, and a user who turned that module off to stop its alerts
+	 * should not find its tags on the staff list.</p>
+	 */
+	private final BooleanSetting evidence = setting(new BooleanSetting("evidence", true));
 
 	/** What the client can currently prove about a watched account. */
 	private enum Status {
@@ -87,6 +104,10 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		NONE,
 		/** Sent as an entity but missing from the player list: a vanish. */
 		VANISHED,
+		/** The server's own tab completion named them while the list hid them. */
+		PROBED,
+		/** Their entity outlived their tab entry: the body is still being drawn. */
+		GHOST,
 		/** Listed as a spectator, so no entity is sent to survival clients. */
 		SPECTATOR,
 		/** On a team that hides nametags: the older vanish style. */
@@ -291,32 +312,56 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		}
 		List<AdminDetector.Match> inWorld = AdminDetector.scan(mc, watchlist);
 		List<AdminDetector.TabTell> tells = AdminDetector.scanTells(mc, watchlist);
+		AntiAdminModule antiAdmin = evidence.value() ? ModuleManager.get().get(AntiAdminModule.class) : null;
+		boolean withEvidence = antiAdmin != null && antiAdmin.isEnabled();
 		for (String name : watchlist.entries()) {
 			AdminDetector.Match entity = findMatch(inWorld, name);
 			AdminDetector.TabTell tell = findTell(tells, name);
+			PlayerInfo info = tabEntry(mc, name);
 			PlayerSkin skin = null;
 			Status status = Status.NONE;
+			UUID subject = null;
 			if (entity != null) {
 				skin = entity.skin();
+				subject = entity.uuid();
 				// An entity whose account is no longer in the player list is the
 				// signature of a vanish: the server is still drawing the body but
 				// has taken the account off the tab.
-				status = listed(mc, entity.uuid()) ? Status.NONE : Status.VANISHED;
+				status = listed(mc, subject) ? Status.NONE : Status.VANISHED;
 			}
 			if (tell != null) {
 				if (skin == null) {
 					skin = tell.match().skin();
 				}
+				if (subject == null) {
+					subject = tell.match().uuid();
+				}
 				status = tell.tell() == AdminDetector.Tell.SPECTATOR
 						? Status.SPECTATOR : Status.HIDDEN;
 			}
-			if (skin == null) {
-				PlayerInfo info = tabEntry(mc, name);
-				if (info != null) {
+			if (info != null) {
+				if (skin == null) {
 					skin = info.getSkin();
-					if (status == Status.NONE && info.getGameMode() == GameType.SPECTATOR) {
-						status = Status.SPECTATOR;
-					}
+				}
+				if (subject == null && info.getProfile() != null) {
+					subject = info.getProfile().id();
+				}
+				if (status == Status.NONE && info.getGameMode() == GameType.SPECTATOR) {
+					status = Status.SPECTATOR;
+				}
+			}
+			// A fully hidden account has no live match and no list entry, so the
+			// only identity left is the one the probe remembered by name.
+			if (subject == null) {
+				subject = SignalBuffer.namedSubject(name);
+			}
+			// What the Anti Admin module has proved about this account. This is
+			// the half no live scan can provide: a probe hit or a silent tab
+			// removal names a player the client is no longer sent anything about.
+			if (withEvidence && subject != null) {
+				Status proved = statusFor(provedKind(antiAdmin.evidenceFor(subject)));
+				if (proved != null) {
+					status = proved;
 				}
 			}
 			String key = name.toLowerCase(Locale.ROOT);
@@ -387,10 +432,53 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		return null;
 	}
 
+	/**
+	 * The strongest thing the evidence proves, or null when it proves nothing.
+	 *
+	 * <p>The same bar the correlator holds alerts to: one weak signal on its own
+	 * is not a tag, because a stray footstep names the wrong person far more
+	 * often than the right one. A strong kind, or two independent kinds, is what
+	 * it takes to say something about a row.</p>
+	 */
+	private static AdminAlert.Kind provedKind(List<Observation> evidence) {
+		Set<DetectionKind> kinds = new HashSet<>();
+		boolean strong = false;
+		for (Observation observation : evidence) {
+			DetectionKind kind = observation.kind();
+			if (kind == DetectionKind.NPC_FINGERPRINT) {
+				// A static stand-in is evidence of nobody, not of a person.
+				continue;
+			}
+			kinds.add(kind);
+			strong |= kind.strong();
+		}
+		if (kinds.isEmpty() || (!strong && kinds.size() < 2)) {
+			return null;
+		}
+		return Correlator.kindFor(evidence);
+	}
+
+	/** Maps the alert wording on to the row's own vocabulary. */
+	private static Status statusFor(AdminAlert.Kind kind) {
+		if (kind == null) {
+			return null;
+		}
+		return switch (kind) {
+			case PROBED -> Status.PROBED;
+			case GHOST -> Status.GHOST;
+			case VANISHED -> Status.VANISHED;
+			case SPECTATOR -> Status.SPECTATOR;
+			case HIDDEN_TAG -> Status.HIDDEN;
+			default -> null;
+		};
+	}
+
 	/** The tag drawn at the end of a row, or an empty string for none. */
 	private static String tagFor(Status status) {
 		return switch (status) {
 			case VANISHED -> "VANISH";
+			case PROBED -> "PROBED";
+			case GHOST -> "GHOST";
 			case SPECTATOR -> "SPEC";
 			case HIDDEN -> "HIDDEN";
 			default -> "";
@@ -400,7 +488,8 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 	/** The colour of a status: amber for a vanish, accent for the rest. */
 	private static int tagColor(Status status) {
 		return switch (status) {
-			case VANISHED -> 0xFFFFC24B;
+			case VANISHED, GHOST -> 0xFFFFC24B;
+			case PROBED -> 0xFFB388FF;
 			case SPECTATOR -> UiTheme.ACCENT;
 			case HIDDEN -> UiTheme.ACCENT_DEEP;
 			default -> UiTheme.TEXT_3;
@@ -475,6 +564,7 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		watchlist.set(ConfigValues.stringList(json, "watchlist"));
 		showHeader.set(ConfigValues.boolValue(json, "show_header", true));
 		background.set(ConfigValues.intValue(json, "background", 92));
+		evidence.set(ConfigValues.boolValue(json, "evidence", true));
 		anchor.set(ConfigValues.intValue(json, "anchor", HudElementModule.ANCHOR_TOP_RIGHT));
 		offsetX.set(ConfigValues.intValue(json, "offset_x", 0));
 		offsetY.set(ConfigValues.intValue(json, "offset_y", 0));
@@ -489,6 +579,7 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		json.add("watchlist", names);
 		json.addProperty("show_header", showHeader.value());
 		json.addProperty("background", Math.round(background.real()));
+		json.addProperty("evidence", evidence.value());
 		json.addProperty("anchor", anchor());
 		json.addProperty("offset_x", offsetX());
 		json.addProperty("offset_y", offsetY());
