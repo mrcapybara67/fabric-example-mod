@@ -116,11 +116,6 @@ public final class WeatherToast {
 		Ui.surface(c, x, y, w, HEIGHT, UiTheme.RADIUS, panelTop, panelBottom);
 		Ui.outline(c, x, y, w, HEIGHT, UiTheme.RADIUS, Ui.withAlpha(accent, Math.round(150f * alpha)));
 
-		// A short accent bar down the leading edge ties the card to the modules
-		// and the HUD chips.
-		Ui.surface(c, x + 1, y + 10, 2, HEIGHT - 20, 1,
-				Ui.withAlpha(accent, a), Ui.withAlpha(UiTheme.ACCENT_DEEP, a));
-
 		// The icon sits in a tinted well so it reads as a badge at a glance,
 		// instead of a glyph floating next to two lines of text.
 		int iconCy = y + HEIGHT / 2;

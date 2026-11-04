@@ -615,8 +615,15 @@ public final class Ui {
 	}
 
 	/**
-	 * A slow specular band that drifts across a surface, the way light slides
-	 * over a curved sheet.
+	 * The polished-glass treatment: a lit top, one soft travelling reflection
+	 * and a narrow bright streak inside it.
+	 *
+	 * <p>A single translucent band was not enough to read as glass; it looked
+	 * like a moving highlight on a flat card. Real glass has three things at
+	 * once - a broad reflection of the room that brightens towards its top, a
+	 * soft band sliding across the face, and a hard specular streak where the
+	 * surface curves towards the light. The three layers are drawn here so every
+	 * glass surface shares them.
 	 *
 	 * @param phase 0..1 position of the band along the surface
 	 */
@@ -634,23 +641,44 @@ public final class Ui {
 			return;
 		}
 
-		// One column at a time, each with its own alpha: the band is then
-		// perfectly smooth instead of showing steps.
-		final float center = phase * (iw + 120.0f) - 60.0f;
-		final float halfWidth = 44.0f;
+		// 1. The room reflected in the sheet: the top third is brighter and
+		//    fades out, which is the cue that reads as "glossy" far more than
+		//    any single band does.
+		c.gradient(ix, iy, ix + iw, iy + Math.max(1, ih * 2 / 5), 0x2AFFFFFF, 0x00FFFFFF);
+
+		// 2. A soft, wide reflection that drifts with the clock.
+		final float center = phase * (iw + 160.0f) - 80.0f;
+		drawSheenBand(c, ix, iy, iw, ih, center, 52f, 0x0E);
+		// 3. The hard streak inside it: narrow, bright, and the thing the eye
+		//    follows. One column at a time, each with its own alpha, so the
+		//    edges are smooth instead of stepped.
+		drawSheenBand(c, ix, iy, iw, ih, center, 13f, 0x1F);
+
+		// 4. The lower edge catches light too - the second surface of a pane.
+		//    One pixel, inside the rim, so it reads as thickness, not a border.
+		int lower = iy + ih - 1;
+		if (lower > iy + 2) {
+			c.fill(ix + Math.max(0, r / 2), lower, ix + iw - Math.max(0, r / 2), lower + 1,
+					0x16FFFFFF);
+		}
+	}
+
+	/** One soft vertical reflection, centred on {@code center}. */
+	private static void drawSheenBand(UiCanvas c, int ix, int iy, int iw, int ih,
+			float center, float halfWidth, int peak) {
 		int from = (int) Math.floor(center - halfWidth);
 		int to = (int) Math.ceil(center + halfWidth);
 		// The band is clamped to the surface instead of being clipped to it.
 		// A scissor change flushes the batched GUI geometry, and this runs on
-		// every frame of both styles; two fills of arithmetic are far cheaper
-		// than the two flushes the clip used to cost.
+		// every frame of every glass surface; two fills of arithmetic are far
+		// cheaper than the two flushes the clip used to cost.
 		for (int col = from; col <= to; col += 2) {
 			float d = (col + 0.5f - center) / halfWidth;
 			if (d <= -1f || d >= 1f) {
 				continue;
 			}
 			float a = 1f - d * d;
-			int alpha = Math.round(0x12 * a * a);
+			int alpha = Math.round(peak * a * a);
 			if (alpha <= 0) {
 				continue;
 			}

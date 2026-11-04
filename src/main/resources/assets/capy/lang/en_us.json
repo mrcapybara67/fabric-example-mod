@@ -284,7 +284,7 @@
 	"capy.module.freecam.max_distance.unit": "blocks",
 	"capy.module.freecam.sprint_boost": "Sprint boost",
 	"capy.module.staff_list.name": "Staff List",
-	"capy.module.staff_list.desc": "A glass box holding the players you watch: their head and the name you typed, placed wherever you like.",
+	"capy.module.staff_list.desc": "A glass box holding the players you watch: their head and their name, shown while they are on the server, placed wherever you like.",
 	"capy.module.staff_list.watchlist": "Players",
 	"capy.module.staff_list.show_header": "Show header",
 	"capy.module.staff_list.background": "Background",

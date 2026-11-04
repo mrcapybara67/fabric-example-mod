@@ -415,7 +415,6 @@ public final class GuiFrame {
 		}
 		// A soft light from above: the top of the window catches the light.
 		Ui.glow(c, wx + 2, wy + 2, ww - 4, Math.min(wh, 90), UiTheme.PALE_CHERRY, 0.05f);
-		Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());
 		Ui.outline(c, wx, wy, ww, wh, r, UiTheme.BORDER);
 		Ui.innerBevel(c, wx, wy, ww, wh, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 		// One accent hairline along the top edge. It is the only place the shell

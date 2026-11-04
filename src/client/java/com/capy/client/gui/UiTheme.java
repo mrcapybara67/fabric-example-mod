@@ -20,8 +20,8 @@ import java.util.Map;
  *     <li>{@code sakura_deep} — darker canvas and a hotter pink, for players
  *         who want maximum contrast against a bright world.</li>
  *     <li>{@code sakura_blush} — softer, lighter and pinker, a calmer sheet.</li>
- *     <li>{@code liquid_glass} — cold blue glass and an ice accent: the second
- *         family, picked with the same picker.</li>
+ *     <li>{@code liquid_glass} — polished gray glass with white light on its
+ *         edges: the second family, picked with the same picker.</li>
  *   </ul>
  *
  * Colours are plain ARGB ints so they can be blended and alpha-scaled without
@@ -165,48 +165,53 @@ public final class UiTheme {
 	);
 
 	/**
-	 * Liquid Glass: a cool, translucent sheet with an ice blue accent.
+	 * Liquid Glass: a polished gray pane with white light on its edges.
 	 *
 	 * <p>The second family rather than another shade of Sakura. Where Sakura is
-	 * warm plum paper, this is cold glass: darker, bluer surfaces with a tighter
-	 * value range - so the hairlines and the accent do the separating - and an
-	 * accent that reads as light rather than as ink. The text tokens stay near
-	 * white because a glass sheet is read through, not on.
+	 * warm plum paper, this is ground glass: neutral graphite surfaces with a
+	 * tight brightness range, a bright white-gray rim that defines the shape, and
+	 * an accent that reads as reflected light rather than as ink. It is
+	 * deliberately not white on white - a sheet of glass is mostly the colour of
+	 * what it covers, with a polished grey body and a white specular line along
+	 * the top and the edges.
 	 */
 	private static final Palette LIQUID_GLASS = new Palette(
 			"liquid_glass",
 			"Liquid Glass",
-			// A deeper scrim and a tighter value range: glass is read as an edge
-			// and a glow, not as a patch of colour, so the sheet stays close to
-			// the scene it covers and the hairlines do the talking.
-			0xA6040A12,
-			0xFF141F2B,
-			0xFF080F17,
-			0xFF1B2836,
-			0xFF111B26,
-			0xFF24333F,
-			0xFF223040,
-			0xFF16222E,
-			0xFF2E4256,
-			0xFF22313F,
-			0xFF0F1922,
-			0xFF0A121A,
-			0xFF1A2733,
-			0xFF121C26,
-			// A brighter rim: on a near black sheet this line is what defines
-			// the shape, so it carries more contrast than in the plum palettes.
-			0xFF6E8CAE,
-			0xFF7CE0FF,
-			0xFFC9F1FF,
-			0xFF1D86B4,
-			0x557CE0FF,
-			0xFFE2FAFF,
-			0xFFF4FDFF,
-			0xFFFBFFFF,
-			0xFFD3E2F0,
-			0xFFAFC0D2,
-			0xFF93A6BA,
-			0xFF04202C
+			// A neutral scrim: glass should dim the world without tinting it.
+			0x8C0A0C0F,
+			// Polished graphite shell, lit at the top and falling into shadow.
+			0xFF3A3F46,
+			0xFF23272C,
+			0xFF3F444C,
+			0xFF2A2F35,
+			// The secondary surface is the brightest plate: it is the one that
+			// reads as the polished face of the glass.
+			0xFF4A5058,
+			0xFF41464E,
+			0xFF2E333A,
+			0xFF525963,
+			0xFF3A4048,
+			0xFF24282E,
+			0xFF1A1E23,
+			0xFF555C66,
+			0xFF3B4149,
+			// A bright rim: on a neutral sheet this line is what defines the
+			// shape, and it is the same white the specular band uses.
+			0xFFC7D0DA,
+			// White light for enabled state, soft white for hover, grey for the
+			// deep end - the accent is a reflection, not a colour.
+			0xFFF2F6FA,
+			0xFFFFFFFF,
+			0xFFAEB8C4,
+			0x4DFFFFFF,
+			0xFFF7FAFD,
+			0xFFFFFFFF,
+			0xFFFFFFFF,
+			0xFFDCE3EB,
+			0xFFAFB8C3,
+			0xFF86909C,
+			0xFF1A1E23
 	);
 
 	private static final Map<String, Palette> PALETTES = new LinkedHashMap<>();

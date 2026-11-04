@@ -3,7 +3,6 @@ package com.capy.client.module.modules.hud;
 import com.capy.client.config.ConfigValues;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
-import com.capy.client.module.ColorSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
@@ -68,8 +67,6 @@ public abstract class HudElementModule extends Module implements Configurable {
 	private final SliderSetting offsetY;
 	private final BooleanSetting showLabel;
 	private final SliderSetting background;
-	private final BooleanSetting accentBar;
-	private final ColorSetting accent;
 
 	protected HudElementModule(String id, String label, int defaultAnchor) {
 		super(Category.HUD, id);
@@ -84,10 +81,6 @@ public abstract class HudElementModule extends Module implements Configurable {
 		// world, and the world has to stay readable through it. Zero draws the
 		// value straight over the scene, which is the look some players want.
 		this.background = setting(new SliderSetting("background", 95, 0, 100));
-		this.accentBar = setting(new BooleanSetting("accent_bar", true));
-		// Zero means "the interface accent", so a chip follows the theme until
-		// the player gives it a colour of its own.
-		this.accent = setting(new ColorSetting("accent", 0));
 	}
 
 	/** The muted prefix drawn before the value; empty for a bare readout. */
@@ -158,17 +151,6 @@ public abstract class HudElementModule extends Module implements Configurable {
 		return Math.round(Math.max(0f, Math.min(1f, (float) background.real() / 100f)) * 255f);
 	}
 
-	/** False draws no accent bar, for a chip that should disappear into the HUD. */
-	public boolean accentBarVisible() {
-		return accentBar.value();
-	}
-
-	/** The chip's own accent, or 0 to follow the interface accent. */
-	public int accentArgb() {
-		int argb = accent.argb();
-		return (argb >>> 24) == 0 ? 0 : argb;
-	}
-
 	// ---------------------------------------------------------- persistence
 
 	@Override
@@ -178,8 +160,6 @@ public abstract class HudElementModule extends Module implements Configurable {
 		offsetY.set(ConfigValues.intValue(json, "offset_y", 0));
 		showLabel.set(ConfigValues.boolValue(json, "show_label", true));
 		background.set(ConfigValues.intValue(json, "background", 95));
-		accentBar.set(ConfigValues.boolValue(json, "accent_bar", true));
-		accent.set(ConfigValues.intValue(json, "accent", 0));
 	}
 
 	@Override
@@ -189,8 +169,6 @@ public abstract class HudElementModule extends Module implements Configurable {
 		json.addProperty("offset_y", offsetY());
 		json.addProperty("show_label", labelVisible());
 		json.addProperty("background", Math.round(background.real()));
-		json.addProperty("accent_bar", accentBarVisible());
-		json.addProperty("accent", accentArgb());
 	}
 
 	private static int clamp(int value, int min, int max) {

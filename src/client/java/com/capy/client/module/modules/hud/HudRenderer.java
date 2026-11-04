@@ -55,9 +55,6 @@ public final class HudRenderer {
 	private static final int PAD = 8;
 	private static final int MARGIN = 8;
 	private static final int GAP = 3;
-	/** Width of the accent bar and the space it needs. */
-	private static final int BAR_W = 2;
-	private static final int BAR_GAP = 6;
 	/** Gap between the muted label and the value. */
 	private static final int LABEL_GAP = 7;
 	private static final int RADIUS = 6;
@@ -105,7 +102,11 @@ public final class HudRenderer {
 	 * point of dragging it around the scene it has to stay readable on.</p>
 	 */
 	public static void drawPrepared(GuiGraphics graphics) {
-		if (scratchSize == 0) {
+		// Either kind is enough to have something to paint. The check used to
+		// look at the chip count alone, so a panel such as the staff list - the
+		// one HUD surface that is not a chip - never drew unless some unrelated
+		// element happened to be switched on.
+		if (scratchSize == 0 && scratchPanelsSize == 0) {
 			return;
 		}
 		UiCanvas canvas = McCanvas.of(graphics);
@@ -169,7 +170,7 @@ public final class HudRenderer {
 				scratchValues[scratchSize] = value == null ? "" : value;
 				scratchLabels[scratchSize] = label == null ? "" : label;
 				scratchWidths[scratchSize] = chipWidth(regular, medium, scratchLabels[scratchSize],
-						scratchValues[scratchSize], hud.accentBarVisible());
+						scratchValues[scratchSize]);
 				scratchSize++;
 			} else if (module instanceof HudPanel panel) {
 				if (scratchPanelsSize == scratchPanels.length) {
@@ -336,12 +337,8 @@ public final class HudRenderer {
 		return panelHeights[index];
 	}
 
-	private static int chipWidth(UiText regular, UiText medium, String label, String value,
-			boolean bar) {
+	private static int chipWidth(UiText regular, UiText medium, String label, String value) {
 		int width = PAD * 2;
-		if (bar) {
-			width += BAR_W + BAR_GAP;
-		}
 		if (!label.isEmpty()) {
 			width += regular.width(label) + LABEL_GAP;
 		}
@@ -350,15 +347,10 @@ public final class HudRenderer {
 
 	// ---------------------------------------------------------------- drawing
 
-	/** Draws one chip: shadow, glass plate, hairline, accent bar, text. */
+	/** Draws one chip: shadow, glass plate, hairline, text. */
 	private static void drawChip(UiCanvas c, UiText regular, UiText medium, String label,
 			String value, int x, int y, int w, HudElementModule hud, float sheen) {
 		int alpha = hud.backgroundAlpha();
-		boolean bar = hud.accentBarVisible();
-		int accent = hud.accentArgb();
-		if (accent == 0) {
-			accent = UiTheme.ACCENT;
-		}
 
 		if (alpha > 0) {
 			// One pixel of shadow, not a blur: the chip is a small object and a
@@ -382,14 +374,6 @@ public final class HudRenderer {
 		}
 
 		int textX = x + PAD;
-		if (bar) {
-			int barH = CHIP_H - 10;
-			// The bar is a gradient, deep at the bottom and light at the top, so
-			// it has a direction even when the chip is only eighteen pixels tall.
-			Ui.surface(c, x + PAD, y + (CHIP_H - barH) / 2, BAR_W, barH, 1,
-					accent, UiTheme.ACCENT_DEEP);
-			textX += BAR_W + BAR_GAP;
-		}
 		if (!label.isEmpty()) {
 			regular.draw(c, label, textX, Ui.centerTextY(y, CHIP_H, regular), UiTheme.TEXT_3);
 			textX += regular.width(label) + LABEL_GAP;

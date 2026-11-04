@@ -38,6 +38,11 @@ public interface HudPanel {
 	/** Puts the panel back on its cell. */
 	void resetPosition();
 
+	/** The name the HUD editor shows for this panel. */
+	default String panelLabel() {
+		return "Panel";
+	}
+
 	/** Width this panel wants this frame, in pixels. */
 	int panelWidth(Minecraft mc);
 

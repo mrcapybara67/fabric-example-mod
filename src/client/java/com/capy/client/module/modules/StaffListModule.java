@@ -26,6 +26,7 @@ import com.capy.client.module.modules.hud.HudPanel;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -191,16 +192,21 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		ensureRows(mc);
 		UiText medium = TYPE.medium();
 		UiText regular = TYPE.regular();
+		// Names are drawn in Minecraft's own font, so they are measured with
+		// it too; the interface face is only the fallback for a frame before
+		// the game's font exists.
+		Font font = mc == null ? null : mc.font;
 		int widest = 0;
 		for (Row row : rows) {
-			int width = medium.width(row.name());
+			int width = font != null ? font.width(row.name()) : medium.width(row.name());
 			String tag = tagFor(row.status());
 			if (!tag.isEmpty()) {
-				width += UiTheme.SP_3 + regular.width(tag);
+				int tagW = font != null ? font.width(tag) : regular.width(tag);
+				width += UiTheme.SP_3 + tagW;
 			}
 			widest = Math.max(widest, width);
 		}
-		int row = PAD * 2 + BAR_W + INNER + HEAD + INNER + widest;
+		int row = PAD * 2 + HEAD + INNER + widest;
 		int header = showHeader.value()
 				? PAD * 2 + medium.width(title()) + UiTheme.SP_4 + 22
 				: 0;
@@ -364,6 +370,15 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 					status = proved;
 				}
 			}
+			// The box lists who is here, not who was typed in. A watched name
+			// that has no entity, no player list entry and nothing proved about
+			// it is simply offline, and drawing its face next to "no status"
+			// read as if the client could see them. Only a row the server can
+			// currently account for survives; a vanished admin still does,
+			// because the evidence proves they are connected while hidden.
+			if (entity == null && tell == null && info == null && status == Status.NONE) {
+				continue;
+			}
 			String key = name.toLowerCase(Locale.ROOT);
 			if (skin != null) {
 				rememberedSkins.put(key, skin);
@@ -496,17 +511,15 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		};
 	}
 
-	/** One watched account: accent tick, head, name, and any status tag. */
+	/** One watched account: head, name, and any status tag. */
 	private void drawRow(UiCanvas c, GuiGraphics graphics, Row row, int x, int y, int w,
 			boolean separator) {
 		UiText medium = TYPE.medium();
 		UiText regular = TYPE.regular();
-		int tick = row.status() == Status.NONE ? UiTheme.ACCENT : tagColor(row.status());
-		int barH = ROW_H - 8;
-		Ui.surface(c, x + PAD, y + 4, BAR_W, barH, 1,
-				Ui.withAlpha(tick, 0xCC), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0xCC));
+		Minecraft mc = Minecraft.getInstance();
+		Font font = mc == null ? null : mc.font;
 
-		int headX = x + PAD + BAR_W + INNER;
+		int headX = x + PAD;
 		int headY = y + (ROW_H - HEAD) / 2;
 		PlayerSkin skin = row.skin();
 		boolean drawn = false;
@@ -533,19 +546,35 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 
 		int textX = headX + HEAD + INNER;
 		int maxW = Math.max(0, x + w - PAD - textX);
-		int textY = Ui.centerTextY(y, ROW_H, medium);
 		String tag = tagFor(row.status());
-		int tagW = tag.isEmpty() ? 0 : regular.width(tag);
-		medium.draw(c, row.name(), textX, textY, UiTheme.TEXT);
-		if (!tag.isEmpty()) {
-			regular.draw(c, tag, x + w - PAD - tagW, Ui.centerTextY(y, ROW_H, regular),
-					tagColor(row.status()));
+		int tagW = font != null ? font.width(tag) : regular.width(tag);
+		if (font != null && graphics != null) {
+			// Minecraft's own face, at its own scale and without the interface
+			// shadow: this line is a player name, and it should look like the
+			// name the tab list would show rather than like UI copy.
+			graphics.drawString(font, row.name(), textX, y + (ROW_H - font.lineHeight) / 2,
+					UiTheme.TEXT, false);
+			if (!tag.isEmpty()) {
+				graphics.drawString(font, tag, x + w - PAD - tagW,
+						y + (ROW_H - font.lineHeight) / 2, tagColor(row.status()), false);
+			}
+		} else {
+			medium.draw(c, row.name(), textX, Ui.centerTextY(y, ROW_H, medium), UiTheme.TEXT);
+			if (!tag.isEmpty()) {
+				regular.draw(c, tag, x + w - PAD - tagW,
+						Ui.centerTextY(y, ROW_H, regular), tagColor(row.status()));
+			}
 		}
 
 		if (separator) {
 			Ui.fadeLine(c, textX, y + ROW_H - 1, maxW,
 					Ui.withAlpha(UiTheme.BORDER, 0x40));
 		}
+	}
+
+	@Override
+	public String panelLabel() {
+		return "Staff list";
 	}
 
 	private String title() {

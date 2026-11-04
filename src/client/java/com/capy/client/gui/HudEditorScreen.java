@@ -114,7 +114,7 @@ public final class HudEditorScreen extends Screen {
 			return;
 		}
 		String title = "HUD EDITOR";
-		String hint = "drag a chip or box to move it  \\u00b7  right click resets it  \\u00b7  esc saves";
+		String hint = "drag a chip or box to move it  \u00b7  right click resets it  \u00b7  esc saves";
 		int centerX = this.width / 2;
 		int titleW = font.width(title);
 		graphics.fill(centerX - titleW / 2 - 10, HINT_TOP - 5, centerX + titleW / 2 + 10,
@@ -128,7 +128,7 @@ public final class HudEditorScreen extends Screen {
 		String offsets = null;
 		if (hoveredPanel >= 0) {
 			HudPanel panel = HudRenderer.panelAt(hoveredPanel);
-			detail = "Staff list".equals(panelLabel(panel)) ? "Staff list" : panelLabel(panel);
+			detail = panel.panelLabel();
 			offsets = "x " + panel.offsetX() + "   y " + panel.offsetY();
 		} else if (hoveredChip >= 0) {
 			HudElementModule module = HudRenderer.slotModule(hoveredChip);
@@ -139,11 +139,6 @@ public final class HudEditorScreen extends Screen {
 			graphics.drawString(font, detail, 8, this.height - 26, UiTheme.TEXT, true);
 			graphics.drawString(font, offsets, 8, this.height - 15, UiTheme.TEXT_3, true);
 		}
-	}
-
-	/** What to call a panel in the readout. */
-	private static String panelLabel(HudPanel panel) {
-		return panel instanceof HudElementModule hud && !hud.label().isEmpty() ? hud.label() : "Panel";
 	}
 
 	/** Four corner brackets, the same language the chip's own frame uses. */
