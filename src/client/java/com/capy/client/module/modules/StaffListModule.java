@@ -14,6 +14,7 @@ import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.WatchlistSetting;
+import com.capy.client.module.modules.antiadmin.AdminDetector;
 import com.capy.client.module.modules.hud.HudElementModule;
 import com.capy.client.module.modules.hud.HudPanel;
 import com.google.gson.JsonArray;
@@ -23,6 +24,13 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.world.entity.player.PlayerSkin;
+import net.minecraft.world.level.GameType;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Staff List: a box of the accounts you watch, drawn as a HUD panel.
@@ -73,6 +81,44 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 	private final SliderSetting offsetX = setting(new SliderSetting("offset_x", 0, -MAX_NUDGE, MAX_NUDGE));
 	private final SliderSetting offsetY = setting(new SliderSetting("offset_y", 0, -MAX_NUDGE, MAX_NUDGE));
 
+	/** What the client can currently prove about a watched account. */
+	private enum Status {
+		/** Nothing detected: shown as a plain row. */
+		NONE,
+		/** Sent as an entity but missing from the player list: a vanish. */
+		VANISHED,
+		/** Listed as a spectator, so no entity is sent to survival clients. */
+		SPECTATOR,
+		/** On a team that hides nametags: the older vanish style. */
+		HIDDEN
+	}
+
+	/** One row of the box, resolved before it is measured or drawn. */
+	private record Row(String name, PlayerSkin skin, Status status) {
+	}
+
+	/**
+	 * Rows for the current frame, rebuilt ten times a second.
+	 *
+	 * <p>The list is resolved once and then measured and drawn from the same
+	 * values. Resolving inside {@code panelWidth}, {@code panelHeight} and the
+	 * draw would scan the world three times a frame and could, on a frame where
+	 * a player leaves between the calls, measure a different set of rows from
+	 * the one it painted.</p>
+	 */
+	private final List<Row> rows = new ArrayList<>();
+	private long rowsBuiltAt;
+	/**
+	 * The last skin seen for a name, for the session.
+	 *
+	 * <p>This is what keeps a head in the box after a vanish. A vanish usually
+	 * removes both the entity and the player list entry, and those are the only
+	 * two places the client can read a skin from - so without a memory here the
+	 * face of the one person the list exists to watch was the first thing to go
+	 * the moment they used {@code /vanish}.</p>
+	 */
+	private final Map<String, PlayerSkin> rememberedSkins = new HashMap<>();
+
 	public StaffListModule() {
 		super(Category.DONUT_SMP, "staff_list");
 	}
@@ -121,10 +167,17 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 	 */
 	@Override
 	public int panelWidth(Minecraft mc) {
+		ensureRows(mc);
 		UiText medium = TYPE.medium();
+		UiText regular = TYPE.regular();
 		int widest = 0;
-		for (String name : watchlist.entries()) {
-			widest = Math.max(widest, medium.width(name));
+		for (Row row : rows) {
+			int width = medium.width(row.name());
+			String tag = tagFor(row.status());
+			if (!tag.isEmpty()) {
+				width += UiTheme.SP_3 + regular.width(tag);
+			}
+			widest = Math.max(widest, width);
 		}
 		int row = PAD * 2 + BAR_W + INNER + HEAD + INNER + widest;
 		int header = showHeader.value()
@@ -136,8 +189,8 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 	/** Height of the box: one row per watched name, plus padding and header. */
 	@Override
 	public int panelHeight(Minecraft mc) {
-		int rows = Math.max(1, watchlist.entries().size());
-		int height = PAD * 2 + rows * ROW_H;
+		ensureRows(mc);
+		int height = PAD * 2 + Math.max(1, rows.size()) * ROW_H;
 		if (showHeader.value()) {
 			height += HEADER_H;
 		}
@@ -185,15 +238,14 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 			int textX = x + PAD + BAR_W + UiTheme.SP_3;
 			medium.draw(c, title(), textX, rowTop + Math.max(0, (HEADER_H - medium.lineHeight()) / 2),
 					UiTheme.TEXT_2);
-			String count = String.valueOf(watchlist.entries().size());
+			String count = String.valueOf(rows.size());
 			int countW = regular.width(count);
 			regular.draw(c, count, x + w - PAD - countW,
 					rowTop + Math.max(0, (HEADER_H - regular.lineHeight()) / 2), UiTheme.TEXT_3);
 			rowTop += HEADER_H;
 		}
 
-		Minecraft mc = Minecraft.getInstance();
-		int count = watchlist.entries().size();
+		int count = rows.size();
 		if (count == 0) {
 			// An empty box is still a box: the panel has to be visible in the
 			// editor before a name is typed, and a heading with no rows reads as
@@ -203,23 +255,171 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 			return;
 		}
 		for (int i = 0; i < count; i++) {
-			String name = watchlist.entries().get(i);
 			int rowY = rowTop + i * ROW_H;
-			drawRow(c, graphics, mc, name, x, rowY, w, i < count - 1);
+			drawRow(c, graphics, rows.get(i), x, rowY, w, i < count - 1);
 		}
 	}
 
-	/** One watched account: accent tick, head, name. */
-	private void drawRow(UiCanvas c, GuiGraphics graphics, Minecraft mc, String name,
-			int x, int y, int w, boolean separator) {
+	/**
+	 * Resolves every watched name to what is known about it right now.
+	 *
+	 * <p>Three sources, in the order that keeps a vanished player visible:
+	 * <ul>
+	 *   <li>the entity the server sent - a skin and a position, and the only
+	 *       source that still exists for a name that has been dropped from the
+	 *       player list;</li>
+	 *   <li>the player list, which carries the skin, the game mode and the
+	 *       nametag team even while no entity is being sent (spectator);</li>
+	 *   <li>the skin remembered from an earlier frame, which is what keeps the
+	 *       head when a vanish removes both of the above.</li>
+	 * </ul>
+	 *
+	 * <p>Status is only ever set from evidence. A name the client cannot see at
+	 * all is drawn as a plain row rather than as "offline": the box is a
+	 * watchlist, not a presence feed, and claiming absence from silence is the
+	 * same mistake Anti Admin used to make.</p>
+	 */
+	private void ensureRows(Minecraft mc) {
+		long now = System.currentTimeMillis();
+		if (rowsBuiltAt != 0L && now - rowsBuiltAt < 100L) {
+			return;
+		}
+		rowsBuiltAt = now;
+		rows.clear();
+		if (mc == null) {
+			return;
+		}
+		List<AdminDetector.Match> inWorld = AdminDetector.scan(mc, watchlist);
+		List<AdminDetector.TabTell> tells = AdminDetector.scanTells(mc, watchlist);
+		for (String name : watchlist.entries()) {
+			AdminDetector.Match entity = findMatch(inWorld, name);
+			AdminDetector.TabTell tell = findTell(tells, name);
+			PlayerSkin skin = null;
+			Status status = Status.NONE;
+			if (entity != null) {
+				skin = entity.skin();
+				// An entity whose account is no longer in the player list is the
+				// signature of a vanish: the server is still drawing the body but
+				// has taken the account off the tab.
+				status = listed(mc, entity.uuid()) ? Status.NONE : Status.VANISHED;
+			}
+			if (tell != null) {
+				if (skin == null) {
+					skin = tell.match().skin();
+				}
+				status = tell.tell() == AdminDetector.Tell.SPECTATOR
+						? Status.SPECTATOR : Status.HIDDEN;
+			}
+			if (skin == null) {
+				PlayerInfo info = tabEntry(mc, name);
+				if (info != null) {
+					skin = info.getSkin();
+					if (status == Status.NONE && info.getGameMode() == GameType.SPECTATOR) {
+						status = Status.SPECTATOR;
+					}
+				}
+			}
+			String key = name.toLowerCase(Locale.ROOT);
+			if (skin != null) {
+				rememberedSkins.put(key, skin);
+			} else {
+				skin = rememberedSkins.get(key);
+			}
+			rows.add(new Row(name, skin, status));
+		}
+	}
+
+	private static AdminDetector.Match findMatch(List<AdminDetector.Match> matches, String name) {
+		for (AdminDetector.Match match : matches) {
+			if (equalsName(match.identity(), name) || equalsName(match.username(), name)) {
+				return match;
+			}
+		}
+		return null;
+	}
+
+	private static AdminDetector.TabTell findTell(List<AdminDetector.TabTell> tells, String name) {
+		for (AdminDetector.TabTell tell : tells) {
+			if (equalsName(tell.match().identity(), name) || equalsName(tell.match().username(), name)) {
+				return tell;
+			}
+		}
+		return null;
+	}
+
+	private static boolean equalsName(String a, String b) {
+		return a != null && b != null && a.equalsIgnoreCase(b);
+	}
+
+	/** True when the account still has a player list entry. */
+	private static boolean listed(Minecraft mc, UUID uuid) {
+		if (uuid == null || mc.getConnection() == null) {
+			return false;
+		}
+		try {
+			return mc.getConnection().getPlayerInfo(uuid) != null;
+		} catch (RuntimeException | LinkageError ignored) {
+			return false;
+		}
+	}
+
+	/** The player list entry for a name, matched case-insensitively. */
+	private static PlayerInfo tabEntry(Minecraft mc, String name) {
+		if (mc == null || mc.getConnection() == null || name == null) {
+			return null;
+		}
+		try {
+			for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
+				if (info == null || info.getProfile() == null) {
+					continue;
+				}
+				if (equalsName(info.getProfile().name(), name)) {
+					return info;
+				}
+				net.minecraft.network.chat.Component display = info.getTabListDisplayName();
+				if (display != null && equalsName(display.getString().trim(), name)) {
+					return info;
+				}
+			}
+		} catch (RuntimeException | LinkageError ignored) {
+			// A connection in the middle of closing; the remembered skin stands.
+		}
+		return null;
+	}
+
+	/** The tag drawn at the end of a row, or an empty string for none. */
+	private static String tagFor(Status status) {
+		return switch (status) {
+			case VANISHED -> "VANISH";
+			case SPECTATOR -> "SPEC";
+			case HIDDEN -> "HIDDEN";
+			default -> "";
+		};
+	}
+
+	/** The colour of a status: amber for a vanish, accent for the rest. */
+	private static int tagColor(Status status) {
+		return switch (status) {
+			case VANISHED -> 0xFFFFC24B;
+			case SPECTATOR -> UiTheme.ACCENT;
+			case HIDDEN -> UiTheme.ACCENT_DEEP;
+			default -> UiTheme.TEXT_3;
+		};
+	}
+
+	/** One watched account: accent tick, head, name, and any status tag. */
+	private void drawRow(UiCanvas c, GuiGraphics graphics, Row row, int x, int y, int w,
+			boolean separator) {
 		UiText medium = TYPE.medium();
+		UiText regular = TYPE.regular();
+		int tick = row.status() == Status.NONE ? UiTheme.ACCENT : tagColor(row.status());
 		int barH = ROW_H - 8;
 		Ui.surface(c, x + PAD, y + 4, BAR_W, barH, 1,
-				Ui.withAlpha(UiTheme.ACCENT, 0xCC), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0xCC));
+				Ui.withAlpha(tick, 0xCC), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0xCC));
 
 		int headX = x + PAD + BAR_W + INNER;
 		int headY = y + (ROW_H - HEAD) / 2;
-		PlayerSkin skin = skinOf(mc, name);
+		PlayerSkin skin = row.skin();
 		boolean drawn = false;
 		if (skin != null && graphics != null) {
 			try {
@@ -237,38 +437,25 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 			Ui.surface(c, headX, headY, HEAD, HEAD, 4,
 					Ui.withAlpha(0xFFFFFFFF, 0x2E), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x66));
 			Ui.outline(c, headX, headY, HEAD, HEAD, 4, Ui.withAlpha(UiTheme.BORDER, 0xB0));
-			String initial = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase(java.util.Locale.ROOT);
-			Ui.drawCentered(c, medium, initial, headX + HEAD / 2,
+			String first = row.name().isEmpty() ? "?" : row.name().substring(0, 1).toUpperCase(Locale.ROOT);
+			Ui.drawCentered(c, medium, first, headX + HEAD / 2,
 					Ui.centerTextY(headY, HEAD, medium), UiTheme.TEXT);
 		}
 
 		int textX = headX + HEAD + INNER;
 		int maxW = Math.max(0, x + w - PAD - textX);
-		medium.draw(c, name, textX, Ui.centerTextY(y, ROW_H, medium), UiTheme.TEXT);
+		int textY = Ui.centerTextY(y, ROW_H, medium);
+		String tag = tagFor(row.status());
+		int tagW = tag.isEmpty() ? 0 : regular.width(tag);
+		medium.draw(c, row.name(), textX, textY, UiTheme.TEXT);
+		if (!tag.isEmpty()) {
+			regular.draw(c, tag, x + w - PAD - tagW, Ui.centerTextY(y, ROW_H, regular),
+					tagColor(row.status()));
+		}
 
 		if (separator) {
 			Ui.fadeLine(c, textX, y + ROW_H - 1, maxW,
 					Ui.withAlpha(UiTheme.BORDER, 0x40));
-		}
-	}
-
-	/**
-	 * The skin the tab list already holds for a name, or null.
-	 *
-	 * <p>Nothing is fetched here. A watched player who is not on the server has
-	 * no entry, and inventing a UUID to ask Mojang for a skin would put a
-	 * network request behind a HUD redraw - the one thing a per frame path must
-	 * never do. Such a row simply draws the initial plate.</p>
-	 */
-	private static PlayerSkin skinOf(Minecraft mc, String name) {
-		if (mc == null || mc.getConnection() == null || name == null) {
-			return null;
-		}
-		try {
-			PlayerInfo info = mc.getConnection().getPlayerInfo(name);
-			return info == null ? null : info.getSkin();
-		} catch (RuntimeException | LinkageError ignored) {
-			return null;
 		}
 	}
 
