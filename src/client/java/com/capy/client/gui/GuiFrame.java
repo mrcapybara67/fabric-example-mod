@@ -408,8 +408,13 @@ public final class GuiFrame {
 		// The decorations belong to the window styles. The ring draws its own
 		// scene and returned above, so everything below this line is only ever
 		// reached with a window on screen.
-		petals.update(delta, width, height);
-		petals.render(c, UiPetals.Layer.BACK, fade);
+		// Petals belong to the paper theme. On the glass theme they would be white
+		// specks drifting over a translucent pane - dust on the screen - so the
+		// whole layer is skipped rather than recoloured.
+		if (!UiTheme.isGlass()) {
+			petals.update(delta, width, height);
+			petals.render(c, UiPetals.Layer.BACK, fade);
+		}
 
 		// The window pops into place: it grows out of 88% with a small
 		// overshoot, drops in from above and fades up. The overshoot is what
@@ -466,8 +471,11 @@ public final class GuiFrame {
 		renderContent(c, type, mouseX, mouseY, delta, (1f - contentEase) * 26f);
 
 		// A few petals pass in front of the window for depth. They are very
-		// faint so they never compete with the content.
-		petals.render(c, UiPetals.Layer.FRONT, fade * 0.7f);
+		// faint so they never compete with the content, and they are absent from
+		// the glass theme for the same reason as the back layer.
+		if (!UiTheme.isGlass()) {
+			petals.render(c, UiPetals.Layer.FRONT, fade * 0.7f);
+		}
 
 		if (footerFitted()) {
 			themePicker.renderOverlay(c, type.regular(), mouseX, mouseY, delta);

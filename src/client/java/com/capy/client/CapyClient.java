@@ -13,11 +13,11 @@ import com.capy.client.module.ModuleManager;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.AntiAdminModule;
 import com.capy.client.module.modules.AntiCheatNotifierModule;
+import com.capy.client.module.modules.AtmosphereModule;
 import com.capy.client.module.modules.BlockAnimationModule;
 import com.capy.client.module.modules.BlockOverlayModule;
 import com.capy.client.module.modules.CustomFOVModule;
 import com.capy.client.module.modules.CustomKnifeModule;
-import com.capy.client.module.modules.CustomSkyModule;
 import com.capy.client.module.modules.FreecamModule;
 import com.capy.client.module.modules.FullbrightModule;
 import com.capy.client.module.modules.HandAuraModule;
@@ -76,9 +76,11 @@ public class CapyClient implements ClientModInitializer {
 		// The finder is not an overlay: it searches the world for a geode and
 		// marks what it found, which is why it lives in its own category.
 		modules.register(new AmethystFinderModule());
-		// The visual set: the sky, the light level, the camera, the field of
-		// view, and the two overlays that frame what the player is looking at.
-		modules.register(new CustomSkyModule());
+		// The visual set: the atmosphere, the light level, the camera, the field
+		// of view, and the two overlays that frame what the player is looking at.
+		// The atmosphere changes what vanilla renders rather than painting over
+		// it, so it is the sky, the fog, the weather and the light in one module.
+		modules.register(new AtmosphereModule());
 		modules.register(new FullbrightModule());
 		modules.register(new SmoothCameraModule());
 		modules.register(new CustomFOVModule());

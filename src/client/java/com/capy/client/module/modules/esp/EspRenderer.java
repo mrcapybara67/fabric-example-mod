@@ -172,9 +172,10 @@ public final class EspRenderer {
 			PoseStack.Pose pose = stack.last();
 			MultiBufferSource.BufferSource batches = batch();
 			// Line width is measured in framebuffer pixels by the shader, so it
-			// has to follow the GUI scale to look the same on every screen.
-			float crisp = Math.max(1.4f, mc.getWindow().getGuiScale() * 1.25f);
-			float glow = crisp * GLOW_SCALE;
+			// has to follow the GUI scale to look the same on every screen. The
+			// per-module thickness is applied inside the draw loop: each overlay
+			// has its own box and tracer width settings.
+			float guiScale = mc.getWindow().getGuiScale();
 
 			// Every module's boxes are gathered and sorted once here, before
 			// either pass: both the fills and the lines draw the same list in
@@ -187,7 +188,7 @@ public final class EspRenderer {
 			// custom render types and flushes the previous one as soon as another
 			// type is requested, so two of them can never be held at once. Doing
 			// the fills first also means the outlines are always drawn over them.
-			drawLayers(batches, pose, crisp, glow, anyFill, anyLine);
+			drawLayers(batches, pose, guiScale, anyFill, anyLine);
 		} catch (RuntimeException e) {
 			// The see-through pipelines are copies of vanilla's, built at
 			// runtime. If one of them cannot be compiled on this machine, the
@@ -235,7 +236,7 @@ public final class EspRenderer {
 	}
 
 	private static void drawLayers(MultiBufferSource.BufferSource batches, PoseStack.Pose pose,
-			float crisp, float glow, boolean anyFill, boolean anyLine) {
+			float guiScale, boolean anyFill, boolean anyLine) {
 		if (anyFill) {
 			for (EspModule module : ACTIVE) {
 				if (!module.fills()) {
@@ -268,13 +269,20 @@ public final class EspRenderer {
 					continue;
 				}
 				VertexConsumer lines = batches.getBuffer(EspRenderTypes.lines());
+				// Widths are per module and per layer: a box edge and a tracer are
+				// different marks on the screen, and a long diagonal tracer needs a
+				// different width than a short vertical edge to read the same.
+				float crisp = Math.max(0.6f, guiScale * module.boxWidth());
+				float glow = crisp * GLOW_SCALE;
+				float tracerCrisp = Math.max(0.6f, guiScale * module.tracerWidth());
+				float tracerGlow = tracerCrisp * GLOW_SCALE;
 				if (module.tracers()) {
 					// Tracers go under the outlines: the box edge is the precise
 					// information, the line is the pointer to it.
 					for (AABB box : boxes) {
 						int glowColor = halo(module.colorFor(box));
-						tracer(lines, pose, box, glowColor, glow);
-						tracer(lines, pose, box, module.colorFor(box), crisp);
+						tracer(lines, pose, box, glowColor, tracerGlow);
+						tracer(lines, pose, box, module.colorFor(box), tracerCrisp);
 					}
 				}
 				if (module.outlines()) {

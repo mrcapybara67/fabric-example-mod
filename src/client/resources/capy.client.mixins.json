@@ -11,10 +11,14 @@
 		"LightTextureMixin",
 		"CustomFovMixin",
 		"SmoothCameraMixin",
-		"FogRendererAccessor",
+		"AtmosphereSkyMixin",
+		"AtmosphereTimeMixin",
+		"AtmosphereFogMixin",
+		"AtmosphereHazeMixin",
 		"MouseHandlerAccessor",
 		"GameRendererAccessor",
 		"FreecamCameraMixin",
+		"FreecamExtractMixin",
 		"FreecamMouseMixin"
 	],
 	"injectors": {

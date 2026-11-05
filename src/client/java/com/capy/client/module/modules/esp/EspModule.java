@@ -70,6 +70,16 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 	 * was found. The renderer's buffer is sized for this number.</p>
 	 */
 	public static final int MAX_BOXES = 1024;
+	/**
+	 * The line thickness sliders, in hundredths of a GUI-scaled pixel.
+	 *
+	 * <p>Stored as fixed point like every other fractional slider: 125 is the
+	 * 1.25 the renderer used to apply to every overlay, so an existing user sees
+	 * no change until they move the row.</p>
+	 */
+	public static final int MIN_WIDTH = 40;
+	public static final int MAX_WIDTH = 400;
+	public static final int DEFAULT_WIDTH = 125;
 
 	/** The overlay's own colour, or null when the subclass owns several. */
 	protected final ColorSetting color;
@@ -77,6 +87,10 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 	protected final BooleanSetting fill;
 	protected final BooleanSetting outline;
 	protected final BooleanSetting tracers;
+	/** Box edge thickness, in hundredths of a GUI-scaled pixel. */
+	protected final SliderSetting boxWidth;
+	/** Tracer thickness, in hundredths of a GUI-scaled pixel. */
+	protected final SliderSetting tracerWidth;
 	private final int defaultColor;
 	private final int defaultRange;
 	private final boolean defaultTracers;
@@ -124,6 +138,11 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		this.fill = setting(new BooleanSetting("fill", true));
 		this.outline = setting(new BooleanSetting("outline", true));
 		this.tracers = setting(new BooleanSetting("tracers", defaultTracers));
+		// The two widths are separate on purpose. A tracer is a long diagonal
+		// line and reads thin at the same width a box edge needs to stay visible,
+		// so tuning one usually means not tuning the other.
+		this.boxWidth = setting(new SliderSetting("box_width", DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, 2));
+		this.tracerWidth = setting(new SliderSetting("tracer_width", DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, 2));
 	}
 
 	/** The boxes to draw this frame. Never allocates a new list per call. */
@@ -210,6 +229,16 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		return tracers.value();
 	}
 
+	/** Box edge thickness in GUI-scaled pixels (1.25 at the default). */
+	public float boxWidth() {
+		return (float) boxWidth.real();
+	}
+
+	/** Tracer thickness in GUI-scaled pixels (1.25 at the default). */
+	public float tracerWidth() {
+		return (float) tracerWidth.real();
+	}
+
 	/**
 	 * Modules that highlight the world refresh their cache on this hook. The
 	 * player overlay answers every frame instead and simply inherits an empty
@@ -241,6 +270,8 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		fill.set(ConfigValues.boolValue(json, "fill", true));
 		outline.set(ConfigValues.boolValue(json, "outline", true));
 		tracers.set(ConfigValues.boolValue(json, "tracers", defaultTracers));
+		boxWidth.set(ConfigValues.intValue(json, "box_width", DEFAULT_WIDTH));
+		tracerWidth.set(ConfigValues.intValue(json, "tracer_width", DEFAULT_WIDTH));
 	}
 
 	@Override
@@ -252,5 +283,7 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		json.addProperty("fill", fills());
 		json.addProperty("outline", outlines());
 		json.addProperty("tracers", tracers());
+		json.addProperty("box_width", boxWidth.get());
+		json.addProperty("tracer_width", tracerWidth.get());
 	}
 }

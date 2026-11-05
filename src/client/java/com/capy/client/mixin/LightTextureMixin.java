@@ -1,6 +1,7 @@
 package com.capy.client.mixin;
 
 import com.capy.client.module.ModuleManager;
+import com.capy.client.module.modules.AtmosphereState;
 import com.capy.client.module.modules.FullbrightModule;
 import com.capy.client.util.Guard;
 import net.minecraft.client.OptionInstance;
@@ -45,18 +46,34 @@ public class LightTextureMixin {
 		// Called once per frame from the lightmap. Anything thrown here is a
 		// crash on the first frame in a world, so vanilla's own value is the
 		// fallback if the module cannot answer.
+		Object vanilla = option.get();
 		try {
 			FullbrightModule module = ModuleManager.get().get(FullbrightModule.class);
-			if (module != null && module.isEnabled()) {
-				// The option is an OptionInstance<Double>: the bytecode after the
-				// replaced call is a checkcast to Double followed by doubleValue(),
-				// so anything else here is a ClassCastException on the very first
-				// frame the module is switched on.
-				return Double.valueOf(module.gamma());
+			boolean fullbright = module != null && module.isEnabled();
+			boolean atmosphere = AtmosphereState.active;
+			if (!fullbright && !atmosphere) {
+				return vanilla;
 			}
+			// The option is an OptionInstance<Double>: the bytecode after the
+			// replaced call is a checkcast to Double followed by doubleValue(),
+			// so anything else here is a ClassCastException on the very first
+			// frame either module is switched on.
+			double gamma = vanilla instanceof Double value ? value : 0.0;
+			if (fullbright) {
+				gamma = module.gamma();
+			}
+			if (atmosphere) {
+				// Warmth lifts the floor of the curve rather than adding to it:
+				// a fixed addition overflows the top of the gamma range and does
+				// nothing to the shadows, which is exactly where an ambient warm
+				// tint has to show. Brightness then scales the whole curve.
+				gamma += (1.0 - gamma) * (AtmosphereState.fbAmb * 0.30f);
+				gamma = Math.max(0.0, Math.min(1.0, gamma * AtmosphereState.fbLive));
+			}
+			return Double.valueOf(gamma);
 		} catch (Throwable failure) {
 			Guard.report("fullbright", failure);
 		}
-		return option.get();
+		return vanilla;
 	}
 }
