@@ -7,8 +7,9 @@ import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 
 /**
- * The radial GUI style: a lit accent disc with the Capy wordmark, a ring of
- * category nodes around it, and a module sheet beside the ring.
+ * The radial GUI style: a lit accent disc carrying the Capy crest and the
+ * wordmark, a ring of category nodes around it, and a module sheet beside the
+ * ring.
  *
  * Navigation is deliberately two-step, matching the way the style reads:
  *
@@ -248,7 +249,10 @@ public final class RadialView {
 
 	/** How far a category label sits outside its own node. */
 	private int labelGap() {
-		return Math.max(12, Math.round(nodeR * 0.70f));
+		// Wide enough for the name plates, not just for the text: a plate is
+		// wider than its word, and at the old gap its inner edge ran back over
+		// the node and covered the category mark.
+		return Math.max(18, Math.round(nodeR * 0.95f));
 	}
 
 	private void layout() {
@@ -628,34 +632,36 @@ public final class RadialView {
 					Ui.withAlpha(0xFFFFFFFF, Math.round(0x3C * fade)));
 		}
 
-		// Wordmark group, measured as one block so the mark and the line share a
-		// centre instead of each being nudged by eye. The hub names no second
-		// line: the caption that used to sit under the wordmark either repeated
-		// the style's own name or repeated the category the sheet header already
-		// shows, and on the disc it only crowded the mark.
+		// The brand block, measured as one group so the seal and the wordmark
+		// share a centre instead of each being nudged by eye.
 		UiText logo = type.headline();
 		if (logo.width("Capy Client") > r * 1.55f) {
 			logo = type.display();
 		}
-		int mark = Math.max(22, Math.min(44, Math.round(r * 0.22f)));
-		int gap = Math.max(5, Math.round(mark * 0.22f));
+		int mark = Math.max(26, Math.min(52, Math.round(r * 0.26f)));
+		int gap = Math.max(5, Math.round(mark * 0.20f));
 		int groupH = mark + gap + logo.lineHeight();
 		int groupTop = centerY - groupH / 2 - Math.round((1f - ease) * 10f);
 
-		// A lit sphere instead of a flat glyph: two stacked discs, a rim and a
-		// specular dot give the hub a light source of its own, which is the depth
-		// the style was missing. The client's name stays under it.
-		int orbR = Math.max(9, mark / 2);
-		int orbAlpha = Math.round(0xF0 * fade);
-		Ui.circle(c, centerX, groupTop + orbR + Math.max(1, orbR / 6), orbR,
-				Ui.withAlpha(0x000000, Math.round(0x50 * fade)));
-		Ui.circleGradient(c, centerX, groupTop + orbR, orbR,
-				Ui.withAlpha(Ui.lighten(accent, 0.62f), orbAlpha),
-				Ui.withAlpha(accentDeep, orbAlpha));
-		Ui.ringFast(c, centerX, groupTop + orbR, Math.max(2, orbR - 1), 2,
-				Ui.withAlpha(0xFFFFFFFF, Math.round(0x55 * fade)));
-		Ui.circle(c, centerX - Math.round(orbR * 0.34f), groupTop + orbR - Math.round(orbR * 0.36f),
-				Math.max(1, Math.round(orbR * 0.26f)), Ui.withAlpha(0xFFFFFFFF, Math.round(0xB0 * fade)));
+		// The client's own crest, not a generic orb. A plain gradient sphere is
+		// the same decoration a dozen HUD widgets use, so it never read as a
+		// logo; the crest - a blossom sealed inside a double ring - is the mark
+		// the rest of the client already uses, and it is the one shape here that
+		// says whose interface this is. The soft disc behind it is not the mark's
+		// body: it is the dark backing that keeps the thin white strokes legible
+		// against the accent, and it is drawn a little wider than the seal so the
+		// outer ring never sits on the disc's own edge.
+		int sealAlpha = Math.round(0xF2 * fade);
+		int sealR = Math.round(mark * 0.62f);
+		Ui.circle(c, centerX, groupTop + mark / 2, sealR + Math.max(1, Math.round(mark * 0.08f)),
+				Ui.withAlpha(0x000000, Math.round(0x38 * fade)));
+		Ui.circleGradient(c, centerX, groupTop + mark / 2, sealR,
+				Ui.withAlpha(Ui.lighten(accent, 0.42f), sealAlpha),
+				Ui.withAlpha(accentDeep, sealAlpha));
+		Ui.ringFast(c, centerX, groupTop + mark / 2, sealR, 1,
+				Ui.withAlpha(0xFFFFFFFF, Math.round(0x40 * fade)));
+		UiIcons.draw(c, UiIcons.Icon.CREST, centerX - mark / 2, groupTop, mark,
+				Ui.withAlpha(ink, sealAlpha));
 		int logoY = groupTop + mark + gap;
 		Ui.drawCentered(c, logo, "Capy Client", centerX, logoY, Ui.withAlpha(ink, Math.round(255 * fade)));
 	}
@@ -753,29 +759,40 @@ public final class RadialView {
 			UiIcons.draw(c, icon(category), nx - iconSize / 2, ny - iconSize / 2, iconSize,
 					Ui.withAlpha(nodeColor, Math.round(255 * fade)));
 
-			// Label just outside the node, along the same spoke. It is centred
-			// on the node's own axis and clamped into the screen, which keeps
-			// the top and bottom labels from ever leaving the viewport - and is
-			// why the label rides the spoke instead of being dropped straight
-			// below the node, where the four side nodes would each land on top
-			// of their neighbour.
-			int lx = centerX + (int) Math.round(Math.cos(angle) * labelR);
-			int ly = centerY + (int) Math.round(Math.sin(angle) * labelR);
+			// Name plate just outside the node, on the same spoke. The plate is
+			// what turns the category from a floating word into a control: it
+			// carries the category's own tint on its rim, so the six names read
+			// as six members of this ring rather than as a list laid over the
+			// scrim. It rides the spoke because dropping it straight under the
+			// node would put the four side categories on top of their
+			// neighbours, and it is clamped into the viewport so the top and
+			// bottom plates can never leave it.
 			String text = category.title;
 			int tw = label.width(text);
-			lx = Math.max(8 + tw / 2, Math.min(width - 8 - tw / 2, lx));
-			ly = Math.max(6, Math.min(height - 6 - label.lineHeight(), ly - label.lineHeight() / 2));
-			// The top right corner belongs to the chrome. A label whose band
+			int plateW = tw + Math.max(12, scaled(10));
+			int plateH = label.lineHeight() + Math.max(6, scaled(4));
+			int lx = centerX + (int) Math.round(Math.cos(angle) * labelR);
+			int ly = centerY + (int) Math.round(Math.sin(angle) * labelR) - plateH / 2;
+			lx = Math.max(8 + plateW / 2, Math.min(width - 8 - plateW / 2, lx));
+			ly = Math.max(6, Math.min(height - 6 - plateH, ly));
+			// The top right corner belongs to the chrome. A plate whose band
 			// crosses the close disc or its style chip is pushed left of them
 			// rather than drawn underneath: on a 427x240 canvas the upper right
-			// node's label lands in exactly that strip. A label that clears the
+			// node's plate lands in exactly that strip. A plate that clears the
 			// controls vertically is left where the spoke puts it.
 			int bandTop = ly - 2;
-			int bandBottom = ly + label.lineHeight() + 2;
-			if (bandBottom > closeY && bandTop < styleY + scaled(STYLE_H) && lx + tw / 2 > chromeLeft()) {
-				lx = Math.max(8 + tw / 2, Math.min(lx, chromeLeft() - tw / 2 - 6));
+			int bandBottom = ly + plateH + 2;
+			if (bandBottom > closeY && bandTop < styleY + scaled(STYLE_H) && lx + plateW / 2 > chromeLeft()) {
+				lx = Math.max(8 + plateW / 2, Math.min(lx, chromeLeft() - plateW / 2 - 6));
 			}
-			Ui.drawCentered(c, label, text, lx, ly,
+			int plateX = lx - plateW / 2;
+			int plateAlpha = Math.round((0xB8 + 0x28 * emphasis) * fade);
+			Ui.roundRect(c, plateX, ly, plateW, plateH, Math.max(4, plateH / 2),
+					Ui.withAlpha(UiTheme.PANEL_TOP, plateAlpha));
+			Ui.outline(c, plateX, ly, plateW, plateH, Math.max(4, plateH / 2),
+					Ui.withAlpha(Ui.lerpColor(UiTheme.BORDER, category.accent, 0.55f + 0.35f * emphasis),
+							Math.round((0x8C + 0x3C * emphasis) * fade)));
+			Ui.drawCentered(c, label, text, lx, ly + Math.max(1, (plateH - label.lineHeight()) / 2),
 					Ui.withAlpha(Ui.lerpColor(UiTheme.TEXT_2, 0xFFFFFFFF, emphasis), Math.round(255 * fade)));
 		}
 	}
