@@ -113,7 +113,11 @@ public class SmoothCameraModule extends Module implements Configurable {
 	/** Applies the cinematic camera setting once, whenever it changes. */
 	public void syncCinematic() {
 		Minecraft mc = Minecraft.getInstance();
-		if (mc == null) {
+		// Same startup window as onToggle: the instance exists before the game
+		// has built its options, and a frame drawn in that window must not read
+		// through a null options object. The setting is applied on the next
+		// frame that has one.
+		if (mc == null || mc.options == null) {
 			return;
 		}
 		boolean wanted = cinematic.value();

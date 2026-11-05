@@ -120,6 +120,18 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private final Set<UUID> joined = new HashSet<>();
 	/** Tab tells already reported this session, keyed by account and tell. */
 	private final Set<String> toldTells = new HashSet<>();
+	/**
+	 * Set when an alert lands on a watched account, cleared once the staff list
+	 * has rebuilt its rows.
+	 *
+	 * <p>The staff list rescans ten times a second on its own clock, which is
+	 * fast enough for a skin change and too slow for the one thing that matters:
+	 * a probe answers with a name the tab list hides, and that answer is the
+	 * whole detection. Waiting up to a tenth of a second is not the problem -
+	 * the problem would be a list that keeps a clock at all when the module
+	 * already knows something changed.</p>
+	 */
+	private boolean staffListDirty;
 
 	private final SignalBuffer buffer = new SignalBuffer();
 	private final AlertManager alerts = new AlertManager();
@@ -207,6 +219,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		npcs.clear();
 		joined.clear();
 		toldTells.clear();
+		staffListDirty = false;
 		PacketSignals.clear();
 		tick = 0L;
 		scanCountdown = 0;
@@ -308,6 +321,9 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private void raise(AdminDetector.Match match, AdminAlert.Kind kind, BlockPos position, double distance) {
 		AlertRecord record = new AlertRecord(match.uuid(), match.username(), Confidence.HIGH,
 				List.<Observation>of(), System.currentTimeMillis(), position, distance, host, kind);
+		// A sighting is a change the staff list shows: its row has to pick up the
+		// new status now, not on the next tick of its own clock.
+		staffListDirty = true;
 		alerts.raise(record);
 	}
 
@@ -335,6 +351,12 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	 * the webhook. Ghost mode keeps only the webhook.
 	 */
 	private void deliver(AlertRecord record) {
+		if (record != null && watchlist.matches(record.name())) {
+			// The signal layer raised this one, not the watchlist scan: a probe
+			// hit is reported through the correlator, so the dirty flag has to be
+			// set here too or the staff list would never hear about it.
+			staffListDirty = true;
+		}
 		syncWebhook();
 		if (!ghostMode.value()) {
 			hud.push(record, System.currentTimeMillis());
@@ -453,6 +475,41 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	/** True when the probe detector is allowed to run. */
 	public boolean probingAllowed() {
 		return probe.value();
+	}
+
+	/**
+	 * Queues one name for the probe detector.
+	 *
+	 * <p>The staff list knows the names the user typed; the probe is the only
+	 * thing that can confirm an account the server has stopped mentioning, so
+	 * the list has to be able to ask for one. The request is dropped unless the
+	 * module is running and the probe is allowed: the probe is the only detector
+	 * that sends anything to the server, so it answers to a switch that stays
+	 * under the user's control.</p>
+	 */
+	public void enqueueProbe(String name) {
+		if (name == null || name.isBlank() || !isEnabled() || !probingAllowed()) {
+			return;
+		}
+		for (SignalDetector detector : detectors) {
+			if (detector instanceof ProbeDetector probeDetector) {
+				probeDetector.enqueue(name);
+				return;
+			}
+		}
+	}
+
+	/**
+	 * True once when the staff list is out of date, and clears the flag.
+	 *
+	 * <p>Consumed rather than read, so a single alert causes a single early
+	 * rebuild. The list would otherwise treat the flag as permanently set and
+	 * lose its own throttle for the rest of the session.</p>
+	 */
+	public boolean isStaffListDirty() {
+		boolean dirty = staffListDirty;
+		staffListDirty = false;
+		return dirty;
 	}
 
 	/**

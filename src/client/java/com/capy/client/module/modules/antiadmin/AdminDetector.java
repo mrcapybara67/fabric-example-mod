@@ -1,6 +1,7 @@
 package com.capy.client.module.modules.antiadmin;
 
 import com.capy.client.module.WatchlistSetting;
+import com.capy.client.util.Guard;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
@@ -68,7 +70,13 @@ public final class AdminDetector {
 		/** In spectator mode: invisible to survival players, but still listed. */
 		SPECTATOR,
 		/** On a team that hides nametags: the older vanish style. */
-		HIDDEN_TAG
+		HIDDEN_TAG,
+		/**
+		 * The connection still holds a player info entry for the account, but the
+		 * tab list does not draw it. This is the shape a 1.21+ vanish takes: the
+		 * listed flag is cleared and the entry is left behind.
+		 */
+		UNLISTED
 	}
 
 	/** A tell, attached to the player it belongs to. */
@@ -210,6 +218,105 @@ public final class AdminDetector {
 			if (team != null && team.getNameTagVisibility() != Team.Visibility.ALWAYS) {
 				out.add(new TabTell(toMatch(info, identity), Tell.HIDDEN_TAG));
 			}
+		}
+		return out;
+	}
+
+	/**
+	 * Every watched entry the connection still holds but the tab list does not
+	 * draw.
+	 *
+	 * <p>This is the difference between the client's two player collections:
+	 * {@code getOnlinePlayers()} is every entry the connection holds, and
+	 * {@code getListedOnlinePlayers()} is the subset the tab list renders. A
+	 * vanish that clears the listed flag leaves the entry, so the account is
+	 * still nameable, still skinnable, and still evidence - it just is not shown.
+	 * An account the server removed outright leaves nothing here; that case can
+	 * only be reached by the probe.</p>
+	 *
+	 * <p>Transient mismatches while joining are possible, which is why the alert
+	 * path still waits for the signal layer's five stable ticks. This method
+	 * answers what the client holds <em>right now</em>; it is a read, not a
+	 * detection.</p>
+	 */
+	public static List<TabTell> scanAllTabEntries(Minecraft mc, WatchlistSetting watchlist) {
+		List<TabTell> out = new ArrayList<>();
+		if (mc == null || watchlist == null || mc.getConnection() == null) {
+			return out;
+		}
+		try {
+			ClientPacketListener connection = mc.getConnection();
+			Set<UUID> listed = new HashSet<>();
+			for (PlayerInfo info : connection.getListedOnlinePlayers()) {
+				if (info != null && info.getProfile() != null && info.getProfile().id() != null) {
+					listed.add(info.getProfile().id());
+				}
+			}
+			for (PlayerInfo info : connection.getOnlinePlayers()) {
+				if (info == null || info.getProfile() == null || info.getProfile().id() == null) {
+					continue;
+				}
+				if (listed.contains(info.getProfile().id())) {
+					continue;
+				}
+				String identity = matchIdentity(info, watchlist);
+				if (identity == null) {
+					continue;
+				}
+				out.add(new TabTell(toMatch(info, identity), Tell.UNLISTED));
+			}
+		} catch (Throwable failure) {
+			Guard.report("admin-scan-unlisted", failure);
+		}
+		return out;
+	}
+
+	/**
+	 * Watched accounts the connection holds an entry for but that are in neither
+	 * the world nor the drawn tab list.
+	 *
+	 * <p>An entry in the info map is proof the server told this client the
+	 * account exists. Being absent from the world is normal on its own - another
+	 * dimension, out of range, or a spectator - and being unlisted is normal
+	 * during a join, so only the two together are reported, and only as
+	 * "vanished", never as a distance.</p>
+	 */
+	public static List<Match> scanForVanished(Minecraft mc, WatchlistSetting watchlist) {
+		List<Match> out = new ArrayList<>();
+		if (mc == null || watchlist == null || mc.getConnection() == null || mc.level == null) {
+			return out;
+		}
+		try {
+			ClientPacketListener connection = mc.getConnection();
+			Set<UUID> inWorld = new HashSet<>();
+			for (AbstractClientPlayer player : mc.level.players()) {
+				if (player != null) {
+					inWorld.add(player.getUUID());
+				}
+			}
+			Set<UUID> listed = new HashSet<>();
+			for (PlayerInfo info : connection.getListedOnlinePlayers()) {
+				if (info != null && info.getProfile() != null && info.getProfile().id() != null) {
+					listed.add(info.getProfile().id());
+				}
+			}
+			for (String name : watchlist.entries()) {
+				PlayerInfo info = TabList.byNameIgnoreCase(mc, name);
+				if (info == null || info.getProfile() == null || info.getProfile().id() == null) {
+					continue;
+				}
+				UUID id = info.getProfile().id();
+				if (inWorld.contains(id) || listed.contains(id)) {
+					continue;
+				}
+				String identity = matchIdentity(info, watchlist);
+				if (identity == null) {
+					continue;
+				}
+				out.add(toMatch(info, identity));
+			}
+		} catch (Throwable failure) {
+			Guard.report("admin-scan-vanished", failure);
 		}
 		return out;
 	}

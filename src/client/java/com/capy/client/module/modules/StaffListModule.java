@@ -21,8 +21,10 @@ import com.capy.client.module.modules.antiadmin.Correlator;
 import com.capy.client.module.modules.antiadmin.DetectionKind;
 import com.capy.client.module.modules.antiadmin.Observation;
 import com.capy.client.module.modules.antiadmin.SignalBuffer;
+import com.capy.client.module.modules.antiadmin.TabList;
 import com.capy.client.module.modules.hud.HudElementModule;
 import com.capy.client.module.modules.hud.HudPanel;
+import com.capy.client.util.Guard;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
@@ -30,6 +32,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.level.GameType;
 import java.util.ArrayList;
@@ -81,6 +84,15 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 	/** How far the nudge may go, matching the chips. */
 	private static final int MAX_NUDGE = HudElementModule.MAX_NUDGE;
 	private static final long SHEEN_PERIOD_MS = 9000L;
+	/**
+	 * How often the list may ask the probe about names it cannot see.
+	 *
+	 * <p>Deliberately slow. The probe already has its own jittered gap between
+	 * requests; this is the second, coarser gate that keeps a panel drawn every
+	 * frame from turning into a queue of requests, and it means a name typed
+	 * into the list at most enters the probe queue once every few seconds.</p>
+	 */
+	private static final long PROBE_INTERVAL_MS = 5000L;
 
 	private final WatchlistSetting watchlist = setting(new WatchlistSetting("watchlist"));
 	private final BooleanSetting showHeader = setting(new BooleanSetting("show_header", true));
@@ -130,6 +142,8 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 	 */
 	private final List<Row> rows = new ArrayList<>();
 	private long rowsBuiltAt;
+	/** Last time the probe was handed the names the world does not contain. */
+	private long probedAt;
 	/**
 	 * The last skin seen for a name, for the session.
 	 *
@@ -308,7 +322,13 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 	 */
 	private void ensureRows(Minecraft mc) {
 		long now = System.currentTimeMillis();
-		if (rowsBuiltAt != 0L && now - rowsBuiltAt < 100L) {
+		AntiAdminModule antiAdmin = ModuleManager.get().get(AntiAdminModule.class);
+		boolean withEvidence = evidence.value() && antiAdmin != null && antiAdmin.isEnabled();
+		// An alert about a watched account is consumed here: it is the one event
+		// that cannot wait for the clock, because a probe answer names a player
+		// the client is otherwise no longer sent anything about.
+		boolean dirty = antiAdmin != null && antiAdmin.isEnabled() && antiAdmin.isStaffListDirty();
+		if (!dirty && rowsBuiltAt != 0L && now - rowsBuiltAt < 100L) {
 			return;
 		}
 		rowsBuiltAt = now;
@@ -318,8 +338,12 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		}
 		List<AdminDetector.Match> inWorld = AdminDetector.scan(mc, watchlist);
 		List<AdminDetector.TabTell> tells = AdminDetector.scanTells(mc, watchlist);
-		AntiAdminModule antiAdmin = evidence.value() ? ModuleManager.get().get(AntiAdminModule.class) : null;
-		boolean withEvidence = antiAdmin != null && antiAdmin.isEnabled();
+		// The two gap scans: an entry the tab list does not draw, and an entry
+		// held for an account that is in neither the world nor the tab. Both are
+		// states the three sources above cannot express, because a listed-only
+		// read cannot tell "not here" from "hidden here".
+		List<AdminDetector.TabTell> unlisted = AdminDetector.scanAllTabEntries(mc, watchlist);
+		List<AdminDetector.Match> vanished = AdminDetector.scanForVanished(mc, watchlist);
 		for (String name : watchlist.entries()) {
 			AdminDetector.Match entity = findMatch(inWorld, name);
 			AdminDetector.TabTell tell = findTell(tells, name);
@@ -356,6 +380,22 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 					status = Status.SPECTATOR;
 				}
 			}
+			// The client holds an entry for this account, but the tab list does
+			// not draw it and/or no entity is being sent: the account is connected
+			// and hidden. An entry alone is not enough - another dimension looks
+			// the same from here - so being absent from the world has to be part
+			// of the reading before the tag is shown.
+			if (status == Status.NONE) {
+				AdminDetector.TabTell unlistedTell = findTell(unlisted, name);
+				AdminDetector.Match absent = findMatch(vanished, name);
+				if (unlistedTell != null || absent != null) {
+					status = Status.VANISHED;
+					if (skin == null) {
+						skin = unlistedTell != null ? unlistedTell.match().skin()
+								: absent == null ? null : absent.skin();
+					}
+				}
+			}
 			// A fully hidden account has no live match and no list entry, so the
 			// only identity left is the one the probe remembered by name.
 			if (subject == null) {
@@ -387,6 +427,51 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 			}
 			rows.add(new Row(name, skin, status));
 		}
+		probeMissing(antiAdmin, withEvidence, mc, now);
+	}
+
+	/**
+	 * Hands the probe every watched name the world does not contain.
+	 *
+	 * <p>This is the only route to an account the server stopped mentioning
+	 * altogether: with no entity and no player info entry there is nothing on the
+	 * client to read, and the server's own tab completion is the one place a
+	 * hidden name still surfaces. Without this the list could only ever tag an
+	 * account whose entry the server left behind, which is the easier half of the
+	 * vanish implementations in the wild.</p>
+	 *
+	 * <p>Gated twice: the interval here, and the probe's own jittered gap and
+	 * one-request-in-flight rule. Nothing is sent unless the Anti Admin module is
+	 * on and its probe switch is on.</p>
+	 */
+	private void probeMissing(AntiAdminModule antiAdmin, boolean withEvidence, Minecraft mc, long now) {
+		if (!withEvidence || antiAdmin == null || !antiAdmin.probingAllowed()) {
+			return;
+		}
+		if (probedAt != 0L && now - probedAt < PROBE_INTERVAL_MS) {
+			return;
+		}
+		probedAt = now;
+		Set<String> inWorld = new HashSet<>();
+		try {
+			for (AbstractClientPlayer player : mc.level.players()) {
+				if (player == null || player.getGameProfile() == null) {
+					continue;
+				}
+				String name = player.getGameProfile().name();
+				if (name != null && !name.isEmpty()) {
+					inWorld.add(name.toLowerCase(Locale.ROOT));
+				}
+			}
+		} catch (Throwable failure) {
+			Guard.report("staff-list-probe-world", failure);
+			return;
+		}
+		for (String name : watchlist.entries()) {
+			if (!inWorld.contains(name.toLowerCase(Locale.ROOT))) {
+				antiAdmin.enqueueProbe(name);
+			}
+		}
 	}
 
 	private static AdminDetector.Match findMatch(List<AdminDetector.Match> matches, String name) {
@@ -411,14 +496,23 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		return a != null && b != null && a.equalsIgnoreCase(b);
 	}
 
-	/** True when the account still has a player list entry. */
+	/**
+	 * True when the tab list is actually drawing the account.
+	 *
+	 * <p>This used to ask whether the connection held an entry, which is true for
+	 * a hidden account too: the entry is exactly what a listed-flag vanish
+	 * leaves behind. The distinction only exists because vanilla keeps the two
+	 * collections apart, and reading the wrong one turned a vanished account
+	 * into a plain row.</p>
+	 */
 	private static boolean listed(Minecraft mc, UUID uuid) {
-		if (uuid == null || mc.getConnection() == null) {
+		if (uuid == null) {
 			return false;
 		}
 		try {
-			return mc.getConnection().getPlayerInfo(uuid) != null;
-		} catch (RuntimeException | LinkageError ignored) {
+			return TabList.listed(mc, uuid);
+		} catch (Throwable failure) {
+			Guard.report("staff-list-listed", failure);
 			return false;
 		}
 	}
