@@ -18,10 +18,19 @@ import org.slf4j.LoggerFactory;
  * Vanilla's {@code lines} and {@code debugQuads} pipelines are depth tested, so
  * a container behind a wall simply disappears — which defeats the point of a
  * storage overlay. The two types here are copies of those pipelines with the
- * depth test turned off. Everything else (shaders, blending, vertex format,
- * depth-write behaviour) is inherited, so a see-through outline still draws
- * with the same line shader and the same soft fill as the normal one: only the
- * "is something in front of it" question is answered differently.
+ * depth test turned off. Everything else (blending, vertex format, depth-write
+ * behaviour) is inherited, so a see-through outline still draws with the same
+ * geometry as the normal one: only the "is something in front of it" question
+ * is answered differently.
+ *
+ * <h2>Why the outline also has its own shader</h2>
+ * Vanilla's line shader fogs its output unconditionally: it mixes the line's
+ * colour towards the frame's fog colour by the vertex distance, so an overlay
+ * drawn through water, rain or a long view distance changes hue with the world
+ * around it. That is right for a hitbox and wrong for an overlay — a red box
+ * must stay red — so the line pipeline points at a copy of the line shader with
+ * the fog call removed. The fill needs no such copy: it draws through
+ * {@code position_color}, which never applied fog in the first place.
  *
  * The copies get their own pipeline location, so they are compiled and cached
  * as separate pipelines instead of aliasing the vanilla ones.
@@ -31,6 +40,9 @@ import org.slf4j.LoggerFactory;
  */
 public final class EspRenderTypes {
 	private static final Logger LOGGER = LoggerFactory.getLogger(EspRenderTypes.class);
+	/** The fogless line shader pair shipped with the mod. */
+	private static final Identifier ESP_LINE_SHADER =
+			Identifier.fromNamespaceAndPath("capy", "core/esp_lines");
 	private static RenderType throughLines;
 	private static RenderType throughQuads;
 	/** True once creating the custom pipelines failed; the vanilla ones are used. */
@@ -68,7 +80,8 @@ public final class EspRenderTypes {
 			return RenderTypes.lines();
 		}
 		if (throughLines == null) {
-			throughLines = createSafely("esp_lines_through", RenderPipelines.LINES);
+			throughLines = createSafely("esp_lines_through", RenderPipelines.LINES,
+					ESP_LINE_SHADER, ESP_LINE_SHADER);
 		}
 		return throughLines == null ? RenderTypes.lines() : throughLines;
 	}
@@ -91,8 +104,21 @@ public final class EspRenderTypes {
 	 * reason is logged once.
 	 */
 	private static RenderType createSafely(String name, RenderPipeline base) {
+		return createSafely(name, base, base.getVertexShader(), base.getFragmentShader());
+	}
+
+	/**
+	 * Builds a custom type with the given shader pair, but never at the cost of
+	 * a crash.
+	 *
+	 * <p>A missing or uncompilable shader is a mapping/resource problem, not a
+	 * reason to take the frame down: the depth-tested vanilla type is used for
+	 * the rest of the session and the reason is logged once.</p>
+	 */
+	private static RenderType createSafely(String name, RenderPipeline base,
+			Identifier vertexShader, Identifier fragmentShader) {
 		try {
-			return create(name, base);
+			return create(name, base, vertexShader, fragmentShader);
 		} catch (Throwable t) {
 			unavailable = true;
 			LOGGER.warn("Capy: could not build the see-through ESP render type ({}); using the depth-tested one.",
@@ -102,8 +128,14 @@ public final class EspRenderTypes {
 	}
 
 	private static RenderType create(String name, RenderPipeline base) {
+		return create(name, base, base.getVertexShader(), base.getFragmentShader());
+	}
+
+	private static RenderType create(String name, RenderPipeline base,
+			Identifier vertexShader, Identifier fragmentShader) {
 		RenderPipeline pipeline = new NoDepthPipeline(base,
-				Identifier.fromNamespaceAndPath("capy", "pipeline/" + name));
+				Identifier.fromNamespaceAndPath("capy", "pipeline/" + name),
+				vertexShader, fragmentShader);
 		RenderSetup setup = RenderSetup.builder(pipeline)
 				.bufferSize(RenderType.SMALL_BUFFER_SIZE)
 				.createRenderSetup();
@@ -120,9 +152,14 @@ public final class EspRenderTypes {
 	 */
 	private static final class NoDepthPipeline extends RenderPipeline {
 		NoDepthPipeline(RenderPipeline base, Identifier location) {
+			this(base, location, base.getVertexShader(), base.getFragmentShader());
+		}
+
+		NoDepthPipeline(RenderPipeline base, Identifier location,
+				Identifier vertexShader, Identifier fragmentShader) {
 			super(location,
-					base.getVertexShader(),
-					base.getFragmentShader(),
+					vertexShader,
+					fragmentShader,
 					base.getShaderDefines(),
 					base.getSamplers(),
 					base.getUniforms(),
