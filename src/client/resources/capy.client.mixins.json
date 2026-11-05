@@ -19,7 +19,10 @@
 		"GameRendererAccessor",
 		"FreecamCameraMixin",
 		"FreecamExtractMixin",
-		"FreecamMouseMixin"
+		"FreecamMouseMixin",
+		"FlyTravelMixin",
+		"BoatInputMixin",
+		"BoatPacketMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

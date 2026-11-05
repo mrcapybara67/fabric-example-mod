@@ -16,8 +16,11 @@ import com.capy.client.module.modules.AntiCheatNotifierModule;
 import com.capy.client.module.modules.AtmosphereModule;
 import com.capy.client.module.modules.BlockAnimationModule;
 import com.capy.client.module.modules.BlockOverlayModule;
+import com.capy.client.module.modules.BoatFlyModule;
+import com.capy.client.module.modules.BoatNoclipModule;
 import com.capy.client.module.modules.CustomFOVModule;
 import com.capy.client.module.modules.CustomKnifeModule;
+import com.capy.client.module.modules.FlyModule;
 import com.capy.client.module.modules.FreecamModule;
 import com.capy.client.module.modules.FullbrightModule;
 import com.capy.client.module.modules.HandAuraModule;
@@ -60,6 +63,12 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(new CustomKnifeModule());
 		WeatherNotifierModule weather = new WeatherNotifierModule();
 		modules.register(weather);
+		// The movement modules: the body flies, or the boat does. Both read
+		// the ordinary movement keys and both keep vanilla's own packet path,
+		// which is what keeps the server's movement checks inside their limits.
+		modules.register(new FlyModule());
+		modules.register(new BoatFlyModule());
+		modules.register(new BoatNoclipModule());
 		AntiAdminModule antiAdmin = new AntiAdminModule();
 		modules.register(antiAdmin);
 		// The notifier sits beside Anti Admin: both modules answer a question
