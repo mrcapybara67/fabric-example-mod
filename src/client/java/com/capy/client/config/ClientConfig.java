@@ -45,6 +45,8 @@ public final class ClientConfig {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
 	private static final String KEY_THEME = "theme";
+	/** Palette of the animated title-screen scene. */
+	private static final String KEY_MENU_THEME = "menu_theme";
 	private static final String KEY_GUI_STYLE = "gui_style";
 	private static final String KEY_GUI_ACCENT = "gui_accent";
 	private static final String KEY_RADIAL_ACCENT = "radial_accent";
@@ -55,6 +57,7 @@ public final class ClientConfig {
 	private static ClientConfig instance = new ClientConfig();
 
 	private String theme = "sakura";
+	private String menuTheme = "aurora";
 	private String guiStyle = "normal";
 	private int guiAccent = 0xFFFF74A8;
 	private int radialAccent = 0xFFFF74A8;
@@ -74,6 +77,17 @@ public final class ClientConfig {
 	public void setTheme(String theme) {
 		if (theme != null && !theme.isEmpty()) {
 			this.theme = theme;
+		}
+	}
+
+	/** The saved title-screen palette id. */
+	public String menuTheme() {
+		return menuTheme;
+	}
+
+	public void setMenuTheme(String menuTheme) {
+		if (menuTheme != null && !menuTheme.isEmpty()) {
+			this.menuTheme = menuTheme;
 		}
 	}
 
@@ -141,6 +155,7 @@ public final class ClientConfig {
 	private void readFrom(JsonObject root) {
 		String storedTheme = ConfigValues.stringValue(root, KEY_THEME, theme);
 		theme = storedTheme;
+		menuTheme = ConfigValues.stringValue(root, KEY_MENU_THEME, menuTheme);
 		guiStyle = ConfigValues.stringValue(root, KEY_GUI_STYLE, guiStyle);
 		guiAccent = ConfigValues.intValue(root, KEY_GUI_ACCENT, guiAccent);
 		radialAccent = ConfigValues.intValue(root, KEY_RADIAL_ACCENT, radialAccent);
@@ -179,6 +194,7 @@ public final class ClientConfig {
 	private JsonObject toJson() {
 		JsonObject root = new JsonObject();
 		root.addProperty(KEY_THEME, theme);
+		root.addProperty(KEY_MENU_THEME, menuTheme);
 		root.addProperty(KEY_GUI_STYLE, guiStyle);
 		root.addProperty(KEY_GUI_ACCENT, guiAccent);
 		root.addProperty(KEY_RADIAL_ACCENT, radialAccent);

@@ -175,6 +175,13 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 			noclipY += vy;
 			noclipZ += vz;
 			boat.setPos(noclipX, noclipY, noclipZ);
+			// The rider is positioned from the hull at the start of vanilla's
+			// tick, before this step. Moving the passenger by the same delta
+			// keeps the body (and the camera in third person) attached instead
+			// of trailing one tick behind the boat.
+			if (player.isPassenger() && player.getVehicle() == boat) {
+				player.setPos(player.getX() + vx, player.getY() + vy, player.getZ() + vz);
+			}
 			boat.setDeltaMovement(0.0, 0.0, 0.0);
 			if (!boat.noPhysics) {
 				boat.noPhysics = true;

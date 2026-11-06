@@ -31,7 +31,9 @@ public final class AtmosphereEffects {
 	/** One client tick of theme weather. Called from the module's own tick. */
 	public static void tick(Minecraft mc, int theme) {
 		try {
-			if (mc == null || mc.player == null || mc.level == null) {
+			if (mc == null || mc.player == null || mc.level == null || mc.screen != null) {
+				// A menu hides the world: spawning particles for a frame nobody
+				// sees only costs bandwidth in the particle engine.
 				return;
 			}
 			if (theme < 0) {
