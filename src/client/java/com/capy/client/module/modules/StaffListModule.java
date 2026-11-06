@@ -17,6 +17,7 @@ import com.capy.client.module.SliderSetting;
 import com.capy.client.module.WatchlistSetting;
 import com.capy.client.module.modules.antiadmin.AdminAlert;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
+import com.capy.client.module.modules.antiadmin.ChatPresence;
 import com.capy.client.module.modules.antiadmin.Correlator;
 import com.capy.client.module.modules.antiadmin.DetectionKind;
 import com.capy.client.module.modules.antiadmin.Observation;
@@ -395,6 +396,16 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 								: absent == null ? null : absent.skin();
 					}
 				}
+			}
+			// Text evidence: a `/tpa Name` command or a server line that names
+			// the account. A vanished admin the server no longer sends anything
+			// about can still be named in chat, and that is the one trace the
+			// packet-level checks cannot see. It has to be recent and the account
+			// has to be absent for it to mean "hidden" rather than "talked about
+			// while offline".
+			if (status == Status.NONE && entity == null && tell == null && info == null
+					&& ChatPresence.recent(name, 180_000L)) {
+				status = Status.VANISHED;
 			}
 			// A fully hidden account has no live match and no list entry, so the
 			// only identity left is the one the probe remembered by name.

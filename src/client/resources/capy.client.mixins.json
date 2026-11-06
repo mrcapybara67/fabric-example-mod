@@ -22,7 +22,9 @@
 		"FreecamMouseMixin",
 		"FlyTravelMixin",
 		"BoatInputMixin",
-		"BoatPacketMixin"
+		"BoatPacketMixin",
+		"TitleScreenMixin",
+		"ChatOutboundMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -143,6 +143,10 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		applyWeather(weatherMode.index());
 
 		AtmosphereState.tick(dt);
+		// Theme weather is vanilla particles spawned on the client: no packet,
+		// no server simulation, and it goes through the game's own particle
+		// renderer, so a replaced renderer still draws it.
+		AtmosphereEffects.tick(mc, selected);
 	}
 
 	/** Rain and thunder strengths for a weather choice. */

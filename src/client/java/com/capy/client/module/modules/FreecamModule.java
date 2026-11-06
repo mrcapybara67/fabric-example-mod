@@ -99,6 +99,16 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	private final SliderSetting maxDistance =
 			setting(new SliderSetting("max_distance", 96, 0, 256, 0));
 	private final BooleanSetting sprintBoost = setting(new BooleanSetting("sprint_boost", true));
+	/**
+	 * Whether the body is held still while the camera is detached.
+	 *
+	 * <p>On by default, which is what a viewer expects: the point of freecam is
+	 * to look from somewhere else, not to walk the body into a wall while the
+	 * player is not looking at it. The movement keys belong to the camera while
+	 * this is on; they are read from the options directly, so the camera still
+	 * flies. Off restores the old behaviour where the body keeps walking.</p>
+	 */
+	private final BooleanSetting freezeBody = setting(new BooleanSetting("freeze_body", true));
 
 	// Velocity in blocks per second, and the resulting position.
 	private double vx;
@@ -156,6 +166,19 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		if (mc.level != lastLevel) {
 			prime(player);
 		}
+		// The body is the camera's anchor, not its co-pilot. Clearing the
+		// movement input stops the body walking away underneath a detached
+		// camera; the zeroed velocity stops gravity from dropping it while the
+		// keys are being spent on the camera.
+		if (freezeBody.value() && !player.isPassenger() && player.input != null) {
+			player.input.keyPresses = net.minecraft.world.entity.player.Input.EMPTY;
+			player.setDeltaMovement(0.0, 0.0, 0.0);
+		}
+		// Advance once from the tick as well as once from the frame. The flight
+		// integration is time based, so calling it twice does not double the
+		// speed; it only guarantees the camera still moves on a renderer whose
+		// Camera hook never runs (a replaced renderer, for example).
+		updateCamera(mc);
 	}
 
 	/**
@@ -358,6 +381,7 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		acceleration.set(ConfigValues.intValue(json, "acceleration", 14));
 		maxDistance.set(ConfigValues.intValue(json, "max_distance", 96));
 		sprintBoost.set(ConfigValues.boolValue(json, "sprint_boost", true));
+		freezeBody.set(ConfigValues.boolValue(json, "freeze_body", true));
 	}
 
 	@Override
@@ -368,5 +392,6 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		json.addProperty("acceleration", acceleration.get());
 		json.addProperty("max_distance", maxDistance.get());
 		json.addProperty("sprint_boost", sprintBoost.value());
+		json.addProperty("freeze_body", freezeBody.value());
 	}
 }

@@ -2,6 +2,7 @@ package com.capy.client.mixin;
 
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.FreecamModule;
+import com.capy.client.util.Guard;
 import net.minecraft.client.MouseHandler;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -30,18 +31,23 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(value = MouseHandler.class, priority = 900)
 public class FreecamMouseMixin {
-	@Inject(method = "handleAccumulatedMovement", at = @At("HEAD"), cancellable = true)
+	@Inject(method = "handleAccumulatedMovement", at = @At("HEAD"), cancellable = true, require = 0)
 	private void capy$freecamLook(CallbackInfo ci) {
-		FreecamModule freecam = ModuleManager.get().get(FreecamModule.class);
-		if (freecam == null || !freecam.isActive()) {
-			return;
+		try {
+			FreecamModule freecam = ModuleManager.get().get(FreecamModule.class);
+			if (freecam == null || !freecam.isActive()) {
+				return;
+			}
+			MouseHandlerAccessor mouse = (MouseHandlerAccessor) (Object) this;
+			freecam.applyLook(mouse.capy$accumulatedDX(), mouse.capy$accumulatedDY());
+			// Cleared as well as cancelled: while the camera is detached the body
+			// must never be turned by a movement the player made in that view.
+			mouse.capy$setAccumulatedDX(0.0);
+			mouse.capy$setAccumulatedDY(0.0);
+			ci.cancel();
+		} catch (Throwable failure) {
+			// The vanilla turn still runs; a lost frame of look is not a crash.
+			Guard.report("freecam look", failure);
 		}
-		MouseHandlerAccessor mouse = (MouseHandlerAccessor) (Object) this;
-		freecam.applyLook(mouse.capy$accumulatedDX(), mouse.capy$accumulatedDY());
-		// Cleared as well as cancelled: while the camera is detached the body
-		// must never be turned by a movement the player made in that view.
-		mouse.capy$setAccumulatedDX(0.0);
-		mouse.capy$setAccumulatedDY(0.0);
-		ci.cancel();
 	}
 }

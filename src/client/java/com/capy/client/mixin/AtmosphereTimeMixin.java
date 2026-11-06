@@ -30,10 +30,24 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(Level.class)
 public class AtmosphereTimeMixin {
+	/**
+	 * True only for the client's own level.
+	 *
+	 * <p>The mixin is on {@link Level}, and in single player the integrated
+	 * server runs in the same JVM with the same transformations applied. Without
+	 * this check the module would change the server's clock and weather too: a
+	 * world whose daytime is pinned by the client hook stops advancing its own
+	 * day counter, and weather reads on the server would follow the client's
+	 * forced weather. A client-only feature must ask whose level it is.</p>
+	 */
+	private boolean capy$isClientLevel() {
+		return ((Level) (Object) this).isClientSide();
+	}
+
 	@Inject(method = "getDayTime", at = @At("RETURN"), cancellable = true, require = 0)
 	private void capy$overrideDayTime(CallbackInfoReturnable<Long> cir) {
 		try {
-			if (!AtmosphereState.active) {
+			if (!AtmosphereState.active || !capy$isClientLevel()) {
 				return;
 			}
 			float time = AtmosphereState.timeDay;
@@ -48,8 +62,15 @@ public class AtmosphereTimeMixin {
 			if (wrapped < 0f) {
 				wrapped += 1f;
 			}
-			long dayTime = (long) (((wrapped + 0.75f) % 1f) * 24000f);
-			cir.setReturnValue(dayTime);
+			long withinDay = (long) (((wrapped + 0.75f) % 1f) * 24000f);
+			// Keep the day count. getDayTime is not only the time of day: vanilla
+			// divides it by 24000 for the HUD day counter and the moon phase. A
+			// bare 0..23999 return pinned every world at day one, froze the moon
+			// and made the Day chip read "Day 1" forever. Only the fraction inside
+			// the current day is replaced.
+			Long original = cir.getReturnValue();
+			long day = original == null ? 0L : Math.floorDiv(original, 24000L);
+			cir.setReturnValue(day * 24000L + withinDay);
 		} catch (Throwable failure) {
 			Guard.report("atmosphere time", failure);
 		}
@@ -58,7 +79,7 @@ public class AtmosphereTimeMixin {
 	@Inject(method = "getRainLevel", at = @At("RETURN"), cancellable = true, require = 0)
 	private void capy$overrideRain(float delta, CallbackInfoReturnable<Float> cir) {
 		try {
-			if (!AtmosphereState.active) {
+			if (!AtmosphereState.active || !capy$isClientLevel()) {
 				return;
 			}
 			if (AtmosphereState.rainOvr >= 0f) {
@@ -72,7 +93,7 @@ public class AtmosphereTimeMixin {
 	@Inject(method = "getThunderLevel", at = @At("RETURN"), cancellable = true, require = 0)
 	private void capy$overrideThunder(float delta, CallbackInfoReturnable<Float> cir) {
 		try {
-			if (!AtmosphereState.active) {
+			if (!AtmosphereState.active || !capy$isClientLevel()) {
 				return;
 			}
 			if (AtmosphereState.thunderOvr >= 0f) {

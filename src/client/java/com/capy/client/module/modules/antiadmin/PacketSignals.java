@@ -251,6 +251,7 @@ public final class PacketSignals {
 		}
 		String text = packet.body() == null ? "" : packet.body().content();
 		remember(text, false);
+		ChatPresence.record(text);
 		push(new Chat(packet.sender(), text == null ? "" : text, now()));
 	}
 
@@ -259,6 +260,7 @@ public final class PacketSignals {
 			return;
 		}
 		remember(packet.content().getString(), true);
+		ChatPresence.record(packet.content().getString());
 		push(new SystemChat(packet.content().getString(), now()));
 	}
 

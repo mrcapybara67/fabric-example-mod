@@ -3,6 +3,7 @@ package com.capy.client.mixin;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.FreecamModule;
 import com.capy.client.util.Guard;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.state.CameraRenderState;
 import net.minecraft.client.renderer.state.LevelRenderState;
@@ -50,6 +51,10 @@ public class FreecamExtractMixin {
 			if (freecam == null || !freecam.isActive() || levelRenderState == null) {
 				return;
 			}
+			// Keep the module advancing even if the Camera hook is the one a
+			// replaced renderer skipped: the extracted state is the copy the
+			// whole frame draws from, so it must not be a frozen frame behind.
+			freecam.updateCamera(Minecraft.getInstance());
 			CameraRenderState state = levelRenderState.cameraRenderState;
 			if (state == null) {
 				return;

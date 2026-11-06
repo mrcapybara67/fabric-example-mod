@@ -2,6 +2,7 @@ package com.capy.client.mixin;
 
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.FreecamModule;
+import com.capy.client.util.Guard;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
@@ -31,20 +32,25 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(Camera.class)
 public abstract class FreecamCameraMixin extends Camera {
-	@Inject(method = "setup", at = @At("TAIL"))
+	@Inject(method = "setup", at = @At("TAIL"), require = 0)
 	private void capy$freecamCamera(Level level, Entity entity, boolean detached, boolean thirdPersonReverse,
 			float partialTick, CallbackInfo ci) {
-		FreecamModule freecam = ModuleManager.get().get(FreecamModule.class);
-		if (freecam == null || !freecam.isEnabled()) {
-			return;
+		try {
+			FreecamModule freecam = ModuleManager.get().get(FreecamModule.class);
+			if (freecam == null || !freecam.isEnabled()) {
+				return;
+			}
+			Minecraft mc = Minecraft.getInstance();
+			if (!freecam.updateCamera(mc)) {
+				return;
+			}
+			Vec3 position = freecam.cameraPosition();
+			this.setPosition(position.x, position.y, position.z);
+			// Vanilla's own order: yaw first, then pitch.
+			this.setRotation(freecam.cameraYaw(), freecam.cameraPitch());
+		} catch (Throwable failure) {
+			// A replaced or moved camera method costs the detach, not the frame.
+			Guard.report("freecam camera", failure);
 		}
-		Minecraft mc = Minecraft.getInstance();
-		if (!freecam.updateCamera(mc)) {
-			return;
-		}
-		Vec3 position = freecam.cameraPosition();
-		this.setPosition(position.x, position.y, position.z);
-		// Vanilla's own order: yaw first, then pitch.
-		this.setRotation(freecam.cameraYaw(), freecam.cameraPitch());
 	}
 }

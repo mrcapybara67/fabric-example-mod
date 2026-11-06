@@ -24,6 +24,7 @@ import com.capy.client.module.modules.antiadmin.AntiAdminHudRenderer;
 import com.capy.client.module.modules.antiadmin.AntiAdminWebhook;
 import com.capy.client.module.modules.antiadmin.BlockInteractDetector;
 import com.capy.client.module.modules.antiadmin.ChatDetector;
+import com.capy.client.module.modules.antiadmin.ChatPresence;
 import com.capy.client.module.modules.antiadmin.Confidence;
 import com.capy.client.module.modules.antiadmin.ContainerDetector;
 import com.capy.client.module.modules.antiadmin.Correlator;
@@ -45,6 +46,7 @@ import com.capy.client.module.modules.antiadmin.ShadowMapDetector;
 import com.capy.client.module.modules.antiadmin.SignalBuffer;
 import com.capy.client.module.modules.antiadmin.SignalDetector;
 import com.capy.client.module.modules.antiadmin.SoundDetector;
+import com.capy.client.module.modules.antiadmin.TabList;
 import com.capy.client.module.modules.antiadmin.TeamPacketDetector;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -120,6 +122,12 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private final Set<UUID> joined = new HashSet<>();
 	/** Tab tells already reported this session, keyed by account and tell. */
 	private final Set<String> toldTells = new HashSet<>();
+	/**
+	 * Watched names already reported from chat while hidden. Keyed by lower-case
+	 * name: one alert per session, because a vanished admin named in chat stays
+	 * named in chat.
+	 */
+	private final Set<String> chatHidden = new HashSet<>();
 	/**
 	 * Set when an alert lands on a watched account, cleared once the staff list
 	 * has rebuilt its rows.
@@ -308,6 +316,47 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 				continue;
 			}
 			raise(tell.match(), kind, null, -1.0);
+		}
+		scanChatPresence(mc);
+	}
+
+	/**
+	 * Catches the vanish that leaves no packet trace: the account is gone from
+	 * the tab list and the world, but the server still names it in chat or the
+	 * player just typed {@code /tpa Name}.
+	 *
+	 * <p>This is deliberately the last check and deliberately the weakest one.
+	 * It needs three things at once - a watched name, a recent mention, and the
+	 * absence of both a tab entry and an entity - so a player who is simply
+	 * online cannot trigger it, and a name cannot be invented from chat alone.
+	 * The alert says the account is hidden, not where it is: there is no
+	 * position to report.</p>
+	 */
+	private void scanChatPresence(Minecraft mc) {
+		for (String name : watchlist.entries()) {
+			if (!ChatPresence.recent(name, 180_000L)) {
+				continue;
+			}
+			if (TabList.byNameIgnoreCase(mc, name) != null) {
+				continue;
+			}
+			boolean inWorld = false;
+			for (AdminDetector.Match match : AdminDetector.scan(mc, watchlist)) {
+				if (match.username() != null && match.username().equalsIgnoreCase(name)) {
+					inWorld = true;
+					break;
+				}
+			}
+			if (inWorld || !chatHidden.add(name.toLowerCase(Locale.ROOT))) {
+				continue;
+			}
+			UUID subject = SignalBuffer.namedSubject(name);
+			if (subject == null) {
+				subject = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name)
+						.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			}
+			AdminDetector.Match match = new AdminDetector.Match(subject, name, name, -1.0, 0L, null);
+			raise(match, AdminAlert.Kind.VANISHED, null, -1.0);
 		}
 	}
 

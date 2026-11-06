@@ -51,11 +51,24 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 			setting(new SliderSetting("horizontal_speed", 100, 40, 400, 1));
 	private final SliderSetting verticalSpeed =
 			setting(new SliderSetting("vertical_speed", 80, 20, 300, 1));
+	/**
+	 * The speed the hull sinks on its own when no vertical key is held, in
+	 * blocks per second. The range starts at a very slow drift (0.10) and ends
+	 * at a deliberate drop (10.00); the value is stored in hundredths so the
+	 * slider can express both ends.
+	 */
+	private final SliderSetting boatFall =
+			setting(new SliderSetting("boat_fall", 100, 10, 1000, 2));
 
 	/** True for the noclip variant, which also disables boat collision. */
 	private final boolean noclip;
 	/** The boat this module last controlled, so its state can be restored. */
 	private AbstractBoat controlled;
+	/** Tracked position for the noclip variant, which steps past collision. */
+	private double noclipX;
+	private double noclipY;
+	private double noclipZ;
+	private boolean noclipPrimed;
 
 	public BoatFlyModule() {
 		this("boat_fly", false);
@@ -132,26 +145,55 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 		double radians = Math.toRadians(player.getYRot());
 		double sin = Math.sin(radians);
 		double cos = Math.cos(radians);
-		// The boat's own tick subtracts its gravity every tick, before it
-		// moves. Adding it back makes a released vertical key hold altitude
-		// instead of drifting down. In water the buoyancy step already
-		// balances gravity, so the compensation would double it there.
-		double buoyancy = boat.isInWater() ? 0.0 : boat.getGravity();
-		boat.setDeltaMovement(
-				(-sin * forward - cos * strafe) * horizontal,
-				lift * vertical + buoyancy,
-				(cos * forward - sin * strafe) * horizontal);
+		double vx = (-sin * forward - cos * strafe) * horizontal;
+		double vz = (cos * forward - sin * strafe) * horizontal;
+		double vy;
+		if (lift > 0) {
+			vy = vertical;
+		} else if (lift < 0) {
+			vy = -vertical;
+		} else {
+			// Boat fall: with no vertical key held the hull descends on its
+			// own. The slider is blocks per second, so 0.10 is a slow sink and
+			// 10.00 is a drop.
+			vy = -boatFall.real() / TICKS_PER_SECOND;
+		}
+
+		if (noclip) {
+			// Direct stepping. Vanilla's collision solver is bypassed entirely,
+			// so a wall cannot refuse the hull: the tracked position is advanced
+			// by the requested step and written to the boat. The boat's own tick
+			// still runs for passengers and packets, but its movement is
+			// discarded here.
+			if (!noclipPrimed) {
+				noclipX = boat.getX();
+				noclipY = boat.getY();
+				noclipZ = boat.getZ();
+				noclipPrimed = true;
+			}
+			noclipX += vx;
+			noclipY += vy;
+			noclipZ += vz;
+			boat.setPos(noclipX, noclipY, noclipZ);
+			boat.setDeltaMovement(0.0, 0.0, 0.0);
+			if (!boat.noPhysics) {
+				boat.noPhysics = true;
+			}
+		} else {
+			// The boat's own tick subtracts its gravity every tick, before it
+			// moves. Adding it back makes the fall speed the slider's speed.
+			// In water the buoyancy step already balances gravity, and on the
+			// ground the collision already stops the fall - compensating there
+			// would push the hull up out of its resting place.
+			double buoyancy = boat.isInWater() || boat.onGround() ? 0.0 : boat.getGravity();
+			boat.setDeltaMovement(vx, vy + buoyancy, vz);
+		}
 
 		// The camera steers the boat: without this the hull keeps whatever
 		// heading it last had and the flight reads as sidestepping.
 		boat.setYRot(player.getYRot());
 		boat.setYHeadRot(player.getYRot());
-		boat.setOnGround(true);
 		boat.resetFallDistance();
-
-		if (noclip && !boat.noPhysics) {
-			boat.noPhysics = true;
-		}
 	}
 
 	@Override
@@ -161,6 +203,7 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 
 	/** Restores the boat's collision and forgets it. */
 	protected void release() {
+		noclipPrimed = false;
 		if (controlled != null) {
 			if (noclip) {
 				controlled.noPhysics = false;
@@ -175,11 +218,13 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 	public void loadConfig(JsonObject json) {
 		horizontalSpeed.set(ConfigValues.intValue(json, "horizontal_speed", 100));
 		verticalSpeed.set(ConfigValues.intValue(json, "vertical_speed", 80));
+		boatFall.set(ConfigValues.intValue(json, "boat_fall", 100));
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		json.addProperty("horizontal_speed", horizontalSpeed.get());
 		json.addProperty("vertical_speed", verticalSpeed.get());
+		json.addProperty("boat_fall", boatFall.get());
 	}
 }
