@@ -9,6 +9,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -27,11 +28,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * motion is driven by the same frame that draws it. That is what makes the
  * flight immune to a starved client tick, which is how it froze on a phone.</p>
  *
- * <p>This mixin extends the class it mixes into, which is what makes the
- * protected {@code setPosition} and {@code setRotation} reachable.</p>
+ * <p>The setters are reached through {@code @Shadow} rather than by extending
+ * {@link Camera}. Extending the target class looks convenient in Java, but it
+ * is rejected by Mixin's hierarchy validation at load time - and because the
+ * mixin config is required, that rejection was a startup crash. A shadow on the
+ * method declared by the target is the supported form.</p>
  */
 @Mixin(Camera.class)
-public abstract class FreecamCameraMixin extends Camera {
+public abstract class FreecamCameraMixin {
+	@Shadow
+	protected abstract void setPosition(double x, double y, double z);
+
+	@Shadow
+	protected abstract void setRotation(float yaw, float pitch);
+
 	@Inject(method = "setup", at = @At("TAIL"), require = 0)
 	private void capy$freecamCamera(Level level, Entity entity, boolean detached, boolean thirdPersonReverse,
 			float partialTick, CallbackInfo ci) {

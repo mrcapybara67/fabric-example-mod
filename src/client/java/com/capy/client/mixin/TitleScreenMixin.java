@@ -7,13 +7,9 @@ import com.capy.client.util.Guard;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.Renderable;
-import net.minecraft.client.gui.components.events.GuiEventListener;
-import net.minecraft.client.gui.narration.NarratableEntry;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -28,16 +24,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * there instead; the vanilla logo, splash, buttons and narration are untouched.
  * The theme button is added at the end of {@code init}, after the vanilla
  * widgets, so it sits above the menu and survives a resize.</p>
+ *
+ * <p>The widget methods are reached through {@link ScreenAccessor}. They are
+ * inherited from {@code Screen}, and a {@code @Shadow} in this mixin is not
+ * resolved against superclasses - doing that crashed the game on startup.</p>
  */
 @Mixin(TitleScreen.class)
 public abstract class TitleScreenMixin {
-	@Shadow
-	protected abstract <T extends GuiEventListener & Renderable & NarratableEntry> T addRenderableWidget(
-			T widget);
-
-	@Shadow
-	protected abstract void removeWidget(GuiEventListener widget);
-
 	@Unique
 	private Button capy$themeButton;
 
@@ -45,10 +38,11 @@ public abstract class TitleScreenMixin {
 	private void capy$initMenu(CallbackInfo ci) {
 		try {
 			MenuBackdrop.onOpen(this);
+			ScreenAccessor screen = (ScreenAccessor) (Object) this;
 			// A resize re-runs init on the same TitleScreen. Removing the old
 			// button first keeps exactly one picker on screen.
 			if (capy$themeButton != null) {
-				this.removeWidget(capy$themeButton);
+				screen.capy$removeWidget(capy$themeButton);
 				capy$themeButton = null;
 			}
 			int width = Minecraft.getInstance().getWindow().getGuiScaledWidth();
@@ -62,7 +56,7 @@ public abstract class TitleScreenMixin {
 						MenuBackdrop.restart();
 						ClientConfig.saveNow();
 					}).bounds(Math.max(4, width - 154), 8, 146, 20).build();
-			this.addRenderableWidget(capy$themeButton);
+			screen.capy$addRenderableWidget(capy$themeButton);
 		} catch (Throwable failure) {
 			// A missing picker costs one button; the menu still opens.
 			Guard.report("menu theme button", failure);

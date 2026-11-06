@@ -17,6 +17,7 @@
 		"AtmosphereHazeMixin",
 		"MouseHandlerAccessor",
 		"GameRendererAccessor",
+		"ScreenAccessor",
 		"FreecamCameraMixin",
 		"FreecamExtractMixin",
 		"FreecamMouseMixin",
