@@ -85,7 +85,13 @@ public final class MenuBackdrop {
 	public static void onOpen(Object screen) {
 		if (screen != openedFor) {
 			openedFor = screen;
-			restart();
+			// Do not start the clock here: screen initialisation can be followed
+			// by resource work, and an opening timed from init would already be
+			// over by the first visible frame. The first draw starts the clock.
+			openedAt = 0L;
+			skinLookup = null;
+			cachedSkin = null;
+			skinFailureReported = false;
 		}
 	}
 
