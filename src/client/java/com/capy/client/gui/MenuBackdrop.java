@@ -17,22 +17,24 @@ import net.minecraft.world.entity.player.PlayerSkin;
  * vector marks - so the scene resolves against the window every frame instead of
  * stretching a fixed panorama. The same code is crisp at 1080p and at 4K.</p>
  *
- * <p>The opening has three beats: the sky fades up under a short black veil, the
- * crest and wordmark slide into place, and after exactly one second the player's
- * own skin enters from the right edge of the window and settles beside the menu.
- * A menu theme changes the sky, the ridge colours, the light and the moving
- * effect together, so the palettes read as different places rather than as
- * different tints of one place.</p>
+ * <p>The opening has four beats: the sky fades up under a short black veil, the
+ * crest and wordmark slide into place, the perspective floor and the theme's
+ * landmark resolve, and the player's own skin drops onto a floating platform
+ * with a landing ring. A menu theme changes the sky, the ridge colours, the
+ * light, the landmark and the moving effect together, so the palettes read as
+ * different places rather than as different tints of one place.</p>
  *
  * <p>Every animated quantity is derived from the clock, never accumulated, so a
  * dropped frame cannot make the scene drift. Positions and seeds are computed
  * once into static arrays; the render loop itself allocates nothing.</p>
  */
 public final class MenuBackdrop {
-	private static final long INTRO_MS = 1600L;
-	/** The character is absent for this long, then slides in from the right. */
-	private static final long CHARACTER_DELAY_MS = 1000L;
-	private static final long CHARACTER_ENTER_MS = 1150L;
+	private static final long INTRO_MS = 1900L;
+	/** The character is absent for this long, then drops in from above. */
+	private static final long CHARACTER_DELAY_MS = 780L;
+	private static final long CHARACTER_ENTER_MS = 980L;
+	/** How long the landing ring and petal burst stay on screen after touchdown. */
+	private static final long LANDING_MS = 900L;
 
 	private static final int STARS = 96;
 	private static final int MOTES = 54;
@@ -150,6 +152,11 @@ public final class MenuBackdrop {
 			drawClouds(g, w, h, theme);
 		}
 		drawRidges(g, w, h, theme);
+		// A perspective floor and a theme landmark give the scene a near, a
+		// middle and a far plane. Without them the sky, ridges and character
+		// all sit on the same flat sheet no matter how good the palette is.
+		drawGround(g, w, h, now, theme, intro, scale);
+		drawLandmark(g, w, h, now, theme, scale);
 		drawEffect(g, w, h, now, theme, intro, scale);
 		drawCharacter(g, w, h, now, theme, scale);
 		drawMark(g, w, h, intro, theme);
@@ -240,7 +247,7 @@ public final class MenuBackdrop {
 				float wave = (float) Math.sin(t * 6.2f + now / 2600.0 + band * 1.7f) * 0.055f
 						+ (float) Math.sin(t * 13.0f + now / 1700.0 + band) * 0.022f;
 				int y = baseY + Math.round(wave * h);
-				int alpha = Math.round(14f + 16f * (0.5f + 0.5f
+				int alpha = Math.round(24f + 34f * (0.5f + 0.5f
 						* (float) Math.sin(t * 9.0f - now / 2100.0 + band)));
 				g.fillGradient(x, y, x + step, y + thickness,
 						withAlpha(color, alpha), withAlpha(color, 0));
@@ -255,7 +262,7 @@ public final class MenuBackdrop {
 					+ (float) Math.sin(t * 13.0f + now / 1700.0) * 0.022f;
 			int y = crestY + Math.round(wave * h);
 			g.fill(x, y, x + step, y + Math.max(1, Math.round(2 * scale)),
-					withAlpha(theme.particleA(), 62));
+					withAlpha(theme.particleA(), 96));
 		}
 	}
 
@@ -341,11 +348,20 @@ public final class MenuBackdrop {
 			int alpha = Math.round((80f + RA[i] * 90f) * intro);
 			int size = Math.max(2, Math.round((2 + (i % 3 == 0 ? 1 : 0)) * scale));
 			int color = (i % 5 == 0) ? theme.particleB() : theme.particleA();
-			g.fill(Math.round(x), Math.round(y), Math.round(x) + size + 1,
-					Math.round(y) + size, withAlpha(color, alpha));
-			g.fill(Math.round(x) + 1, Math.round(y) + size, Math.round(x) + 2,
-					Math.round(y) + size + Math.max(1, Math.round(2 * scale)),
-					withAlpha(color, Math.max(0, alpha - 45)));
+			// A turning kite, not a domino: the leaf rotates with its fall and
+			// carries a darker half, so it reads as a small object with an edge.
+			float angle = (float) Math.sin(now / 780.0 + i * 1.7) * 0.9f
+					+ i * 0.41f;
+			g.pose().pushMatrix();
+			g.pose().translate(x, y);
+			g.pose().rotate(angle);
+			g.fill(-size, -Math.max(1, size / 2), size + 1, Math.max(1, size / 2) + 1,
+					withAlpha(color, alpha));
+			g.fill(-size, 0, 1, Math.max(1, size / 2) + 1,
+					withAlpha(color, Math.max(0, alpha - 35)));
+			g.fill(0, -Math.max(1, size / 2), size + 1, 0,
+					withAlpha(color, Math.max(0, alpha - 15)));
+			g.pose().popMatrix();
 		}
 	}
 
@@ -435,13 +451,156 @@ public final class MenuBackdrop {
 		}
 	}
 
+	// ---------------------------------------------------------------- depth
+
+	/**
+	 * A perspective floor: converging lines and rows that tighten towards the
+	 * horizon. It is the cheapest depth cue in the scene and the one that stops
+	 * the ridges from reading as a painted wall.
+	 */
+	private static void drawGround(GuiGraphics g, int w, int h, long now, MenuTheme theme,
+			float intro, float scale) {
+		int horizon = Math.round(h * 0.70f);
+		float fade = easeOut(intro);
+		g.fillGradient(0, horizon, w, h, 0x00000000, withAlpha(theme.ridgeFar(), 150));
+		UiCanvas c = McCanvas.of(g);
+		int thickness = Math.max(1, Math.round(scale));
+		int vpX = w / 2;
+		int spread = Math.max(w, h);
+		for (int i = -8; i <= 8; i++) {
+			int bottomX = vpX + i * spread / 7;
+			int alpha = Math.round((i == 0 ? 34 : 18) * fade);
+			Ui.line(c, vpX, horizon, bottomX, h, thickness,
+					withAlpha(theme.ridgeLight(), alpha));
+		}
+		int rows = 12;
+		for (int row = 1; row <= rows; row++) {
+			float t = row / (float) rows;
+			int y = horizon + Math.round((h - horizon) * t * t);
+			int alpha = Math.round((6 + t * 30) * fade);
+			Ui.line(c, 0, y, w, y, thickness, withAlpha(theme.ridgeLight(), alpha));
+		}
+		// One slow highlight sweeping down the floor, like light through cloud.
+		float sweep = (now / 5200f) % 1f;
+		int sy = horizon + Math.round((h - horizon) * sweep * sweep);
+		Ui.line(c, 0, sy, w, sy, Math.max(1, Math.round(2 * scale)),
+				withAlpha(theme.accent(), Math.round(20 * fade)));
+	}
+
+	/**
+	 * A theme-owned landmark at the middle-distance. Each one is built from a
+	 * few cuboids, so it has a front, a shaded side and a top: the same trick
+	 * the character uses, applied to the place the character is standing in.
+	 */
+	private static void drawLandmark(GuiGraphics g, int w, int h, long now, MenuTheme theme,
+			float scale) {
+		int horizon = Math.round(h * 0.70f);
+		int base = horizon + Math.round(h * 0.08f);
+		int x = Math.round(w * 0.21f);
+		int unit = Math.max(3, Math.round(Math.min(w, h) * 0.012f * scale));
+
+		if (theme == MenuTheme.AURORA) {
+			fillDisc(g, x, base - unit * 8, unit * 9, withAlpha(theme.glow(), 16));
+			cuboid(g, x - unit * 5, base, unit * 3, unit * 14, unit * 2,
+					withAlpha(theme.particleB(), 92), withAlpha(theme.ridgeFar(), 230),
+					withAlpha(theme.particleA(), 130));
+			cuboid(g, x, base, unit * 2, unit * 21, unit * 2,
+					withAlpha(theme.particleA(), 110), withAlpha(theme.ridgeNear(), 235),
+					withAlpha(theme.particleB(), 160));
+			cuboid(g, x + unit * 3, base, unit * 3, unit * 10, unit * 2,
+					withAlpha(theme.particleB(), 80), withAlpha(theme.ridgeFar(), 225),
+					withAlpha(theme.particleA(), 120));
+		} else if (theme == MenuTheme.SAKURA || theme == MenuTheme.PLUM) {
+			cuboid(g, x, base, unit * 3, unit * 22, unit * 2,
+					withAlpha(theme.ridgeNear(), 255), withAlpha(0xFF2A1620, 255),
+					withAlpha(theme.ridgeLight(), 80));
+			int crownY = base - unit * 22;
+			for (int i = 0; i < 6; i++) {
+				fillDisc(g, x + Math.round(unit * (i - 2.5f) * 2.6f), crownY - unit * (i % 2) * 3,
+						unit * (5 + (i % 3)), withAlpha(i % 2 == 0 ? theme.particleA() : theme.particleB(), 62));
+			}
+			for (int i = 0; i < 14; i++) {
+				int px = x + Math.round((RX[i] - 0.5f) * unit * 24);
+				int py = crownY + Math.round((RY[i] - 0.3f) * unit * 14
+						+ (now / 900f + RA[i]) % 4 * unit);
+				g.fill(px, py, px + Math.max(1, unit / 2), py + Math.max(1, unit / 2),
+						withAlpha(theme.particleA(), 140));
+			}
+		} else if (theme == MenuTheme.DEEP_OCEAN) {
+			for (int i = 0; i < 5; i++) {
+				int sx = x + (i - 2) * unit * 4;
+				int hh = unit * (8 + (i * 7 % 11));
+				cuboid(g, sx, base, unit * 2, hh, unit * 2,
+						withAlpha(theme.ridgeNear(), 235), withAlpha(theme.ridgeFar(), 255),
+						withAlpha(theme.particleB(), 55));
+			}
+			for (int i = 0; i < 4; i++) {
+				int sx = x - unit * 9 + i * unit * 6;
+				g.fillGradient(sx, horizon - unit * 4, sx + unit * 3, base,
+						withAlpha(theme.particleA(), 26), 0x00000000);
+			}
+		} else if (theme == MenuTheme.NEON) {
+			for (int i = 0; i < 4; i++) {
+				int sx = x + (i - 2) * unit * 5;
+				int hh = unit * (9 + (i * 7 % 14));
+				cuboid(g, sx, base, unit * 3, hh, unit * 2,
+						withAlpha(theme.ridgeNear(), 250), withAlpha(0xFF02080E, 255),
+						withAlpha(theme.accent(), 75));
+				g.fill(sx + unit, base - hh + unit * 2, sx + unit * 2,
+						base - hh + unit * 3, withAlpha(theme.particleA(), 120));
+			}
+		} else if (theme == MenuTheme.CRIMSON) {
+			fillDisc(g, x, base - unit * 4, unit * 16, withAlpha(theme.glow(), 30));
+			cuboid(g, x - unit * 9, base, unit * 18, unit * 8, unit * 4,
+					withAlpha(0xFF2A0808, 255), withAlpha(0xFF160304, 255),
+					withAlpha(theme.particleB(), 95));
+			g.fill(x - unit * 2, base - unit * 9, x + unit, base - unit * 7,
+					withAlpha(theme.particleA(), 190));
+			g.fill(x - unit, base - unit * 8, x + unit * 2, base - unit * 2,
+					withAlpha(theme.particleA(), 100));
+		} else if (theme == MenuTheme.VOID) {
+			fillDisc(g, x, base - unit * 11, unit * 12, withAlpha(theme.glow(), 26));
+			cuboid(g, x - unit * 2, base, unit * 5, unit * 26, unit * 2,
+					withAlpha(0xFF10071E, 255), withAlpha(0xFF05020A, 255),
+					withAlpha(theme.accent(), 100));
+			Ui.ring(McCanvas.of(g), x + Math.round(unit * 0.5f), base - unit * 14,
+					unit * 7, Math.max(1, unit / 2), withAlpha(theme.accent(), 90));
+		} else if (theme == MenuTheme.MIDNIGHT) {
+			cuboid(g, x - unit * 10, base, unit * 20, unit * 12, unit * 3,
+					withAlpha(theme.ridgeNear(), 255), withAlpha(theme.ridgeFar(), 255),
+					withAlpha(theme.ridgeLight(), 34));
+		} else if (theme == MenuTheme.OVERCAST) {
+			for (int i = 0; i < 4; i++) {
+				fillDisc(g, x + (i - 2) * unit * 7, horizon - unit * 7,
+						unit * (9 + i % 2 * 3), withAlpha(theme.particleA(), 54));
+			}
+		} else {
+			cuboid(g, x, base, unit * 4, unit * 15, unit * 3,
+					withAlpha(theme.ridgeNear(), 250), withAlpha(theme.ridgeFar(), 255),
+					withAlpha(theme.particleA(), 70));
+		}
+	}
+
+	/** A box with a front, a darker right side and a lit top. */
+	private static void cuboid(GuiGraphics g, int x, int base, int width, int height, int depth,
+			int front, int side, int top) {
+		if (width <= 0 || height <= 0) {
+			return;
+		}
+		g.fill(x, base - height, x + width, base, front);
+		g.fill(x + width, base - height - depth, x + width + depth, base - depth, side);
+		g.fill(x, base - height - depth, x + width, base - height, top);
+		g.fill(x, base - height - depth, x + width + depth, base - height - depth + 1,
+				withAlpha(top, 150));
+	}
+
 	// ------------------------------------------------------------- character
 
 	/**
-	 * The player's own skin, absent for the first second and then sliding in
-	 * from the right edge. The skin is resolved once per title screen from the
-	 * game profile and drawn as a flat front view, so it needs no world, no
-	 * entity and no render pass of its own.
+	 * The player's own skin, absent for the first beat and then dropped in from
+	 * above. The skin is resolved once per title screen from the game profile
+	 * and extruded into a small 3D figure. It needs no world, no entity and no
+	 * render pass of its own.
 	 */
 	private static void drawCharacter(GuiGraphics g, int w, int h, long now, MenuTheme theme,
 			float scale) {
@@ -450,53 +609,152 @@ public final class MenuBackdrop {
 			return;
 		}
 		float t = clamp(elapsed / (float) CHARACTER_ENTER_MS);
-		float ease = easeOutCubic(t);
+		// A short overshoot followed by a settle: the character lands instead of
+		// gliding to a stop. The overshoot is deliberately tiny; a full bounce
+		// on a menu reads as a toy.
+		float ease = easeOutBack(t);
 		int unit = Math.max(2, Math.round(Math.min(h * 0.46f, 330f * scale) / 32f));
-		int targetCx = Math.round(w * 0.88f);
-		int entryCx = w + 16 * unit;
-		int cx = Math.round(entryCx + (targetCx - entryCx) * ease);
+		int targetCx = Math.round(w * 0.86f);
+		int cx = targetCx;
+		int floorY = Math.round(h * 0.835f);
+		float drop = (1f - ease) * (h * 0.22f);
 		int bob = Math.round((float) Math.sin(now / 850.0) * 2f * scale);
-		int top = Math.round(h * 0.82f) - 32 * unit + bob;
+		int top = floorY - 32 * unit + bob + Math.round(drop);
 
 		UiCanvas c = McCanvas.of(g);
 		Ui.discGlow(c, cx, top + 17 * unit, Math.max(16, 8 * unit),
 				withAlpha(theme.accent(), 70), 0.28f);
-		// A soft floor shadow: two nested ellipses, cheaper than a real blur and
-		// enough to seat the character in the scene.
-		fillEllipse(g, cx, Math.round(h * 0.835f) + bob, 11 * unit, Math.max(2, unit));
+		// A floating island makes the character stand on something with a top
+		// and a side, rather than on a shadow painted over a gradient.
+		drawPlatform(g, cx, floorY + bob, unit, theme, now);
+		fillEllipse(g, cx, floorY + Math.round(2 * scale) + bob, 11 * unit, Math.max(2, unit));
+
 		Minecraft mc = Minecraft.getInstance();
 		PlayerSkin skin = skin(mc);
 		if (skin != null) {
-			drawSkin(g, skin, cx, top, unit);
+			drawSkin3D(g, skin, cx, top, unit, now);
 		} else {
 			drawSilhouette(c, cx, top, unit, theme);
 		}
+		// The landing mark is on the platform, not around the character's feet:
+		// it is the point on the floor that received the weight.
+		drawLanding(g, cx, floorY + bob, unit, theme, elapsed);
 		drawName(g, mc, cx, top, unit, theme, scale);
 	}
 
-	private static void drawSkin(GuiGraphics g, PlayerSkin skin, int cx, int top, int unit) {
+	/** A shallow 3D island: a diamond top with a darker tapered side. */
+	private static void drawPlatform(GuiGraphics g, int cx, int floorY, int unit,
+			MenuTheme theme, long now) {
+		int radius = Math.round(9.5f * unit + 14f);
+		int thickness = Math.max(4, Math.round(unit * 0.8f));
+		int top = floorY + Math.round(unit * 0.6f);
+		// Side walls first, so the top face covers their upper edges.
+		g.pose().pushMatrix();
+		g.pose().translate(cx, top + thickness);
+		g.pose().rotate(0.7853982f);
+		g.fill(-radius + 4, -radius + 8, radius - 4, radius + 4,
+				withAlpha(theme.ridgeNear(), 220));
+		g.fill(-radius, -radius, radius, radius, withAlpha(theme.ridgeFar(), 210));
+		g.fill(-radius + 3, -radius + 3, radius - 3, radius - 3,
+				withAlpha(theme.ridgeLight(), 38));
+		g.pose().popMatrix();
+		// A little lift and a moving highlight on the rim.
+		int pulse = Math.round(18f + 18f * (float) Math.sin(now / 1100.0));
+		g.fill(cx - radius / 2, top - 1, cx + radius / 2, top + 1,
+				withAlpha(theme.accent(), pulse));
+	}
+
+	/** Ring and petals thrown out at the moment the character touches down. */
+	private static void drawLanding(GuiGraphics g, int cx, int floorY, int unit,
+			MenuTheme theme, long elapsed) {
+		long sinceLanding = elapsed - CHARACTER_ENTER_MS;
+		if (sinceLanding < 0 || sinceLanding > LANDING_MS) {
+			return;
+		}
+		float t = sinceLanding / (float) LANDING_MS;
+		float fade = 1f - t;
+		UiCanvas c = McCanvas.of(g);
+		int radius = Math.round(unit * (5f + t * 13f));
+		Ui.ring(c, cx, floorY + Math.round(unit * 0.7f), radius,
+				Math.max(1, Math.round(2 * fade + 1)), withAlpha(theme.accent(), Math.round(110 * fade)));
+		for (int i = 0; i < 18; i++) {
+			float angle = i * 0.349f + 0.2f;
+			float distance = unit * (2f + t * (6f + RA[i] * 7f));
+			int x = cx + Math.round((float) Math.cos(angle) * distance);
+			int y = floorY + Math.round(unit * 0.6f + (float) Math.sin(angle) * distance * 0.35f);
+			int size = Math.max(1, Math.round((1 + RA[i] * 2f) * (1f - t * 0.5f)));
+			int color = (i & 1) == 0 ? theme.particleA() : theme.particleB();
+			g.fill(x, y, x + size + 1, y + size, withAlpha(color, Math.round(170 * fade)));
+		}
+	}
+
+	/**
+	 * The skin as an extruded figure: front, right side and top face per body
+	 * part, with the side and top shaded down. The turn is driven by a slow
+	 * sine, so the depth is visible without the figure spinning around.
+	 */
+	private static void drawSkin3D(GuiGraphics g, PlayerSkin skin, int cx, int top, int unit,
+			long now) {
 		if (skin.body() == null || skin.body().texturePath() == null) {
 			return;
 		}
 		Identifier texture = skin.body().texturePath();
 		int arm = skin.model() == PlayerModelType.SLIM ? 3 : 4;
-		// Head (front) and its hat layer.
-		blit(g, texture, cx - 4 * unit, top, 8, 8, 8, 8, unit);
-		blit(g, texture, cx - 4 * unit, top, 40, 8, 8, 8, unit);
-		// Torso.
-		blit(g, texture, cx - 4 * unit, top + 8 * unit, 20, 20, 8, 12, unit);
-		// Right arm (viewer's left), left arm (viewer's right).
-		blit(g, texture, cx - (4 + arm) * unit, top + 8 * unit, 44, 20, arm, 12, unit);
-		blit(g, texture, cx + 4 * unit, top + 8 * unit, 36, 52, arm, 12, unit);
-		// Legs.
-		blit(g, texture, cx - 4 * unit, top + 20 * unit, 4, 20, 4, 12, unit);
-		blit(g, texture, cx, top + 20 * unit, 20, 52, 4, 12, unit);
+		float turn = 0.30f + 0.10f * (float) Math.sin(now / 2400.0);
+		// Eight units times the turn: at the usual 10 px unit the side face is
+		// about 24 px, a real edge rather than a one-pixel bevel.
+		int depth = Math.max(3, Math.round(8 * unit * turn));
+		// Centre the box rather than its front face, or the whole figure drifts
+		// left as the depth grows.
+		int x = cx - 4 * unit - depth / 2;
+
+		// Legs first, then arms, body and head: the same order a player model
+		// is built, and it keeps each side face behind the front it belongs to.
+		part(g, texture, x - arm * unit, top + 20 * unit, arm * unit, 12 * unit,
+				depth, 4, 20, 0, 20, 4, 16, 0x33000000, 0x22000000);
+		part(g, texture, x + 4 * unit, top + 20 * unit, 4 * unit, 12 * unit,
+				depth, 20, 52, 16, 52, 20, 48, 0x33000000, 0x22000000);
+		part(g, texture, x - (4 + arm) * unit, top + 8 * unit, arm * unit, 12 * unit,
+				depth, 44, 20, 40, 20, 44, 16, 0x3A000000, 0x26000000);
+		part(g, texture, x + 4 * unit, top + 8 * unit, arm * unit, 12 * unit,
+				depth, 36, 52, 32, 52, 36, 48, 0x3A000000, 0x26000000);
+		part(g, texture, x - 4 * unit, top + 8 * unit, 8 * unit, 12 * unit,
+				depth, 20, 20, 16, 20, 20, 16, 0x2E000000, 0x1E000000);
+		part(g, texture, x - 4 * unit, top, 8 * unit, 8 * unit,
+				depth, 8, 8, 0, 8, 8, 0, 0x3A000000, 0x22000000);
+
+		// The hat layer is a real second skin shell, not a tint: draw its front
+		// and a narrow side so the head keeps its outline when the layer is
+		// mostly transparent.
+		blitFace(g, texture, x - 4 * unit, top, 8 * unit, 8 * unit, 40, 8, 8, 8);
+		blitFace(g, texture, x + 4 * unit, top - depth, depth, 8 * unit, 40, 16, 8, 8);
+		g.fill(x + 4 * unit, top - depth, x + 4 * unit + depth, top + 8 * unit,
+				0x1A000000);
 	}
 
-	private static void blit(GuiGraphics g, Identifier texture, int x, int y, int u, int v,
-			int sourceW, int sourceH, int unit) {
-		g.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, u, v,
-				sourceW * unit, sourceH * unit, 64, 64);
+	/** One extruded box: side and top, then the front face over their edges. */
+	private static void part(GuiGraphics g, Identifier texture, int x, int y, int width, int height,
+			int depth, int u, int v, int sideU, int sideV, int topU, int topV,
+			int sideShade, int topShade) {
+		// Right side: a squeezed copy of the side texture, drawn behind the
+		// front. The alpha fill is what makes it read as a face in shadow.
+		blitFace(g, texture, x + width, y - depth, depth, height, sideU, sideV, 8, 8);
+		g.fill(x + width, y - depth, x + width + depth, y + height - depth, sideShade);
+		// Top: a lighter cap, only one pixel band deep in the texture but enough
+		// to close the box at the shoulder and the head.
+		blitFace(g, texture, x, y - depth, width, depth, topU, topV, 8, 8);
+		g.fill(x, y - depth, x + width, y, topShade);
+		// Front.
+		blitFace(g, texture, x, y, width, height, u, v, 8, 8);
+	}
+
+	private static void blitFace(GuiGraphics g, Identifier texture, int x, int y, int width, int height,
+			int u, int v, int sourceW, int sourceH) {
+		if (width <= 0 || height <= 0) {
+			return;
+		}
+		g.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, u, v, width, height,
+				sourceW, sourceH, 64, 64);
 	}
 
 	/** A plate-and-initial stand-in when no skin can be resolved yet. */
@@ -645,5 +903,11 @@ public final class MenuBackdrop {
 	private static float easeOutCubic(float t) {
 		float u = 1f - t;
 		return 1f - u * u * u;
+	}
+
+	/** Overshoots by about a tenth, then settles; the landing beat of the intro. */
+	private static float easeOutBack(float t) {
+		float u = t - 1f;
+		return 1f + 2.70158f * u * u * u + 1.70158f * u * u;
 	}
 }

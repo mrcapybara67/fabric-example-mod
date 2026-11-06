@@ -35,11 +35,13 @@ public final class ClientKeybinds {
 	private static final String INSPECT_KEY = "key.capy.inspect_knife";
 	private static final String HUD_EDITOR_KEY = "key.capy.hud_editor";
 	private static final String FREECAM_KEY = "key.capy.freecam";
+	private static final String FREELOOK_KEY = "key.capy.freelook";
 
 	private static KeyMapping openClickGui;
 	private static KeyMapping inspectKnife;
 	private static KeyMapping hudEditor;
 	private static KeyMapping toggleFreecam;
+	private static KeyMapping toggleFreelook;
 
 	/** Ticks left to keep trying to hand input back; negative means idle. */
 	private static int restoreTicks = -1;
@@ -77,6 +79,15 @@ public final class ClientKeybinds {
 				FREECAM_KEY,
 				InputConstants.Type.KEYSYM,
 				GLFW.GLFW_KEY_V,
+				category
+		));
+		// Freelook's switch. Left Alt is the convention for an orbit that is
+		// held for a moment; it is a toggle here because a phone has no key to
+		// hold, and the module card is the primary control either way.
+		toggleFreelook = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+				FREELOOK_KEY,
+				InputConstants.Type.KEYSYM,
+				GLFW.GLFW_KEY_LEFT_ALT,
 				category
 		));
 	}
@@ -139,6 +150,20 @@ public final class ClientKeybinds {
 	/** The freecam binding, so the module card can show the current key. */
 	public static KeyMapping toggleFreecam() {
 		return toggleFreecam;
+	}
+
+	/** True on the tick after the freelook key was pressed. */
+	public static boolean consumeFreelookClick() {
+		boolean clicked = false;
+		while (toggleFreelook != null && toggleFreelook.consumeClick()) {
+			clicked = true;
+		}
+		return clicked;
+	}
+
+	/** The freelook binding, so the module card can show the current key. */
+	public static KeyMapping toggleFreelook() {
+		return toggleFreelook;
 	}
 
 	/** The HUD editor binding, so the editor can show the current key. */

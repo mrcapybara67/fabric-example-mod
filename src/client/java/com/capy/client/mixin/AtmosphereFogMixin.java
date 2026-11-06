@@ -11,6 +11,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * Atmosphere's fog density, applied to the distances vanilla is about to use.
@@ -34,10 +35,42 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <h2>Only two of the six fields</h2>
  * The sky and cloud ends are left alone. They bound how far the sky dome and the
  * clouds are drawn, not how far the player can see; scaling them would shrink
- * the sky itself instead of thickening the air in front of it.
+ * the sky itself instead of thickening the air in front of it. The colour is a
+ * separate hook: a theme owns the hue, while vanilla's light and weather still
+ * own the brightness.
  */
 @Mixin(AtmosphericFogEnvironment.class)
 public class AtmosphereFogMixin {
+	/**
+	 * Tints the colour half of the fog. Distances decide how thick the air is;
+	 * the base colour decides what the air is made of. Both are needed for a
+	 * theme to read as a place rather than as a distance slider.
+	 */
+	@Inject(method = "getBaseColor", at = @At("RETURN"), cancellable = true, require = 0)
+	private void capy$tintFog(ClientLevel level, Camera camera, int base, float partialTick,
+			CallbackInfoReturnable<Integer> cir) {
+		try {
+			float hot = AtmosphereState.fogTintHot;
+			if (!AtmosphereState.active || hot <= 0.01f) {
+				return;
+			}
+			int original = cir.getReturnValue();
+			int a = (original >>> 24) & 0xFF;
+			int r = (original >> 16) & 0xFF;
+			int g = (original >> 8) & 0xFF;
+			int b = original & 0xFF;
+			int tr = Math.round(AtmosphereState.fogR * 255f);
+			int tg = Math.round(AtmosphereState.fogG * 255f);
+			int tb = Math.round(AtmosphereState.fogB * 255f);
+			r = Math.round(r + (tr - r) * hot);
+			g = Math.round(g + (tg - g) * hot);
+			b = Math.round(b + (tb - b) * hot);
+			cir.setReturnValue((a << 24) | (r << 16) | (g << 8) | b);
+		} catch (Throwable failure) {
+			Guard.report("atmosphere fog colour", failure);
+		}
+	}
+
 	@Inject(method = "setupFog", at = @At("TAIL"), require = 0)
 	private void capy$scaleFog(FogData data, Camera camera, ClientLevel level, float partialTick,
 			DeltaTracker tracker, CallbackInfo ci) {

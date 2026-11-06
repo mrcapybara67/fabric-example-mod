@@ -14,6 +14,7 @@ import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.AntiAdminModule;
 import com.capy.client.module.modules.AntiCheatNotifierModule;
 import com.capy.client.module.modules.AtmosphereModule;
+import com.capy.client.module.modules.AtmosphereWorldRenderer;
 import com.capy.client.module.modules.BlockAnimationModule;
 import com.capy.client.module.modules.BlockOverlayModule;
 import com.capy.client.module.modules.BoatFlyModule;
@@ -22,6 +23,7 @@ import com.capy.client.module.modules.CustomFOVModule;
 import com.capy.client.module.modules.CustomKnifeModule;
 import com.capy.client.module.modules.FlyModule;
 import com.capy.client.module.modules.FreecamModule;
+import com.capy.client.module.modules.FreelookModule;
 import com.capy.client.module.modules.FullbrightModule;
 import com.capy.client.module.modules.HandAuraModule;
 import com.capy.client.module.modules.SmoothCameraModule;
@@ -99,6 +101,9 @@ public class CapyClient implements ClientModInitializer {
 		// Freecam detaches the camera from the body: a viewer's tool for
 		// inspecting a build or a base without walking over to it.
 		modules.register(new FreecamModule());
+		// Freelook is the short-leash companion: orbit the body without leaving
+		// it, while the body keeps its own heading and interaction point.
+		modules.register(new FreelookModule());
 		// The staff list is the display half of a watchlist: a glass box of the
 		// accounts the player named, placed wherever they want it.
 		modules.register(new StaffListModule());
@@ -175,6 +180,13 @@ public class CapyClient implements ClientModInitializer {
 					freecamModule.toggle();
 				}
 			}
+			boolean freelookKey = ClientKeybinds.consumeFreelookClick();
+			if (freelookKey && client.screen == null && client.player != null) {
+				FreelookModule freelookModule = modules.get(FreelookModule.class);
+				if (freelookModule != null) {
+					freelookModule.toggle();
+				}
+			}
 			boolean inspect = ClientKeybinds.consumeInspectClick();
 			if (inspect && client.screen == null) {
 				CustomKnifeModule knife = modules.get(CustomKnifeModule.class);
@@ -209,6 +221,11 @@ public class CapyClient implements ClientModInitializer {
 		// Guarded: this runs inside the world pass, where a thrown exception is a
 		// crash on the first frame in a world rather than a missing box.
 		WorldRenderEvents.AFTER_ENTITIES.register(context -> Guard.run("esp", () -> EspRenderer.render(context)));
+		// Atmosphere's geometry sits in the same pass, after the overlays: the
+		// aurora, petals and light shafts belong to the world's depth buffer,
+		// not to a screen-space layer.
+		WorldRenderEvents.AFTER_ENTITIES.register(
+				context -> Guard.run("atmosphere world", () -> AtmosphereWorldRenderer.render(context)));
 
 		// The HUD chips go first, so an alert is never hidden behind them.
 		// Every HUD element is guarded. The HUD is drawn on the first frame in a

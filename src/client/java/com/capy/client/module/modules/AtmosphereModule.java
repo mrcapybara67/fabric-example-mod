@@ -93,6 +93,7 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		AtmosphereState.neutral();
 		AtmosphereState.skyHot = 0f;
 		AtmosphereState.fogHot = 1f;
+		AtmosphereState.fogTintHot = 0f;
 		AtmosphereState.fbAmb = 0f;
 		AtmosphereState.fbHot = 0f;
 		AtmosphereState.fbLive = 1f;
@@ -116,6 +117,7 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		dt = Math.max(0f, Math.min(0.1f, dt));
 
 		int selected = theme.index();
+		AtmosphereState.theme = selected;
 		if (selected != appliedTheme) {
 			applyTheme(selected);
 			appliedTheme = selected;
@@ -124,7 +126,16 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		// Sliders drive the strengths. Each is stored in hundredths so the GUI
 		// has integer steps; `real()` gives the 0..1 (or 0.2..3) value back.
 		AtmosphereState.skyHotTarget = (float) skyBlend.real() / 100f;
-		AtmosphereState.fogHotTarget = (float) fogDensity.real() / 100f;
+		// Each theme has its own air: Deep Ocean is deliberately much thicker
+		// than Aurora, and the slider scales that identity rather than replacing
+		// it. A theme change therefore changes the fog even when the slider is
+		// left alone, which is the point of a theme.
+		AtmosphereState.fogHotTarget = (float) fogDensity.real() / 100f * fogScale(selected);
+		int fog = fogColor(selected);
+		AtmosphereState.fogR = ((fog >> 16) & 0xFF) / 255f;
+		AtmosphereState.fogG = ((fog >> 8) & 0xFF) / 255f;
+		AtmosphereState.fogB = (fog & 0xFF) / 255f;
+		AtmosphereState.fogTintTarget = 0.88f;
 		AtmosphereState.fbHotTarget = (float) bloom.real() / 100f;
 		AtmosphereState.fbAmbTarget = (float) warmth.real() / 100f;
 		AtmosphereState.fbLiveTarget = (float) brightness.real() / 100f;
@@ -147,6 +158,38 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		// no server simulation, and it goes through the game's own particle
 		// renderer, so a replaced renderer still draws it.
 		AtmosphereEffects.tick(mc, selected);
+	}
+
+	/** The fog hue each theme owns. */
+	private static int fogColor(int index) {
+		return switch (index) {
+			case 1 -> 0xFFFFB474; // golden hour
+			case 2 -> 0xFF1A2340; // midnight
+			case 3 -> 0xFF2AC8A8; // aurora
+			case 4 -> 0xFF8E99A6; // overcast
+			case 5 -> 0xFF0B5478; // deep ocean
+			case 6 -> 0xFF6A1414; // crimson
+			case 7 -> 0xFFF2A8C6; // sakura
+			case 8 -> 0xFF160B22; // void
+			case 9 -> 0xFF0F6C74; // neon
+			default -> 0xFFAFC8E8;
+		};
+	}
+
+	/** How much thicker than the slider this theme's air should be. */
+	private static float fogScale(int index) {
+		return switch (index) {
+			case 1 -> 0.90f;
+			case 2 -> 1.10f;
+			case 3 -> 0.82f;
+			case 4 -> 1.55f;
+			case 5 -> 2.25f;
+			case 6 -> 1.25f;
+			case 7 -> 0.78f;
+			case 8 -> 1.40f;
+			case 9 -> 1.00f;
+			default -> 1.00f;
+		};
 	}
 
 	/** Rain and thunder strengths for a weather choice. */

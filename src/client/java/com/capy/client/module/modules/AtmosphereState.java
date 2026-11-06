@@ -39,6 +39,20 @@ public final class AtmosphereState {
 	public static volatile float fogHot = 1f;
 	public static volatile float fogHotTarget = 1f;
 
+	/**
+	 * Fog colour, written from the selected theme, and how strongly it is mixed
+	 * into vanilla's own fog colour. The theme owns the hue; the time of day
+	 * still owns the brightness, which is why the blend is not a replacement.
+	 */
+	public static volatile float fogR = 0.78f;
+	public static volatile float fogG = 0.86f;
+	public static volatile float fogB = 0.98f;
+	public static volatile float fogTintHot = 0f;
+	public static volatile float fogTintTarget = 0f;
+
+	/** The selected theme index, read by the world-space theme renderer. */
+	public static volatile int theme = 0;
+
 	/** Ambient warmth: lifts the floor of the lightmap. */
 	public static volatile float fbAmb = 0f;
 	public static volatile float fbAmbTarget = 0f;
@@ -83,6 +97,7 @@ public final class AtmosphereState {
 		float step = Math.max(0f, Math.min(1f, LERP_SPEED * dt));
 		skyHot = ease(skyHot, skyHotTarget, step);
 		fogHot = ease(fogHot, fogHotTarget, step);
+		fogTintHot = ease(fogTintHot, fogTintTarget, step);
 		fbAmb = ease(fbAmb, fbAmbTarget, step);
 		fbHot = ease(fbHot, fbHotTarget, step);
 		fbLive = ease(fbLive, fbLiveTarget, step);
@@ -95,6 +110,7 @@ public final class AtmosphereState {
 	public static void neutral() {
 		skyHotTarget = 0f;
 		fogHotTarget = 1f;
+		fogTintTarget = 0f;
 		fbHotTarget = 0f;
 		fbAmbTarget = 0f;
 		fbLiveTarget = 1f;

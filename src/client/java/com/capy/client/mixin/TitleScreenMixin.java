@@ -21,9 +21,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p>{@code renderBackground} is the single call that paints the panorama, the
  * blur and the darkening before any widget exists. The custom scene is drawn
- * there instead; the vanilla logo, splash, buttons and narration are untouched.
- * The theme button is added at the end of {@code init}, after the vanilla
- * widgets, so it sits above the menu and survives a resize.</p>
+ * there instead; the vanilla logo is cancelled by {@code LogoRendererMixin} so
+ * it cannot cover the client wordmark, while the buttons and narration are
+ * untouched. The theme button is added at the end of {@code init}, after the
+ * vanilla widgets, so it sits above the menu and survives a resize.</p>
  *
  * <p>The widget methods are reached through {@link ScreenAccessor}. They are
  * inherited from {@code Screen}, and a {@code @Shadow} in this mixin is not
