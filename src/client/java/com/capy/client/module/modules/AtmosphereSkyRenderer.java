@@ -289,29 +289,73 @@ public final class AtmosphereSkyRenderer {
 		}
 	}
 
-	/** Neon: a synthwave sun, a perspective grid and scanning bands. */
+	/** Neon: a banded synthwave sun over a neon horizon grid. */
 	private static void neon(Sky sky, double now) {
 		double sunYaw = 0.0;
 		double sunPitch = 22.0;
+		double pulse = 0.5 + 0.5 * Math.sin(now * 0.45);
+
+		// The horizon bloom sits behind the sun and the grid, so the lower sky
+		// glows instead of ending in a hard colour seam.
+		sky.ellipse(sunYaw, 5.0, 54.0, 8.0, 0x24FF3FBF, 10);
+		sky.ellipse(sunYaw, 2.0, 30.0, 4.5, 0x30FF5AC8, 8);
 		sky.sun(sunYaw, sunPitch, 16.0, 0xFFFF8ADA, 0x38FF48D0);
-		for (int i = 0; i < 5; i++) {
-			double cutPitch = sunPitch - 10 + i * 4.3 + Math.sin(now * 0.5) * 0.3;
-			sky.band(sunYaw - 18, cutPitch, 18, 0.8, 0x00100A18, 0xCC160A1E);
-		}
-		for (int i = 0; i < 8; i++) {
-			double yaw = i * 45 + now * 0.5;
-			sky.puff(yaw, 35 + i % 3 * 5, 18, 1.4, 0x2820E0D0);
-		}
-		for (int i = 0; i < 12; i++) {
-			double yaw = i * 30 + now * 1.4;
-			sky.band(yaw, -8, 1.2, 14, 0x005A32FF, 0x4E28FFE8);
-		}
+
+		// Opaque cutout bars, not translucent shading: they have to hide the
+		// sun behind them. The slight phase offset makes the stripes breathe.
 		for (int i = 0; i < 6; i++) {
-			double pitch = -7 + i * 3.1;
-			sky.band(-130, pitch, 75, 0.8, 0x0020E0D0, 0x3C20E0D0);
+			double cutPitch = sunPitch - 10.0 + i * 3.8
+					+ Math.sin(now * 0.35 + i * 0.7) * 0.22;
+			sky.band(sunYaw - 17.5, cutPitch, 17.5, 1.1,
+					0xFF03101A, 0xFF061A24);
 		}
-		double scan = (now * 0.06) % 1.0;
-		sky.band(-130, 6 + scan * 28, 75, 0.9, 0x0010F8E8, 0x1E10F8E8);
+
+		// Two cloud layers, one cyan and one magenta, drifting in opposite
+		// directions across the upper half of the frame.
+		for (int i = 0; i < 9; i++) {
+			double yaw = i * 42 + now * 0.32;
+			sky.puff(yaw, 35 + i % 3 * 5, 19 + i % 2 * 4, 1.4,
+					i % 2 == 0 ? 0x2620E0D0 : 0x1EFF68C8);
+		}
+		for (int i = 0; i < 5; i++) {
+			double yaw = -i * 61 - now * 0.22;
+			sky.puff(yaw, 26 + i % 2 * 4, 13, 1.0, 0x18FF9AD8);
+		}
+
+		// Longitude lines run from below the horizon up into the lower sky.
+		// They fade at the bottom and brighten towards the horizon, which is
+		// what sells the plane receding away from the viewer.
+		for (int i = 0; i < 18; i++) {
+			double yaw = i * 20 + now * 0.18;
+			sky.band(yaw, -14, 0.6, 17,
+					0x0018F8E8, 0x5A18F8E8);
+		}
+
+		// Latitude lines are split into short segments by ring(); a single
+		// flat quad across the horizon would cut through the dome.
+		for (int i = 0; i < 7; i++) {
+			double pitch = -12.0 + i * 2.1;
+			int alpha = 0x16 + i * 0x07;
+			sky.ring(pitch, 0.55, 32,
+					0x0018C8D8, withAlpha(0xFF18C8D8, alpha));
+		}
+		sky.ring(-0.5, 0.9, 32, 0x0020E0D0, 0x7020E0D0);
+
+		// A scan line sweeps up from the grid into the sun. The ring follows
+		// the dome all the way round instead of ending at one side.
+		double scan = (now * 0.045) % 1.0;
+		sky.ring(-2.0 + scan * 24.0, 0.8, 32,
+				0x0010F8E8, 0x3010F8E8);
+
+		// A few high sparks keep the upper sky alive without becoming a star
+		// field; the theme is still a neon horizon, not a night sky.
+		for (int i = 0; i < 24; i++) {
+			double yaw = hash(i * 19 + 7) * 360 + now * 0.12;
+			double pitch = 34 + hash(i * 31 + 5) * 48;
+			double twinkle = 0.35 + 0.65 * Math.sin(now * 1.4 + i * 1.7);
+			sky.star(yaw, pitch, i % 6 == 0 ? 0.42 : 0.22,
+					(int) (twinkle * 78 + pulse * 18), 0xFFFF9ADC);
+		}
 	}
 
 	// ------------------------------------------------------------------ sky
@@ -352,6 +396,20 @@ public final class AtmosphereSkyRenderer {
 			vertexAt(yaw + width, pitch, RADIUS * 0.985, bottom);
 			vertexAt(yaw + width, pitch + height, RADIUS * 0.985, top);
 			vertexAt(yaw - width, pitch + height, RADIUS * 0.985, top);
+		}
+
+		/**
+		 * A full latitude line, split into short quads. One wide quad across the
+		 * dome becomes a chord through the camera rather than a line on the sky;
+		 * these segments stay close to the sphere all the way round.
+		 */
+		void ring(double pitch, double height, int segments, int bottom, int top) {
+			int count = Math.max(3, segments);
+			double step = 360.0 / count;
+			for (int i = 0; i < count; i++) {
+				double yaw = -180.0 + (i + 0.5) * step;
+				band(yaw, pitch, step * 0.5, height, bottom, top);
+			}
 		}
 
 		/** The sun or moon: a soft glow, then a bright core. */
