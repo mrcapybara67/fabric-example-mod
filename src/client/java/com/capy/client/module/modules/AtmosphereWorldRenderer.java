@@ -6,8 +6,10 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -25,8 +27,8 @@ import net.minecraft.world.phys.Vec3;
  * This runs on phones, so every theme has a hard, small object count and every
  * object is one or two quads. All positions are computed from a cheap hash and
  * the frame time; nothing is allocated inside the loops, and the buffer is
- * reused between frames. The worst case is Sakura at 64 petals, two crossed
- * faces each: 512 vertices, not 512 models.
+ * reused between frames. Sakura is 72 textured petals, two crossed faces each:
+ * 1,152 vertices, not 72 models.
  *
  * <h2>Theme ownership</h2>
  * {@link AtmosphereState#theme} is written by the module on the tick. The
@@ -35,6 +37,14 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class AtmosphereWorldRenderer {
 	private static final int BUFFER_BYTES = 2 * 1024 * 1024;
+	/**
+	 * The opal petal is the one theme sprite drawn from a real texture. It is
+	 * not a vanilla particle: the shape, the iridescent veins and the pearl
+	 * flecks all belong to the client, and the texture is sampled on both
+	 * crossed faces of every falling petal.
+	 */
+	private static final Identifier OPAL_PETAL =
+			Identifier.fromNamespaceAndPath("capy", "textures/atmosphere/opal_petal.png");
 	private static MultiBufferSource.BufferSource batch;
 	private static ByteBufferBuilder buffer;
 
@@ -74,7 +84,7 @@ public final class AtmosphereWorldRenderer {
 				case 4 -> rain(vc, pose, ox, oy, oz, now);
 				case 5 -> ocean(vc, pose, ox, oy, oz, now);
 				case 6 -> embers(vc, pose, ox, oy, oz, now);
-				case 7 -> sakura(vc, pose, ox, oy, oz, now);
+				case 7 -> sakura(batches, pose, ox, oy, oz, now);
 				case 8 -> voidRift(vc, pose, ox, oy, oz, now);
 				case 9 -> neon(vc, pose, ox, oy, oz, now);
 				default -> dust(vc, pose, ox, oy, oz, now, 0xFFBFE0FF, 0xFFFFFFFF, 38);
@@ -123,35 +133,37 @@ public final class AtmosphereWorldRenderer {
 	}
 
 	/**
-	 * A custom petal: a tapered kite crossed with a second kite. Not a particle
-	 * sprite, not a flat billboard — the two faces separate as the camera moves,
-	 * which is the "falling model" the theme was missing.
+	 * Opal leaves with a real texture on two crossed faces. The texture is the
+	 * petal's silhouette, so the quads do not need to fake one with colour
+	 * strips; the two crossed copies give the leaf thickness and let its
+	 * iridescence catch the light as it turns.
 	 */
-	private static void sakura(VertexConsumer vc, PoseStack.Pose pose,
+	private static void sakura(MultiBufferSource.BufferSource batches, PoseStack.Pose pose,
 			double ox, double oy, double oz, double now) {
-		int petals = 64;
+		VertexConsumer vc = batches.getBuffer(RenderTypes.entityTranslucent(OPAL_PETAL));
+		int petals = 72;
 		for (int i = 0; i < petals; i++) {
 			double seed = hash(i * 17 + 3);
 			double seed2 = hash(i * 31 + 11);
 			double seed3 = hash(i * 47 + 5);
-			double size = 0.065 + seed3 * 0.075;
-			double speed = 0.45 + seed2 * 0.65;
+			double size = 0.10 + seed3 * 0.12;
+			double speed = 0.42 + seed2 * 0.62;
 			double fall = 15.0;
 			double cycle = (now * speed + seed * fall) % fall;
-			double x = ox + (seed - 0.5) * 26 + Math.sin(now * 0.8 + i * 0.7) * 1.7;
+			double x = ox + (seed - 0.5) * 26 + Math.sin(now * 0.8 + i * 0.7) * 1.8;
 			double y = oy + 12.5 - cycle + Math.sin(now * 1.3 + i) * 0.35;
-			double z = oz + (seed2 - 0.5) * 26 + Math.cos(now * 0.65 + i * 0.9) * 1.4;
+			double z = oz + (seed2 - 0.5) * 26 + Math.cos(now * 0.65 + i * 0.9) * 1.5;
 			double angle = Math.atan2(Math.cos(now * 0.7 + i * 1.1), Math.sin(now * 0.7 + i * 1.1));
 			double ux = Math.cos(angle) * size;
 			double uz = Math.sin(angle) * size;
-			double vx = -uz * 1.35;
-			double vz = ux * 1.35;
-			double vy = size * 0.55;
-			int color = (i & 1) == 0 ? 0xFFF7B8D0 : 0xFFFFD9E7;
-			// Front kite: wide at the shoulders, pointed at the stem.
-			petal(vc, pose, x, y, z, ux, 0, uz, vx, vy, vz, color);
-			// Crossed face: the same petal a quarter turn away.
-			petal(vc, pose, x, y, z, vx, vy, vz, -ux, 0, -uz, 0xFFEBA0BE);
+			double vx = -uz * 1.45;
+			double vz = ux * 1.45;
+			double vy = size * 0.62;
+			int tint = (i % 3) == 0 ? 0xFFFFF4FB
+					: (i % 3) == 1 ? 0xFFFFD6EA : 0xFFD6FFF8;
+			texturedPetal(vc, pose, x, y, z, ux, 0, uz, vx, vy, vz, tint);
+			texturedPetal(vc, pose, x, y, z, vx, vy, vz, -ux, 0, -uz,
+					withAlpha(tint, 205));
 		}
 	}
 
@@ -298,26 +310,39 @@ public final class AtmosphereWorldRenderer {
 
 	// ----------------------------------------------------------- geometry
 
-	/** A diamond petal in the plane spanned by u and v. */
-	private static void petal(VertexConsumer vc, PoseStack.Pose pose,
+	/**
+	 * One textured petal face, followed by its reverse winding so the leaf is
+	 * visible from above and below. The texture supplies the shape; the tint
+	 * supplies the cool pearl shift between individual leaves.
+	 */
+	private static void texturedPetal(VertexConsumer vc, PoseStack.Pose pose,
 			double x, double y, double z,
-			double ux, double uy, double uz, double vx, double vy, double vz, int color) {
+			double ux, double uy, double uz, double vx, double vy, double vz, int tint) {
 		double topX = x + vx;
 		double topY = y + vy;
 		double topZ = z + vz;
 		double botX = x - vx * 0.9;
 		double botY = y - vy * 0.9;
 		double botZ = z - vz * 0.9;
-		int edge = (color & 0x00FFFFFF) | 0x40000000;
-		vertex(vc, pose, x + ux, y + uy, z + uz, color);
-		vertex(vc, pose, topX, topY, topZ, edge);
-		vertex(vc, pose, x - ux, y - uy, z - uz, color);
-		vertex(vc, pose, botX, botY, botZ, edge);
-		// Reverse winding: the petal is thin and must be visible from below.
-		vertex(vc, pose, botX, botY, botZ, edge);
-		vertex(vc, pose, x - ux, y - uy, z - uz, color);
-		vertex(vc, pose, topX, topY, topZ, edge);
-		vertex(vc, pose, x + ux, y + uy, z + uz, color);
+		texturedVertex(vc, pose, x - ux, y - uy, z - uz, 0f, 0.5f, tint);
+		texturedVertex(vc, pose, topX, topY, topZ, 0.5f, 0f, tint);
+		texturedVertex(vc, pose, x + ux, y + uy, z + uz, 1f, 0.5f, tint);
+		texturedVertex(vc, pose, botX, botY, botZ, 0.5f, 1f, tint);
+		// Reverse winding, same UVs: a leaf has two sides.
+		texturedVertex(vc, pose, botX, botY, botZ, 0.5f, 1f, tint);
+		texturedVertex(vc, pose, x + ux, y + uy, z + uz, 1f, 0.5f, tint);
+		texturedVertex(vc, pose, topX, topY, topZ, 0.5f, 0f, tint);
+		texturedVertex(vc, pose, x - ux, y - uy, z - uz, 0f, 0.5f, tint);
+	}
+
+	private static void texturedVertex(VertexConsumer vc, PoseStack.Pose pose,
+			double x, double y, double z, float u, float v, int argb) {
+		vc.addVertex(pose, (float) x, (float) y, (float) z)
+				.setColor(argb)
+				.setUv(u, v)
+				.setOverlay(0)
+				.setLight(LightTexture.FULL_BRIGHT)
+				.setNormal(0f, 1f, 0f);
 	}
 
 	/** A small flat billboard-ish spark; two crossed quads would be too many here. */
@@ -342,6 +367,10 @@ public final class AtmosphereWorldRenderer {
 	private static void vertex(VertexConsumer vc, PoseStack.Pose pose,
 			double x, double y, double z, int argb) {
 		vc.addVertex(pose, (float) x, (float) y, (float) z).setColor(argb);
+	}
+
+	private static int withAlpha(int color, int alpha) {
+		return (Math.max(0, Math.min(255, alpha)) << 24) | (color & 0x00FFFFFF);
 	}
 
 	/** Stable [0,1) hash. No Random allocation, no shared state. */

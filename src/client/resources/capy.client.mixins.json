@@ -23,11 +23,9 @@
 		"FreecamMouseMixin",
 		"FreelookCameraMixin",
 		"FreelookMouseMixin",
-		"LogoRendererMixin",
 		"FlyTravelMixin",
 		"BoatInputMixin",
 		"BoatPacketMixin",
-		"TitleScreenMixin",
 		"ChatOutboundMixin"
 	],
 	"injectors": {

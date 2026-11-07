@@ -75,16 +75,23 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	private static final float MIN_FRAME = 0.001f;
 	private static final float MAX_FRAME = 0.05f;
 	/** How much faster the flight is while the sprint key is held. */
-	private static final double SPRINT_FACTOR = 2.5;
+	private static final double SPRINT_FACTOR = 2.0;
+	/**
+	 * A common brake for both flight and look. The sliders still describe the
+	 * camera, but the raw values were tuned on a desktop mouse and feel much
+	 * too quick on a phone, where a swipe arrives as one large delta.
+	 */
+	private static final double FLIGHT_SCALE = 0.55;
+	private static final float LOOK_SCALE = 0.35f;
 	/** Velocity kept after the distance guard pulls the camera back in. */
 	private static final double CLAMP_DAMPING = 0.15;
 
 	private final SliderSetting horizontalSpeed =
-			setting(new SliderSetting("horizontal_speed", 16, 1, 64, 0));
+			setting(new SliderSetting("horizontal_speed", 10, 1, 48, 0));
 	private final SliderSetting verticalSpeed =
-			setting(new SliderSetting("vertical_speed", 12, 1, 64, 0));
+			setting(new SliderSetting("vertical_speed", 7, 1, 48, 0));
 	private final SliderSetting lookSpeed =
-			setting(new SliderSetting("look_speed", 100, 10, 300));
+			setting(new SliderSetting("look_speed", 45, 5, 150));
 	/** E-folds per second: how hard the camera pushes towards the speed asked for. */
 	private final SliderSetting acceleration =
 			setting(new SliderSetting("acceleration", 14, 2, 30));
@@ -236,8 +243,8 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	 * holding two keys would fly 1.41 times as fast as holding one.</p>
 	 */
 	private void fly(Minecraft mc, float dt) {
-		double speedH = horizontalSpeed.real();
-		double speedV = verticalSpeed.real();
+		double speedH = horizontalSpeed.real() * FLIGHT_SCALE;
+		double speedV = verticalSpeed.real() * FLIGHT_SCALE;
 		boolean boosting = sprintBoost.value() && mc.options != null && mc.options.keySprint.isDown();
 		if (boosting) {
 			speedH *= SPRINT_FACTOR;
@@ -341,7 +348,7 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		if (deltaX == 0.0 && deltaY == 0.0) {
 			return;
 		}
-		float factor = (float) lookSpeed.real() / 100f;
+		float factor = (float) lookSpeed.real() / 100f * LOOK_SCALE;
 		yaw = wrapDegrees(yaw + (float) (deltaX * factor));
 		pitch += (float) (deltaY * factor);
 		pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, pitch));
@@ -375,9 +382,9 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 
 	@Override
 	public void loadConfig(JsonObject json) {
-		horizontalSpeed.set(ConfigValues.intValue(json, "horizontal_speed", 16));
-		verticalSpeed.set(ConfigValues.intValue(json, "vertical_speed", 12));
-		lookSpeed.set(ConfigValues.intValue(json, "look_speed", 100));
+		horizontalSpeed.set(ConfigValues.intValue(json, "horizontal_speed", 10));
+		verticalSpeed.set(ConfigValues.intValue(json, "vertical_speed", 7));
+		lookSpeed.set(ConfigValues.intValue(json, "look_speed", 45));
 		acceleration.set(ConfigValues.intValue(json, "acceleration", 14));
 		maxDistance.set(ConfigValues.intValue(json, "max_distance", 96));
 		sprintBoost.set(ConfigValues.boolValue(json, "sprint_boost", true));

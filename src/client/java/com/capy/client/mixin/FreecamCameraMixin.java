@@ -42,6 +42,14 @@ public abstract class FreecamCameraMixin {
 	@Shadow
 	protected abstract void setRotation(float yaw, float pitch);
 
+	/**
+	 * Vanilla uses this flag to decide whether the camera is still the body.
+	 * While Freecam has moved the view, leaving it false makes the renderer
+	 * treat the frame as first person and skip the local player entirely.
+	 */
+	@Shadow
+	private boolean detached;
+
 	@Inject(method = "setup", at = @At("TAIL"), require = 0)
 	private void capy$freecamCamera(Level level, Entity entity, boolean detached, boolean thirdPersonReverse,
 			float partialTick, CallbackInfo ci) {
@@ -58,6 +66,10 @@ public abstract class FreecamCameraMixin {
 			this.setPosition(position.x, position.y, position.z);
 			// Vanilla's own order: yaw first, then pitch.
 			this.setRotation(freecam.cameraYaw(), freecam.cameraPitch());
+			// The body must be drawn from outside it. Without this, the local
+			// player is culled as the first-person camera entity and Freecam
+			// becomes an empty view with no body in frame.
+			this.detached = true;
 		} catch (Throwable failure) {
 			// A replaced or moved camera method costs the detach, not the frame.
 			Guard.report("freecam camera", failure);

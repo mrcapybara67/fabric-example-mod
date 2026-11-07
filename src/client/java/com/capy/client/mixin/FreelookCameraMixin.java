@@ -24,6 +24,15 @@ public abstract class FreelookCameraMixin {
 	@Shadow
 	protected abstract void setRotation(float yaw, float pitch);
 
+	/**
+	 * The entity renderer uses this to tell a first-person frame from a
+	 * detached one. Freelook changes the position and rotation but not the
+	 * camera's entity, so without flipping this the local player is skipped as
+	 * if the view were still inside the head.
+	 */
+	@Shadow
+	private boolean detached;
+
 	@Inject(method = "setup", at = @At("TAIL"), require = 0)
 	private void capy$freelookCamera(Level level, Entity entity, boolean detached,
 			boolean thirdPersonReverse, float partialTick, CallbackInfo ci) {
@@ -41,6 +50,7 @@ public abstract class FreelookCameraMixin {
 			Vec3 position = freelook.cameraPosition();
 			this.setPosition(position.x, position.y, position.z);
 			this.setRotation(freelook.cameraYaw(), freelook.cameraPitch());
+			this.detached = true;
 		} catch (Throwable failure) {
 			Guard.report("freelook camera", failure);
 		}

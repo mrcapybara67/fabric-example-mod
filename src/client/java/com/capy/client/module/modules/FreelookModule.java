@@ -31,11 +31,17 @@ import net.minecraft.world.phys.Vec3;
 public final class FreelookModule extends Module implements Tickable, Configurable {
 	private static final float MIN_PITCH = -85f;
 	private static final float MAX_PITCH = 85f;
+	/**
+	 * Raw mouse deltas are far too fast for a detached orbit on a phone, where
+	 * one swipe can accumulate a large delta. The slider is still the player's
+	 * control; this is the common brake underneath it.
+	 */
+	private static final float CURSOR_SCALE = 0.35f;
 
 	/** Orbit radius, in tenths of a block (40 = 4.0 blocks). */
 	private final SliderSetting distance = setting(new SliderSetting("distance", 40, 15, 80, 1));
 	private final SliderSetting height = setting(new SliderSetting("height", 2, -10, 15, 1));
-	private final SliderSetting sensitivity = setting(new SliderSetting("sensitivity", 100, 20, 300));
+	private final SliderSetting sensitivity = setting(new SliderSetting("sensitivity", 45, 5, 150));
 	private float yaw;
 	private float pitch;
 	private boolean primed;
@@ -134,7 +140,7 @@ public final class FreelookModule extends Module implements Tickable, Configurab
 		if (deltaX == 0.0 && deltaY == 0.0) {
 			return;
 		}
-		float factor = (float) sensitivity.real() / 100f;
+		float factor = (float) sensitivity.real() / 100f * CURSOR_SCALE;
 		yaw = wrapDegrees(yaw + (float) (deltaX * factor));
 		pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, pitch + (float) (deltaY * factor)));
 	}
@@ -156,7 +162,7 @@ public final class FreelookModule extends Module implements Tickable, Configurab
 	public void loadConfig(JsonObject json) {
 		distance.set(ConfigValues.intValue(json, "distance", 40));
 		height.set(ConfigValues.intValue(json, "height", 2));
-		sensitivity.set(ConfigValues.intValue(json, "sensitivity", 100));
+		sensitivity.set(ConfigValues.intValue(json, "sensitivity", 45));
 	}
 
 	@Override

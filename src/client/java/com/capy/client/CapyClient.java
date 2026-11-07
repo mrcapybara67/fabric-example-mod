@@ -14,6 +14,7 @@ import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.AntiAdminModule;
 import com.capy.client.module.modules.AntiCheatNotifierModule;
 import com.capy.client.module.modules.AtmosphereModule;
+import com.capy.client.module.modules.AtmosphereSkyRenderer;
 import com.capy.client.module.modules.AtmosphereWorldRenderer;
 import com.capy.client.module.modules.BlockAnimationModule;
 import com.capy.client.module.modules.BlockOverlayModule;
@@ -221,9 +222,14 @@ public class CapyClient implements ClientModInitializer {
 		// Guarded: this runs inside the world pass, where a thrown exception is a
 		// crash on the first frame in a world rather than a missing box.
 		WorldRenderEvents.AFTER_ENTITIES.register(context -> Guard.run("esp", () -> EspRenderer.render(context)));
-		// Atmosphere's geometry sits in the same pass, after the overlays: the
-		// aurora, petals and light shafts belong to the world's depth buffer,
-		// not to a screen-space layer.
+		// The skybox is submitted before terrain so every block can cover it.
+		// Its render type owns no depth state, which is what keeps distant
+		// terrain visible while the vanilla panorama is replaced.
+		WorldRenderEvents.START_MAIN.register(
+				context -> Guard.run("atmosphere sky", () -> AtmosphereSkyRenderer.render(context)));
+		// Atmosphere's geometry sits in the same pass as the overlays, after
+		// entities: the petals and light shafts belong to the world's depth
+		// buffer, not to a screen-space layer.
 		WorldRenderEvents.AFTER_ENTITIES.register(
 				context -> Guard.run("atmosphere world", () -> AtmosphereWorldRenderer.render(context)));
 
