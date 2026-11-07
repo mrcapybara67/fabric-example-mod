@@ -75,7 +75,9 @@ public final class AtmosphereWorldRenderer {
 			double ox = px - camera.x;
 			double oy = py - camera.y;
 			double oz = pz - camera.z;
-			double now = (System.nanoTime() % 60_000_000_000L) / 1.0e9;
+			// Keep time continuous: wrapping it every minute made every particle
+			// cycle jump back to its start while the sky kept moving.
+			double now = System.nanoTime() / 1.0e9;
 
 			switch (AtmosphereState.theme) {
 				case 1 -> dust(vc, pose, ox, oy, oz, now, 0xFFFFC47A, 0xFFFFE0A8, 54);

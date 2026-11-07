@@ -4,6 +4,7 @@ import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.FreecamModule;
 import com.capy.client.module.modules.FreelookModule;
 import com.capy.client.util.Guard;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.MouseHandler;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -28,8 +29,22 @@ public class FreelookMouseMixin {
 			if (freelook == null || !freelook.isActive()) {
 				return;
 			}
+			Minecraft mc = Minecraft.getInstance();
+			// Leave GUI dragging and the loading overlay to vanilla. The camera
+			// must not steal a delta that belongs to a screen.
+			if (mc.screen != null || mc.getOverlay() != null) {
+				return;
+			}
 			MouseHandlerAccessor mouse = (MouseHandlerAccessor) (Object) this;
-			freelook.applyLook(mouse.capy$accumulatedDX(), mouse.capy$accumulatedDY());
+			double dx = mouse.capy$accumulatedDX();
+			double dy = mouse.capy$accumulatedDY();
+			if (mc.options != null && mc.options.invertMouseX().get()) {
+				dx = -dx;
+			}
+			if (mc.options != null && mc.options.invertMouseY().get()) {
+				dy = -dy;
+			}
+			freelook.applyLook(dx, dy);
 			mouse.capy$setAccumulatedDX(0.0);
 			mouse.capy$setAccumulatedDY(0.0);
 			ci.cancel();
