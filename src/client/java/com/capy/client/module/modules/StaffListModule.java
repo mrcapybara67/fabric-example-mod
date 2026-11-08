@@ -14,14 +14,13 @@ import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.SliderSetting;
+import com.capy.client.module.Tickable;
 import com.capy.client.module.WatchlistSetting;
-import com.capy.client.module.modules.antiadmin.AdminAlert;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
 import com.capy.client.module.modules.antiadmin.ChatPresence;
-import com.capy.client.module.modules.antiadmin.Correlator;
-import com.capy.client.module.modules.antiadmin.DetectionKind;
-import com.capy.client.module.modules.antiadmin.Observation;
-import com.capy.client.module.modules.antiadmin.SignalBuffer;
+import com.capy.client.module.modules.antiadmin.PresencePolicy;
+import com.capy.client.module.modules.antiadmin.PresenceStatus;
+import com.capy.client.module.modules.antiadmin.ProbeState;
 import com.capy.client.module.modules.antiadmin.TabList;
 import com.capy.client.module.modules.hud.HudElementModule;
 import com.capy.client.module.modules.hud.HudPanel;
@@ -37,6 +36,7 @@ import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.level.GameType;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -69,7 +69,7 @@ import java.util.UUID;
  * on top of it. The heads are drawn with vanilla's player face renderer, which
  * is the only way to get the skin's UVs and its hat layer right.</p>
  */
-public class StaffListModule extends Module implements Configurable, HudPanel {
+public class StaffListModule extends Module implements Configurable, HudPanel, Tickable {
 	/** Resolved once: a font lookup per frame is not free. */
 	private static final UiType TYPE = new McType();
 
@@ -112,37 +112,31 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 	 */
 	private final BooleanSetting evidence = setting(new BooleanSetting("evidence", true));
 
-	/** What the client can currently prove about a watched account. */
-	private enum Status {
-		/** Nothing detected: shown as a plain row. */
-		NONE,
-		/** Sent as an entity but missing from the player list: a vanish. */
-		VANISHED,
-		/** The server's own tab completion named them while the list hid them. */
-		PROBED,
-		/** Their entity outlived their tab entry: the body is still being drawn. */
-		GHOST,
-		/** Listed as a spectator, so no entity is sent to survival clients. */
-		SPECTATOR,
-		/** On a team that hides nametags: the older vanish style. */
-		HIDDEN
-	}
-
 	/** One row of the box, resolved before it is measured or drawn. */
-	private record Row(String name, PlayerSkin skin, Status status) {
+	private record Row(String name, PlayerSkin skin, PresenceStatus status, String evidence,
+			long evidenceAgeMs, long lastSeenAt) {
 	}
 
 	/**
-	 * Rows for the current frame, rebuilt ten times a second.
+	 * Rows for the current frame, rebuilt once per tick.
 	 *
 	 * <p>The list is resolved once and then measured and drawn from the same
 	 * values. Resolving inside {@code panelWidth}, {@code panelHeight} and the
 	 * draw would scan the world three times a frame and could, on a frame where
 	 * a player leaves between the calls, measure a different set of rows from
-	 * the one it painted.</p>
+	 * the one it painted. The expensive world and tab scans are cached for a
+	 * second; the cheap per-name rebuild runs every tick.</p>
 	 */
 	private final List<Row> rows = new ArrayList<>();
-	private long rowsBuiltAt;
+	private final Map<String, Long> lastSeen = new HashMap<>();
+	private boolean rowsBuilt;
+	private List<String> lastWatchlist = List.of();
+	private Object lastLevel;
+	private long lastScanMs;
+	private List<AdminDetector.Match> scannedWorld = List.of();
+	private List<AdminDetector.TabTell> scannedTells = List.of();
+	private List<AdminDetector.TabTell> scannedUnlisted = List.of();
+	private List<AdminDetector.Match> scannedVanished = List.of();
 	/** Last time the probe was handed the names the world does not contain. */
 	private long probedAt;
 	/**
@@ -158,6 +152,20 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 
 	public StaffListModule() {
 		super(Category.DONUT_SMP, "staff_list");
+	}
+
+	/** Drops per-world row and last-seen state on a world change or disconnect. */
+	public void resetSession() {
+		rows.clear();
+		lastSeen.clear();
+		scannedWorld = List.of();
+		scannedTells = List.of();
+		scannedUnlisted = List.of();
+		scannedVanished = List.of();
+		rowsBuilt = false;
+		lastLevel = null;
+		lastScanMs = 0L;
+		probedAt = 0L;
 	}
 
 	// --------------------------------------------------------------- placement
@@ -214,7 +222,7 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		int widest = 0;
 		for (Row row : rows) {
 			int width = font != null ? font.width(row.name()) : medium.width(row.name());
-			String tag = tagFor(row.status());
+			String tag = tagFor(row);
 			if (!tag.isEmpty()) {
 				int tagW = font != null ? font.width(tag) : regular.width(tag);
 				width += UiTheme.SP_3 + tagW;
@@ -302,161 +310,120 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		}
 	}
 
+	@Override
+	public void onTick(Minecraft mc) {
+		if (!isEnabled()) {
+			return;
+		}
+		AntiAdminModule antiAdmin = ModuleManager.get().get(AntiAdminModule.class);
+		long now = System.currentTimeMillis();
+		boolean dirty = antiAdmin != null && antiAdmin.isEnabled() && antiAdmin.isStaffListDirty();
+		boolean changed = !watchlist.entries().equals(lastWatchlist);
+		Object level = mc == null ? null : mc.level;
+		boolean needScan = !rowsBuilt || dirty || changed || level != lastLevel
+				|| now - lastScanMs >= 1000L;
+		// Rows are rebuilt every tick; the world and tab collections are only
+		// re-read when something changed or a second has passed. That keeps the
+		// visible tags fresh without walking every entity and entry per tick.
+		refreshRows(mc, now, needScan);
+	}
+
+	/** The first frame can arrive before the first tick; build once then. */
+	private void ensureRows(Minecraft mc) {
+		if (!rowsBuilt) {
+			refreshRows(mc, System.currentTimeMillis(), true);
+		}
+	}
+
 	/**
 	 * Resolves every watched name to what is known about it right now.
 	 *
-	 * <p>Three sources, in the order that keeps a vanished player visible:
-	 * <ul>
-	 *   <li>the entity the server sent - a skin and a position, and the only
-	 *       source that still exists for a name that has been dropped from the
-	 *       player list;</li>
-	 *   <li>the player list, which carries the skin, the game mode and the
-	 *       nametag team even while no entity is being sent (spectator);</li>
-	 *   <li>the skin remembered from an earlier frame, which is what keeps the
-	 *       head when a vanish removes both of the above.</li>
-	 * </ul>
-	 *
-	 * <p>Status is only ever set from evidence. A name the client cannot see at
-	 * all is drawn as a plain row rather than as "offline": the box is a
-	 * watchlist, not a presence feed, and claiming absence from silence is the
-	 * same mistake Anti Admin used to make.</p>
+	 * <p>Called once per tick, or immediately on a watchlist/level change, and
+	 * never from the drawing path.</p>
 	 */
-	private void ensureRows(Minecraft mc) {
-		long now = System.currentTimeMillis();
+	private void refreshRows(Minecraft mc, long now, boolean forceScan) {
+		rowsBuilt = true;
+		lastWatchlist = List.copyOf(watchlist.entries());
+		lastLevel = mc == null ? null : mc.level;
+		rows.clear();
+		if (mc == null || mc.level == null) {
+			return;
+		}
 		AntiAdminModule antiAdmin = ModuleManager.get().get(AntiAdminModule.class);
 		boolean withEvidence = evidence.value() && antiAdmin != null && antiAdmin.isEnabled();
-		// An alert about a watched account is consumed here: it is the one event
-		// that cannot wait for the clock, because a probe answer names a player
-		// the client is otherwise no longer sent anything about.
-		boolean dirty = antiAdmin != null && antiAdmin.isEnabled() && antiAdmin.isStaffListDirty();
-		if (!dirty && rowsBuiltAt != 0L && now - rowsBuiltAt < 100L) {
-			return;
+		if (forceScan) {
+			scannedWorld = AdminDetector.scan(mc, watchlist);
+			scannedTells = AdminDetector.scanTells(mc, watchlist);
+			scannedUnlisted = AdminDetector.scanAllTabEntries(mc, watchlist);
+			scannedVanished = AdminDetector.scanForVanished(mc, watchlist);
+			lastScanMs = now;
 		}
-		rowsBuiltAt = now;
-		rows.clear();
-		if (mc == null) {
-			return;
-		}
-		List<AdminDetector.Match> inWorld = AdminDetector.scan(mc, watchlist);
-		List<AdminDetector.TabTell> tells = AdminDetector.scanTells(mc, watchlist);
-		// The two gap scans: an entry the tab list does not draw, and an entry
-		// held for an account that is in neither the world nor the tab. Both are
-		// states the three sources above cannot express, because a listed-only
-		// read cannot tell "not here" from "hidden here".
-		List<AdminDetector.TabTell> unlisted = AdminDetector.scanAllTabEntries(mc, watchlist);
-		List<AdminDetector.Match> vanished = AdminDetector.scanForVanished(mc, watchlist);
+		List<AdminDetector.Match> inWorld = scannedWorld;
+		List<AdminDetector.TabTell> tells = scannedTells;
+		List<AdminDetector.TabTell> unlisted = scannedUnlisted;
+		List<AdminDetector.Match> vanished = scannedVanished;
 		for (String name : watchlist.entries()) {
+			String key = name.toLowerCase(Locale.ROOT);
 			AdminDetector.Match entity = findMatch(inWorld, name);
 			AdminDetector.TabTell tell = findTell(tells, name);
 			PlayerInfo info = tabEntry(mc, name);
-			PlayerSkin skin = null;
-			Status status = Status.NONE;
-			UUID subject = null;
-			if (entity != null) {
-				skin = entity.skin();
-				subject = entity.uuid();
-				// An entity whose account is no longer in the player list is the
-				// signature of a vanish: the server is still drawing the body but
-				// has taken the account off the tab.
-				status = listed(mc, subject) ? Status.NONE : Status.VANISHED;
+			boolean listed = info != null && info.getProfile() != null && listed(mc, info.getProfile().id());
+			boolean tabHidden = findTell(unlisted, name) != null || findMatch(vanished, name) != null;
+			boolean spectator = (tell != null && tell.tell() == AdminDetector.Tell.SPECTATOR)
+					|| (info != null && info.getGameMode() == GameType.SPECTATOR);
+			boolean inWorldNow = entity != null;
+			double distance = entity == null ? -1.0 : entity.distance();
+			boolean withinRange = distance >= 0.0 && antiAdmin != null
+					&& distance <= antiAdmin.detectionRange();
+			ProbeState probe = withEvidence ? antiAdmin.probeState(name) : ProbeState.UNKNOWN;
+			// A probe hit is disproved by the name appearing in the tab list;
+			// an absent result is likewise no longer meaningful once listed.
+			boolean probeHidden = probe == ProbeState.HIDDEN && !listed;
+			boolean probeAbsent = probe == ProbeState.ABSENT && !listed;
+			PresencePolicy.Decision decision = PresencePolicy.decide(new PresencePolicy.Evidence(
+					probeHidden, tabHidden, spectator,
+					inWorldNow && !listed, inWorldNow, listed, withinRange,
+					probeAbsent, ChatPresence.recent(name, 180_000L)));
+			boolean seen = inWorldNow || info != null || tell != null || probeHidden;
+			long lastSeenAt = lastSeen.getOrDefault(key, 0L);
+			if (seen) {
+				lastSeenAt = now;
+				lastSeen.put(key, lastSeenAt);
 			}
-			if (tell != null) {
-				if (skin == null) {
-					skin = tell.match().skin();
+			long evidenceAge = now - lastSeenAt;
+			if (probeHidden || probeAbsent) {
+				long probeAge = antiAdmin.probeAgeMs(name);
+				if (probeAge >= 0L) {
+					evidenceAge = probeAge;
 				}
-				if (subject == null) {
-					subject = tell.match().uuid();
-				}
-				status = tell.tell() == AdminDetector.Tell.SPECTATOR
-						? Status.SPECTATOR : Status.HIDDEN;
+			} else if (seen) {
+				evidenceAge = 0L;
 			}
-			if (info != null) {
-				if (skin == null) {
-					skin = info.getSkin();
-				}
-				if (subject == null && info.getProfile() != null) {
-					subject = info.getProfile().id();
-				}
-				if (status == Status.NONE && info.getGameMode() == GameType.SPECTATOR) {
-					status = Status.SPECTATOR;
-				}
-			}
-			// The client holds an entry for this account, but the tab list does
-			// not draw it and/or no entity is being sent: the account is connected
-			// and hidden. An entry alone is not enough - another dimension looks
-			// the same from here - so being absent from the world has to be part
-			// of the reading before the tag is shown.
-			if (status == Status.NONE) {
-				AdminDetector.TabTell unlistedTell = findTell(unlisted, name);
-				AdminDetector.Match absent = findMatch(vanished, name);
-				if (unlistedTell != null || absent != null) {
-					status = Status.VANISHED;
-					if (skin == null) {
-						skin = unlistedTell != null ? unlistedTell.match().skin()
-								: absent == null ? null : absent.skin();
-					}
-				}
-			}
-			// Text evidence: a `/tpa Name` command or a server line that names
-			// the account. A vanished admin the server no longer sends anything
-			// about can still be named in chat, and that is the one trace the
-			// packet-level checks cannot see. It has to be recent and the account
-			// has to be absent for it to mean "hidden" rather than "talked about
-			// while offline".
-			if (status == Status.NONE && entity == null && tell == null && info == null
-					&& ChatPresence.recent(name, 180_000L)) {
-				status = Status.VANISHED;
-			}
-			// A fully hidden account has no live match and no list entry, so the
-			// only identity left is the one the probe remembered by name.
-			if (subject == null) {
-				subject = SignalBuffer.namedSubject(name);
-			}
-			// What the Anti Admin module has proved about this account. This is
-			// the half no live scan can provide: a probe hit or a silent tab
-			// removal names a player the client is no longer sent anything about.
-			if (withEvidence && subject != null) {
-				Status proved = statusFor(provedKind(antiAdmin.evidenceFor(subject)));
-				if (proved != null) {
-					status = proved;
-				}
-			}
-			// The box lists who is here, not who was typed in. A watched name
-			// that has no entity, no player list entry and nothing proved about
-			// it is simply offline, and drawing its face next to "no status"
-			// read as if the client could see them. Only a row the server can
-			// currently account for survives; a vanished admin still does,
-			// because the evidence proves they are connected while hidden.
-			if (entity == null && tell == null && info == null && status == Status.NONE) {
-				continue;
-			}
-			String key = name.toLowerCase(Locale.ROOT);
+			PlayerSkin skin = entity != null ? entity.skin()
+					: tell != null ? tell.match().skin()
+					: info != null ? info.getSkin() : null;
 			if (skin != null) {
 				rememberedSkins.put(key, skin);
 			} else {
 				skin = rememberedSkins.get(key);
 			}
-			rows.add(new Row(name, skin, status));
+			rows.add(new Row(name, skin, decision.status(), decision.evidence(), evidenceAge, lastSeenAt));
 		}
+		rows.sort(Comparator.comparingInt((Row row) -> row.status().rowOrder())
+				.thenComparing(Row::name, String.CASE_INSENSITIVE_ORDER));
 		probeMissing(antiAdmin, withEvidence, mc, now);
 	}
 
 	/**
 	 * Hands the probe every watched name the world does not contain.
 	 *
-	 * <p>This is the only route to an account the server stopped mentioning
-	 * altogether: with no entity and no player info entry there is nothing on the
-	 * client to read, and the server's own tab completion is the one place a
-	 * hidden name still surfaces. Without this the list could only ever tag an
-	 * account whose entry the server left behind, which is the easier half of the
-	 * vanish implementations in the wild.</p>
-	 *
-	 * <p>Gated twice: the interval here, and the probe's own jittered gap and
-	 * one-request-in-flight rule. Nothing is sent unless the Anti Admin module is
-	 * on and its probe switch is on.</p>
+	 * <p>Anti Admin now does this for its own watchlist, so this is only a
+	 * supplement for a Staff List that watches different names. It is called
+	 * from the tick rebuild, never from the drawing path, and the probe applies
+	 * its own per-name gap and request cap.</p>
 	 */
 	private void probeMissing(AntiAdminModule antiAdmin, boolean withEvidence, Minecraft mc, long now) {
-		if (!withEvidence || antiAdmin == null || !antiAdmin.probingAllowed()) {
+		if (!withEvidence || antiAdmin == null || !antiAdmin.probingAllowed() || mc == null || mc.level == null) {
 			return;
 		}
 		if (probedAt != 0L && now - probedAt < PROBE_INTERVAL_MS) {
@@ -552,67 +519,44 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 		return null;
 	}
 
-	/**
-	 * The strongest thing the evidence proves, or null when it proves nothing.
-	 *
-	 * <p>The same bar the correlator holds alerts to: one weak signal on its own
-	 * is not a tag, because a stray footstep names the wrong person far more
-	 * often than the right one. A strong kind, or two independent kinds, is what
-	 * it takes to say something about a row.</p>
-	 */
-	private static AdminAlert.Kind provedKind(List<Observation> evidence) {
-		Set<DetectionKind> kinds = new HashSet<>();
-		boolean strong = false;
-		for (Observation observation : evidence) {
-			DetectionKind kind = observation.kind();
-			if (kind == DetectionKind.NPC_FINGERPRINT) {
-				// A static stand-in is evidence of nobody, not of a person.
-				continue;
+	/** The tag drawn at the end of a row: status, evidence, and its age. */
+	private static String tagFor(Row row) {
+		String evidence = row.evidence();
+		long age = Math.max(0L, row.evidenceAgeMs());
+		if (evidence == null || evidence.isBlank() || "none".equals(evidence)) {
+			if (row.lastSeenAt() > 0L) {
+				evidence = "last seen";
+				age = Math.max(0L, System.currentTimeMillis() - row.lastSeenAt());
+			} else {
+				return row.status().name();
 			}
-			kinds.add(kind);
-			strong |= kind.strong();
 		}
-		if (kinds.isEmpty() || (!strong && kinds.size() < 2)) {
-			return null;
-		}
-		return Correlator.kindFor(evidence);
+		return row.status().name() + ", " + evidence + ", " + formatAge(age);
 	}
 
-	/** Maps the alert wording on to the row's own vocabulary. */
-	private static Status statusFor(AdminAlert.Kind kind) {
-		if (kind == null) {
-			return null;
+	private static String formatAge(long ms) {
+		if (ms < 1000L) {
+			return "now";
 		}
-		return switch (kind) {
-			case PROBED -> Status.PROBED;
-			case GHOST -> Status.GHOST;
-			case VANISHED -> Status.VANISHED;
-			case SPECTATOR -> Status.SPECTATOR;
-			case HIDDEN_TAG -> Status.HIDDEN;
-			default -> null;
-		};
-	}
-
-	/** The tag drawn at the end of a row, or an empty string for none. */
-	private static String tagFor(Status status) {
-		return switch (status) {
-			case VANISHED -> "VANISH";
-			case PROBED -> "PROBED";
-			case GHOST -> "GHOST";
-			case SPECTATOR -> "SPEC";
-			case HIDDEN -> "HIDDEN";
-			default -> "";
-		};
+		long seconds = ms / 1000L;
+		if (seconds < 60L) {
+			return seconds + "s";
+		}
+		long minutes = seconds / 60L;
+		if (minutes < 60L) {
+			return minutes + "m";
+		}
+		return (minutes / 60L) + "h";
 	}
 
 	/** The colour of a status: amber for a vanish, accent for the rest. */
-	private static int tagColor(Status status) {
+	private static int tagColor(PresenceStatus status) {
 		return switch (status) {
-			case VANISHED, GHOST -> 0xFFFFC24B;
-			case PROBED -> 0xFFB388FF;
-			case SPECTATOR -> UiTheme.ACCENT;
-			case HIDDEN -> UiTheme.ACCENT_DEEP;
-			default -> UiTheme.TEXT_3;
+			case VANISHED -> 0xFFFFC24B;
+			case NEARBY -> UiTheme.ACCENT;
+			case ONLINE -> UiTheme.TEXT_2;
+			case SPECTATOR -> UiTheme.ACCENT_DEEP;
+			case OFFLINE, UNKNOWN -> UiTheme.TEXT_3;
 		};
 	}
 
@@ -651,7 +595,7 @@ public class StaffListModule extends Module implements Configurable, HudPanel {
 
 		int textX = headX + HEAD + INNER;
 		int maxW = Math.max(0, x + w - PAD - textX);
-		String tag = tagFor(row.status());
+		String tag = tagFor(row);
 		int tagW = font != null ? font.width(tag) : regular.width(tag);
 		if (font != null && graphics != null) {
 			// Minecraft's own face, at its own scale and without the interface

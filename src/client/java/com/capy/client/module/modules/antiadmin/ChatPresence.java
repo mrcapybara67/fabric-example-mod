@@ -5,50 +5,69 @@ import java.util.Locale;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
- * A short memory of names that appeared in chat or in a command the player
- * typed.
+ * A short memory of names that appeared in server system messages.
  *
- * <p>This exists for the case no packet can solve: a staff member in
- * {@code /vanish} whose account the server removed from the tab list and whose
- * entity it stopped sending. If the server still talks about them - a teleport
- * request, a join notice, a moderator line - the client has one piece of
- * evidence left. The staff list and Anti Admin read it instead of claiming the
- * player is offline.</p>
+ * <p>Only server messages are evidence. A player can type any name, and the
+ * local player's own command is not an observation about anybody; both are
+ * ignored. Join and leave lines are excluded from the weak presence hint as
+ * well, because a normal logout must not leave a name looking vanished for
+ * three minutes. Leave lines are kept separately so an alert can be cancelled
+ * inside the short logout window.</p>
  *
- * <p>Only names that already appear on a watchlist are ever matched, so a common
- * word in chat cannot create a row by accident.</p>
+ * <p>Whole-name matching keeps "Sam" out of "Samsung". The queue is bounded, so
+ * a server that floods chat cannot grow this memory without limit.</p>
  */
 public final class ChatPresence {
 	private static final int MAX_LINES = 96;
+	private static final int MAX_LEAVES = 64;
 	private static final long WINDOW_MS = 180_000L;
+	/** A normal logout is cancelled around this window, in milliseconds. */
+	public static final long LEAVE_WINDOW_MS = 4_000L;
 
 	private static final ConcurrentLinkedDeque<Line> LINES = new ConcurrentLinkedDeque<>();
+	private static final ConcurrentLinkedDeque<Line> LEAVES = new ConcurrentLinkedDeque<>();
 
 	private ChatPresence() {
 	}
 
-	/** Remembers one chat or system line. */
-	public static void record(String text) {
+	/**
+	 * Records one server system line.
+	 *
+	 * <p>Join and leave lines are not stored as presence hints. A leave line is
+	 * stored in the short logout window instead; a join line is ignored because
+	 * being listed already answers that question.</p>
+	 */
+	public static void recordSystem(String text) {
 		if (text == null || text.isBlank()) {
 			return;
 		}
-		LINES.addLast(new Line(text.toLowerCase(Locale.ROOT), System.currentTimeMillis()));
-		while (LINES.size() > MAX_LINES) {
-			LINES.pollFirst();
-		}
-	}
-
-	/** Remembers an outgoing command such as {@code /tpa Steve}. */
-	public static void recordCommand(String command) {
-		if (command == null || command.isBlank()) {
+		String lower = text.toLowerCase(Locale.ROOT);
+		long now = System.currentTimeMillis();
+		if (isLeave(lower)) {
+			LEAVES.addLast(new Line(lower, now));
+			trim(LEAVES, MAX_LEAVES);
 			return;
 		}
-		record(command.startsWith("/") ? command.substring(1) : command);
+		if (isJoin(lower)) {
+			return;
+		}
+		LINES.addLast(new Line(lower, now));
+		trim(LINES, MAX_LINES);
 	}
 
 	/**
-	 * True when {@code name} was named as a whole word in the last three
-	 * minutes. Whole-word matching keeps "Sam" out of "Samsung".
+	 * Commands are deliberately not evidence.
+	 *
+	 * <p>Kept as an explicit no-op so a caller that still reports an outgoing
+	 * command cannot accidentally resurrect the old behavior.</p>
+	 */
+	public static void recordCommand(String command) {
+		// Outgoing commands are not observations about another account.
+	}
+
+	/**
+	 * True when {@code name} was named as a whole word in a retained server
+	 * line. This is a weak hint, never a presence proof.
 	 */
 	public static boolean recent(String name, long windowMs) {
 		if (name == null || name.isBlank()) {
@@ -67,6 +86,48 @@ public final class ChatPresence {
 			}
 		}
 		return false;
+	}
+
+	/** True when a server leave line named {@code name} in the last window. */
+	public static boolean leaveWithin(String name, long windowMs) {
+		if (name == null || name.isBlank()) {
+			return false;
+		}
+		long now = System.currentTimeMillis();
+		long window = windowMs <= 0L ? LEAVE_WINDOW_MS : windowMs;
+		String needle = name.toLowerCase(Locale.ROOT);
+		for (Iterator<Line> it = LEAVES.descendingIterator(); it.hasNext();) {
+			Line line = it.next();
+			if (now - line.timeMs() > window) {
+				return false;
+			}
+			if (containsWord(line.lower(), needle)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Drops all retained text. Called on a world change or a toggle. */
+	public static void clear() {
+		LINES.clear();
+		LEAVES.clear();
+	}
+
+	private static void trim(ConcurrentLinkedDeque<Line> lines, int max) {
+		while (lines.size() > max) {
+			lines.pollFirst();
+		}
+	}
+
+	private static boolean isLeave(String lower) {
+		return lower.contains("left the game") || lower.contains("left the server")
+				|| lower.contains("logged out") || lower.contains("disconnected");
+	}
+
+	private static boolean isJoin(String lower) {
+		return lower.contains("joined the game") || lower.contains("joined the server")
+				|| lower.contains("logged in");
 	}
 
 	private static boolean containsWord(String haystack, String word) {

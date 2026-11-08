@@ -24,7 +24,6 @@ import com.capy.client.module.modules.antiadmin.AntiAdminHudRenderer;
 import com.capy.client.module.modules.antiadmin.AntiAdminWebhook;
 import com.capy.client.module.modules.antiadmin.BlockInteractDetector;
 import com.capy.client.module.modules.antiadmin.ChatDetector;
-import com.capy.client.module.modules.antiadmin.ChatPresence;
 import com.capy.client.module.modules.antiadmin.Confidence;
 import com.capy.client.module.modules.antiadmin.ContainerDetector;
 import com.capy.client.module.modules.antiadmin.Correlator;
@@ -39,6 +38,7 @@ import com.capy.client.module.modules.antiadmin.PacketSignals;
 import com.capy.client.module.modules.antiadmin.ParticleDetector;
 import com.capy.client.module.modules.antiadmin.PingGhostDetector;
 import com.capy.client.module.modules.antiadmin.ProbeDetector;
+import com.capy.client.module.modules.antiadmin.ProbeState;
 import com.capy.client.module.modules.antiadmin.RapidPacketDetector;
 import com.capy.client.module.modules.antiadmin.ServerProfile;
 import com.capy.client.module.modules.antiadmin.ServerProfileMatcher;
@@ -123,12 +123,6 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	/** Tab tells already reported this session, keyed by account and tell. */
 	private final Set<String> toldTells = new HashSet<>();
 	/**
-	 * Watched names already reported from chat while hidden. Keyed by lower-case
-	 * name: one alert per session, because a vanished admin named in chat stays
-	 * named in chat.
-	 */
-	private final Set<String> chatHidden = new HashSet<>();
-	/**
 	 * Set when an alert lands on a watched account, cleared once the staff list
 	 * has rebuilt its rows.
 	 *
@@ -143,6 +137,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 
 	private final SignalBuffer buffer = new SignalBuffer();
 	private final AlertManager alerts = new AlertManager();
+	private final ProbeDetector probeDetector;
 	private final KnownPlayerStore known = new KnownPlayerStore();
 	private final ServerProfileMatcher matcher = new ServerProfileMatcher();
 	private final AntiAdminWebhook webhook = new AntiAdminWebhook("");
@@ -173,7 +168,9 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		detectors.add(new SoundDetector(buffer));
 		detectors.add(new BlockInteractDetector(buffer));
 		detectors.add(new ChatDetector(buffer));
-		detectors.add(new ProbeDetector(buffer));
+		probeDetector = new ProbeDetector(buffer);
+		probeDetector.listener(this::onProbeAbsent);
+		detectors.add(probeDetector);
 		detectors.add(new PingGhostDetector(buffer));
 		detectors.add(new TeamPacketDetector(buffer));
 		detectors.add(new GamemodeDetector(buffer));
@@ -252,6 +249,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		}
 		tick++;
 		buffer.tick(tick);
+		probeDetector.setWatchlistPresent(!watchlist.entries().isEmpty());
 		syncWebhook();
 		if (--profileCountdown <= 0) {
 			profileCountdown = PROFILE_INTERVAL;
@@ -317,47 +315,54 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			}
 			raise(tell.match(), kind, null, -1.0);
 		}
-		scanChatPresence(mc);
+		queueWatchlistProbes(mc);
 	}
 
 	/**
-	 * Catches the vanish that leaves no packet trace: the account is gone from
-	 * the tab list and the world, but the server still names it in chat or the
-	 * player just typed {@code /tpa Name}.
-	 *
-	 * <p>This is deliberately the last check and deliberately the weakest one.
-	 * It needs three things at once - a watched name, a recent mention, and the
-	 * absence of both a tab entry and an entity - so a player who is simply
-	 * online cannot trigger it, and a name cannot be invented from chat alone.
-	 * The alert says the account is hidden, not where it is: there is no
-	 * position to report.</p>
+	 * Queues every watched name that is not in the tab list and has no nearby
+	 * entity. This is the path that works with Staff List switched off: the
+	 * probe no longer depends on the display module to discover candidates.
 	 */
-	private void scanChatPresence(Minecraft mc) {
+	private void queueWatchlistProbes(Minecraft mc) {
+		if (!probingAllowed() || watchlist.entries().isEmpty() || mc == null || mc.level == null) {
+			return;
+		}
+		double rangeSqr = (double) detectionRange() * detectionRange();
 		for (String name : watchlist.entries()) {
-			if (!ChatPresence.recent(name, 180_000L)) {
-				continue;
-			}
-			if (TabList.byNameIgnoreCase(mc, name) != null) {
-				continue;
-			}
-			boolean inWorld = false;
-			for (AdminDetector.Match match : AdminDetector.scan(mc, watchlist)) {
-				if (match.username() != null && match.username().equalsIgnoreCase(name)) {
-					inWorld = true;
-					break;
+			net.minecraft.client.multiplayer.PlayerInfo info = TabList.byNameIgnoreCase(mc, name);
+			if (info != null && info.getProfile() != null && info.getProfile().id() != null) {
+				UUID id = info.getProfile().id();
+				if (TabList.listed(mc, id)) {
+					continue;
+				}
+				net.minecraft.world.entity.Entity entity = mc.level.getPlayerByUUID(id);
+				if (entity != null && mc.player != null
+						&& entity.distanceToSqr(mc.player) <= rangeSqr) {
+					continue;
+				}
+			} else {
+				boolean nearby = false;
+				for (net.minecraft.client.player.AbstractClientPlayer player : mc.level.players()) {
+					if (player != null && player.getGameProfile() != null
+							&& name.equalsIgnoreCase(player.getGameProfile().name())
+							&& mc.player != null
+							&& player.distanceToSqr(mc.player) <= rangeSqr) {
+						nearby = true;
+						break;
+					}
+				}
+				if (nearby) {
+					continue;
 				}
 			}
-			if (inWorld || !chatHidden.add(name.toLowerCase(Locale.ROOT))) {
-				continue;
-			}
-			UUID subject = SignalBuffer.namedSubject(name);
-			if (subject == null) {
-				subject = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name)
-						.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-			}
-			AdminDetector.Match match = new AdminDetector.Match(subject, name, name, -1.0, 0L, null);
-			raise(match, AdminAlert.Kind.VANISHED, null, -1.0);
+			enqueueProbe(name);
 		}
+	}
+
+	/** Clears the state a probe disproved for this name. */
+	private void onProbeAbsent(String name) {
+		alerts.clearName(name);
+		staffListDirty = true;
 	}
 
 	/**
@@ -524,6 +529,16 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	/** True when the probe detector is allowed to run. */
 	public boolean probingAllowed() {
 		return probe.value();
+	}
+
+	/** What the last completed probe cycle proved for a watched name. */
+	public ProbeState probeState(String name) {
+		return probeDetector.stateFor(name);
+	}
+
+	/** Age of the last completed probe cycle for a name, or -1. */
+	public long probeAgeMs(String name) {
+		return probeDetector.stateAgeMs(name);
 	}
 
 	/**

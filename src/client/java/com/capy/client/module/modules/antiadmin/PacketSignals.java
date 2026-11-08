@@ -251,7 +251,9 @@ public final class PacketSignals {
 		}
 		String text = packet.body() == null ? "" : packet.body().content();
 		remember(text, false);
-		ChatPresence.record(text);
+		// Player chat is not evidence: only a server system message is. The
+		// detector still receives the event so its system-only path stays in
+		// one place.
 		push(new Chat(packet.sender(), text == null ? "" : text, now()));
 	}
 
@@ -259,9 +261,10 @@ public final class PacketSignals {
 		if (!clientThread() || packet.content() == null) {
 			return;
 		}
-		remember(packet.content().getString(), true);
-		ChatPresence.record(packet.content().getString());
-		push(new SystemChat(packet.content().getString(), now()));
+		String text = packet.content().getString();
+		remember(text, true);
+		ChatPresence.recordSystem(text);
+		push(new SystemChat(text, now()));
 	}
 
 	public static void onOpenScreen(ClientboundOpenScreenPacket packet) {
@@ -367,6 +370,7 @@ public final class PacketSignals {
 	public static void clear() {
 		EVENTS.clear();
 		TEXT.clear();
+		ChatPresence.clear();
 	}
 
 	// ------------------------------------------------------------- text lines

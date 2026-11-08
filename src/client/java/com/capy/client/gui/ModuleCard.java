@@ -1,5 +1,6 @@
 package com.capy.client.gui;
 
+import com.capy.client.module.ActionSetting;
 import com.capy.client.module.BlockListSetting;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.ChoiceSetting;
@@ -56,6 +57,7 @@ public class ModuleCard {
 	private final Map<SliderSetting, int[]> sliderBounds = new IdentityHashMap<>();
 	private final Map<BooleanSetting, UiToggle> switches = new IdentityHashMap<>();
 	private final Map<BooleanSetting, int[]> switchBounds = new IdentityHashMap<>();
+	private final Map<ActionSetting, int[]> actionBounds = new IdentityHashMap<>();
 	private final Map<ChoiceSetting, String[]> choiceLabels = new IdentityHashMap<>();
 	private final Map<ChoiceSetting, String> choiceRowLabels = new IdentityHashMap<>();
 	private final Map<ChoiceSetting, int[]> choiceBounds = new IdentityHashMap<>();
@@ -287,7 +289,7 @@ public class ModuleCard {
 		if (s instanceof SliderSetting) {
 			return ROW_SLIDER;
 		}
-		if (s instanceof BooleanSetting) {
+		if (s instanceof BooleanSetting || s instanceof ActionSetting) {
 			return ROW_TOGGLE;
 		}
 		if (s instanceof ChoiceSetting) {
@@ -486,6 +488,29 @@ public class ModuleCard {
 			bb[1] = x + w - UiTheme.SP_6;
 			bb[2] = rowY;
 			bb[3] = rowY + ROW_TOGGLE;
+			return ROW_TOGGLE;
+		}
+
+		if (s instanceof ActionSetting action) {
+			String label = settingLabel(action.key());
+			int bw = 58;
+			int bh = 20;
+			int bx = x + w - UiTheme.SP_6 - bw;
+			int by = rowY + (ROW_TOGGLE - bh) / 2;
+			boolean hovered = mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + bh;
+			Ui.drawEllipsized(c, regular, label, contentX, Ui.centerTextY(rowY, ROW_TOGGLE, regular),
+					Math.max(0, bx - contentX - UiTheme.SP_3), hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+			Ui.surface(c, bx, by, bw, bh, 6, UiTheme.PANEL_ALT, UiTheme.PANEL_TOP);
+			Ui.surfaceEdge(c, bx, by, bw, bh, 6,
+					Ui.withAlpha(hovered ? UiTheme.ACCENT : UiTheme.BORDER, hovered ? 0xD0 : 0x90),
+					Ui.withAlpha(UiTheme.BORDER, 0x50));
+			Ui.drawCentered(c, regular, "Reset", bx + bw / 2, Ui.centerTextY(by, bh, regular),
+					hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+			int[] ab = actionBounds.computeIfAbsent(action, key -> new int[4]);
+			ab[0] = bx;
+			ab[1] = bx + bw;
+			ab[2] = by;
+			ab[3] = by + bh;
 			return ROW_TOGGLE;
 		}
 
@@ -711,6 +736,13 @@ public class ModuleCard {
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
 				entry.getKey().toggle();
+				return true;
+			}
+		}
+		for (Map.Entry<ActionSetting, int[]> entry : actionBounds.entrySet()) {
+			int[] b = entry.getValue();
+			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
+				entry.getKey().run();
 				return true;
 			}
 		}

@@ -71,6 +71,22 @@ public enum DetectionKind {
 		return strong;
 	}
 
+	/**
+	 * The cause this signal belongs to. Confidence is raised by independent
+	 * families, not by counting several signals produced by the same cause.
+	 */
+	public SignalFamily family() {
+		return switch (this) {
+			case PROBE_CONFIRMED -> SignalFamily.PROBE;
+			case ENTITY_NOT_IN_TAB, SILENT_TAB_REMOVE, SHADOW_MAP_DELTA, PHANTOM_PING ->
+					SignalFamily.TAB_HIDDEN;
+			case SPECTATOR_CYCLE -> SignalFamily.SPECTATOR;
+			case HEADLESS_CHAT, VANISH_TEXT -> SignalFamily.CHAT;
+			case NPC_FINGERPRINT -> SignalFamily.NEUTRAL;
+			default -> SignalFamily.WORLD;
+		};
+	}
+
 	/** Readable evidence text, used by the alert cards and the webhook. */
 	public String label() {
 		return label;

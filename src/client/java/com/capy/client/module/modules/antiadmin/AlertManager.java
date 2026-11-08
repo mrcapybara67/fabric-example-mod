@@ -16,9 +16,9 @@ import net.minecraft.world.entity.player.PlayerSkin;
  * <ul>
  *   <li>a card sits in the HUD for {@link #CARD_MS}, so a detection stays
  *       readable after the face alert has played;</li>
- *   <li>the same account saying the same thing again inside
- *       {@link #DEDUP_MS} is dropped — a vanished player who keeps setting off
- *       the same detector must not restart the alert every tick;</li>
+ *   <li>the same account saying the same thing again while its state is
+ *       unchanged is dropped — a vanished player who keeps setting off the
+ *       same detector must not restart the alert every tick;</li>
  *   <li>a higher confidence reopens the alert immediately, because the second
  *       piece of evidence is the one worth looking up for;</li>
  *   <li>a different <em>kind</em> is always new information. A sighting
@@ -30,8 +30,6 @@ import net.minecraft.world.entity.player.PlayerSkin;
  * the sound and the webhook live.
  */
 public final class AlertManager {
-	/** Repeat of the same account and kind inside this window is ignored. */
-	public static final long DEDUP_MS = 30_000L;
 	/** How long an alert stays on the HUD. */
 	public static final long CARD_MS = 30_000L;
 
@@ -65,27 +63,77 @@ public final class AlertManager {
 		if (record == null) {
 			return false;
 		}
+		if (AlertGate.suppressedByLogout(record.name())) {
+			// A normal logout is not a vanish. The leave line may arrive just
+			// before or just after the removal packets, so this checks both
+			// directions inside one four-second window.
+			return false;
+		}
 		long now = System.currentTimeMillis();
 		Raised previous = raised.get(record.uuid());
 		if (previous != null) {
-			// Only a strictly stronger finding reopens an alert that is already
-			// on the screen. The correlator re-evaluates every subject every
-			// tick, so "not weaker than" is the wrong test: with it an
-			// unchanged finding reopens the alert fifty times a second, which
-			// restarts the guardian face at zero every frame and keeps the
-			// wording - which only starts after the face - from ever appearing.
-			// Equal evidence means "still true", not "tell them again".
+			// A state change is a different kind or a higher confidence. The
+			// correlator re-evaluates every subject every tick, so repeating the
+			// same state would restart the face and keep the wording from ever
+			// appearing. It stays quiet until the state is cleared or changes.
 			boolean stronger = record.confidence().ordinal() > previous.confidence.ordinal();
-			if (previous.kind == record.kind() && now - previous.at < DEDUP_MS && !stronger) {
+			if (previous.kind == record.kind() && !stronger) {
 				return false;
 			}
 		}
-		raised.put(record.uuid(), new Raised(record.kind(), record.confidence(), now));
+		raised.put(record.uuid(), new Raised(record.name(), record.kind(), record.confidence()));
 		active = toAlert(record, now);
 		activeAt = now;
 		activeRecord = record;
 		sink.accept(record);
 		return true;
+	}
+
+	/**
+	 * Drops an alert for a name that has left normally.
+	 *
+	 * <p>Called from the tick so a leave line that arrives after the removal
+	 * packets still clears the card, not only the next alert.</p>
+	 */
+	public void cancelGone() {
+		raised.entrySet().removeIf(entry -> {
+			Raised state = entry.getValue();
+			if (AlertGate.suppressedByLogout(state.name)) {
+				if (activeRecord != null && activeRecord.uuid().equals(entry.getKey())) {
+					active = null;
+					activeRecord = null;
+				}
+				return true;
+			}
+			return false;
+		});
+	}
+
+	/** Clears the state for one account, e.g. after it is listed again. */
+	public void clearSubject(UUID subject) {
+		if (subject == null) {
+			return;
+		}
+		raised.remove(subject);
+		if (activeRecord != null && subject.equals(activeRecord.uuid())) {
+			active = null;
+			activeRecord = null;
+		}
+	}
+
+	/** Clears a state by name, for a probe that proved the name absent. */
+	public void clearName(String name) {
+		if (name == null) {
+			return;
+		}
+		raised.entrySet().removeIf(entry -> {
+			boolean match = name.equalsIgnoreCase(entry.getValue().name);
+			if (match && activeRecord != null && activeRecord.uuid().equals(entry.getKey())) {
+				active = null;
+				activeRecord = null;
+			}
+			return match;
+		});
 	}
 
 	/** The alert being shown, or null once it has played out. */
@@ -138,6 +186,6 @@ public final class AlertManager {
 		return new AdminAlert(match, record.kind(), now);
 	}
 
-	private record Raised(AdminAlert.Kind kind, Confidence confidence, long at) {
+	private record Raised(String name, AdminAlert.Kind kind, Confidence confidence) {
 	}
 }

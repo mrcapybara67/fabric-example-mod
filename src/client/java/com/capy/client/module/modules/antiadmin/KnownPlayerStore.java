@@ -153,6 +153,22 @@ public final class KnownPlayerStore {
 			return new HashMap<>();
 		});
 		KnownPlayer existing = players.get(uuid);
+		if (existing == null && players.size() >= MAX_PER_SERVER) {
+			// The store is written with the newest records per server, but a
+			// single long session could still grow past the limit before the
+			// next save. Drop the oldest now so memory follows the file cap.
+			UUID oldest = null;
+			long oldestSeen = Long.MAX_VALUE;
+			for (KnownPlayer player : players.values()) {
+				if (player.lastSeen() < oldestSeen) {
+					oldestSeen = player.lastSeen();
+					oldest = player.uuid();
+				}
+			}
+			if (oldest != null) {
+				players.remove(oldest);
+			}
+		}
 		KnownPlayer updated = existing == null
 				? KnownPlayer.firstSeen(uuid, name == null ? "unknown" : name, pos, kind, now)
 				: existing.detected(kind, pos, name, now);

@@ -10,19 +10,11 @@ import net.minecraft.client.Minecraft;
 /**
  * Two chat signals that point in opposite directions.
  *
- * {@code HEADLESS_CHAT} is a signed message from an account the client has no
- * entity for <em>and</em> that the tab list does not draw. Both halves are
- * needed. Chat is broadcast to every player on the server while entities are
- * only sent within tracking range, so "no entity" on its own describes every
- * person talking from across the map - reporting that made a busy server fire
- * the loudest alert in the module at a stranger's chatter. No entity and no
- * tab entry together are the actual contradiction: the server is relaying a
- * signed message from a session it will not admit exists.
- *
- * {@code VANISH_TEXT} is the opposite: a line that announces a vanish. It comes
- * from the server, from a plugin, or from another player typing it, so it is
- * weak evidence and heavily rate limited — on an anarchy server it is noise,
- * which is why those profiles turn it off.
+ * Only server system messages are evidence. A player can type a vanish line
+ * or a staff member's name, so player chat is deliberately ignored. The one
+ * text signal kept here is {@code VANISH_TEXT}: a server or plugin line that
+ * announces a vanish. It is weak evidence and heavily rate limited; anarchy
+ * profiles turn it off because their chat is a firehose of faked lines.
  */
 public final class ChatDetector extends AbstractDetector {
 	/** How long one name can produce vanish wording before it is ignored. */
@@ -54,26 +46,9 @@ public final class ChatDetector extends AbstractDetector {
 
 	@Override
 	public void onPacket(PacketSignals.Event event) {
-		if (event instanceof PacketSignals.Chat chat) {
-			handlePlayerChat(chat);
-		} else if (event instanceof PacketSignals.SystemChat system) {
+		if (event instanceof PacketSignals.SystemChat system) {
 			handleSystemChat(system.text());
 		}
-	}
-
-	private void handlePlayerChat(PacketSignals.Chat chat) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null || chat.sender() == null || chat.sender().equals(localId(mc))) {
-			return;
-		}
-		String quote = quote(chat.text());
-		// Being out of entity range is normal for somebody on the other side of
-		// the server; being out of entity range *and* unlisted is not.
-		if (mc.level.getPlayerByUUID(chat.sender()) == null && !TabList.listed(mc, chat.sender())) {
-			emitAs(DetectionKind.HEADLESS_CHAT, chat.sender(), null,
-					"chat from an account with no entity and no tab entry: \"" + quote + "\"");
-		}
-		scanForVanish(chat.sender(), chat.text());
 	}
 
 	private void handleSystemChat(String text) {
@@ -135,10 +110,6 @@ public final class ChatDetector extends AbstractDetector {
 			}
 		}
 		return null;
-	}
-
-	private static UUID localId(Minecraft mc) {
-		return mc.player == null ? null : mc.player.getUUID();
 	}
 
 	private static String quote(String text) {

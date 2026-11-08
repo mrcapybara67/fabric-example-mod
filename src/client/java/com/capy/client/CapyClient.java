@@ -122,7 +122,7 @@ public class CapyClient implements ClientModInitializer {
 		// of every module that keeps state.
 		ClientConfig config = ClientConfig.load(FabricLoader.getInstance().getConfigDir());
 		UiTheme.setPalette(config.theme());
-		GuiColors.load(config.guiAccent(), config.radialAccent());
+		GuiColors.load(config.guiAccent());
 
 		ClientKeybinds.register();
 
@@ -272,11 +272,21 @@ public class CapyClient implements ClientModInitializer {
 
 		// Transient detection state must not survive a world change or a
 		// disconnect: the players of the old world are gone.
-		ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register((before, after) ->
-				Guard.run("anti-admin reset", antiAdmin::reset));
+		StaffListModule staffList = modules.get(StaffListModule.class);
+		ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register((before, after) -> {
+			Guard.run("anti-admin reset", antiAdmin::reset);
+			Guard.run("staff-list reset", () -> {
+				if (staffList != null) {
+					staffList.resetSession();
+				}
+			});
+		});
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			Guard.run("anti-admin disconnect", () -> {
 				antiAdmin.reset();
+				if (staffList != null) {
+					staffList.resetSession();
+				}
 				// Leaving a server is a good moment to store the settings.
 				ClientConfig.get().save(FabricLoader.getInstance().getConfigDir());
 			});

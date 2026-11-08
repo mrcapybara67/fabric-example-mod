@@ -19,16 +19,16 @@ import net.minecraft.world.entity.player.Player;
  * why it fired:
  *
  * <pre>
- *   CERTAIN  a probe hit, or an unlisted entity plus any second kind
- *   HIGH     any strong kind, or two independent kinds
- *   MEDIUM   one weak kind that reached its threshold
- *   LOW      one weak kind below its threshold (only shown when asked for)
+ *   CERTAIN  a probe hit
+ *   HIGH     two independent signal families
+ *   MEDIUM   one family, including a strong tab-hidden signal
+ *   LOW      nothing confirmed
  * </pre>
  *
- * "Independent" means distinct {@link DetectionKind}s, not distinct
- * observations: ten orphan particles are one kind of evidence, a particle and
- * a footstep are two. {@link DetectionKind#NPC_FINGERPRINT} never counts —
- * it exists to rule a subject out, not to accuse it.
+ * The unit is the {@link SignalFamily}, not the individual observation: ten
+ * tab-removal packets are one cause, while a tab removal plus a probe hit is
+ * genuinely two. {@link DetectionKind#NPC_FINGERPRINT} never counts — it
+ * exists to rule a subject out, not to accuse it.
  *
  * A subject an {@code NpcFingerprinter} has identified is skipped entirely, so
  * a static stand-in is never reported as a vanished staff member.
@@ -60,8 +60,17 @@ public final class Correlator {
 		if (mc == null || mc.level == null || mc.player == null || profile == null) {
 			return 0;
 		}
+		alerts.cancelGone();
+		Map<UUID, List<Observation>> snapshot = buffer.snapshot();
+		// A listed account is visible again: its vanished state is disproved,
+		// so the next vanish can alert as a fresh state change.
+		for (Map.Entry<UUID, List<Observation>> entry : snapshot.entrySet()) {
+			if (TabList.listed(mc, entry.getKey())) {
+				alerts.clearSubject(entry.getKey());
+			}
+		}
 		int raised = 0;
-		for (Map.Entry<UUID, List<Observation>> entry : buffer.snapshot().entrySet()) {
+		for (Map.Entry<UUID, List<Observation>> entry : snapshot.entrySet()) {
 			AlertRecord record = evaluate(mc, entry.getKey(), entry.getValue(), profile, minimum, host, watchlist);
 			if (record == null || !alerts.raise(record)) {
 				continue;
@@ -112,13 +121,18 @@ public final class Correlator {
 			}
 		}
 
-		Confidence confidence = score(counts, confirmed);
-		// One weak signal on an account the user never named is not enough to
-		// interrupt them: a single orphan footstep or a stray potion particle
-		// names the wrong person far more often than the right one. Two
-		// independent kinds, or a strong kind, still get through - that is the
-		// bar a real vanish has always had to clear.
-		if (confirmed.size() < 2 && !confirmed.stream().anyMatch(DetectionKind::strong)) {
+		Confidence confidence = ConfidenceScoring.score(counts, confirmed);
+		// Raise only when the evidence comes from more than one independent
+		// family, or from the probe. A burst of tab-removal packets is one
+		// family whether it is one packet or ten, and on its own it is also
+		// what a normal logout looks like.
+		long families = confirmed.stream()
+				.map(DetectionKind::family)
+				.filter(family -> family != SignalFamily.NEUTRAL)
+				.distinct()
+				.count();
+		boolean probe = confirmed.contains(DetectionKind.PROBE_CONFIRMED);
+		if (!probe && families < 2) {
 			return null;
 		}
 		BlockPos position = lastPosition(counted);
@@ -140,6 +154,14 @@ public final class Correlator {
 		if (name == null || name.isEmpty() || "unknown".equals(name) || "someone".equals(name)) {
 			return null;
 		}
+		// A leave line within the four-second logout window cancels the alert.
+		// The check is on the resolved name so a burst of removal packets alone
+		// cannot turn an ordinary logout into a vanish. The same gate is used by
+		// AlertManager, so a regression that drops the leave check fails the
+		// logout tests instead of shipping.
+		if (!AlertGate.mayAnnounceVanish(name, probe, (int) families)) {
+			return null;
+		}
 		// Watchlist only: with the setting on, the signal layer is corroboration
 		// for the watched accounts, not a second, unnamed detector.
 		if (watchlist != null && !watchlist.matches(name)) {
@@ -147,23 +169,6 @@ public final class Correlator {
 		}
 		return new AlertRecord(subject, name, confidence, counted, System.currentTimeMillis(),
 				position, distanceTo(mc.player, position), host, kindFor(counted));
-	}
-
-	/** The confidence ladder described on the class. */
-	private static Confidence score(Map<DetectionKind, Integer> counts, List<DetectionKind> confirmed) {
-		if (counts.containsKey(DetectionKind.PROBE_CONFIRMED)) {
-			return Confidence.CERTAIN;
-		}
-		if (counts.containsKey(DetectionKind.ENTITY_NOT_IN_TAB) && confirmed.size() >= 2) {
-			return Confidence.CERTAIN;
-		}
-		if (confirmed.size() >= 2) {
-			return Confidence.HIGH;
-		}
-		if (confirmed.size() == 1) {
-			return confirmed.get(0).strong() ? Confidence.HIGH : Confidence.MEDIUM;
-		}
-		return Confidence.LOW;
 	}
 
 	/**

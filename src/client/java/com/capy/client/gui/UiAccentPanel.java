@@ -1,14 +1,13 @@
 package com.capy.client.gui;
 
 /**
- * The client's colour studio: two full HSV pickers, one for the window styles
- * and one for the radial ring, plus a row of quick palettes.
+ * The client's colour studio: a full HSV picker for the window accent plus a
+ * row of quick palettes.
  *
- * It is a floating overlay rather than a settings row so both the window GUI
- * and the radial GUI can open the exact same control. The pickers are the
- * existing {@link UiColorPicker}, bound to the standalone settings in
+ * It is a floating overlay rather than a settings row. The picker is the
+ * existing {@link UiColorPicker}, bound to the standalone setting in
  * {@link GuiColors}; no module had to grow a fake "GUI colour" setting just to
- * host them.
+ * host it.
  */
 public final class UiAccentPanel {
 	private static final int PAD = 16;
@@ -21,7 +20,6 @@ public final class UiAccentPanel {
 	};
 
 	private final UiColorPicker windowPicker = new UiColorPicker(GuiColors.window(), false);
-	private final UiColorPicker ringPicker = new UiColorPicker(GuiColors.ring(), false);
 	private final Anim reveal = new Anim(0f, 18f);
 
 	private boolean open;
@@ -32,7 +30,6 @@ public final class UiAccentPanel {
 	private int panelW;
 	private int panelH;
 	private int windowRowY;
-	private int ringRowY;
 	private int presetY;
 	private int swatchX;
 	private int closeX;
@@ -45,10 +42,9 @@ public final class UiAccentPanel {
 	public void toggle() {
 		open = !open;
 		if (open) {
-			// The studio is opened to pick a colour, not to look at two closed
-			// rows: both pickers start expanded so H/S/V are one click away.
+			// The studio is opened to pick a colour, not to look at a closed
+			// row: the picker starts expanded so H/S/V are one click away.
 			windowPicker.setOpen(true);
-			ringPicker.setOpen(true);
 		}
 	}
 
@@ -57,7 +53,6 @@ public final class UiAccentPanel {
 		// A close during a drag must end the drag, or re-opening the studio and
 		// moving the pointer would keep editing a track the user never grabbed.
 		windowPicker.released();
-		ringPicker.released();
 	}
 
 	/** Closes the panel if it is open; used by Escape before closing the GUI. */
@@ -77,48 +72,23 @@ public final class UiAccentPanel {
 		panelW = Math.max(250, pickerW + PAD * 2);
 		panelX = (width - panelW) / 2;
 
-		int stacked = HEADER_H + windowPicker.height() + 10 + ringPicker.height()
+		int content = HEADER_H + windowPicker.height()
 				+ 14 + 12 + SWATCH + 8 + 12 + PAD;
-		// On a 480x270 GUI (the auto scale on a 1080p screen) two stacked
-		// pickers are taller than the whole screen. There the studio turns
-		// into a two-column sheet instead of clipping the ring picker.
-		//
-		// The width guard is the floor for those two columns, not a nicety:
-		// below about 360 pixels a column stops fitting "Window accent" plus
-		// its hex value. Stacking has to be refused anyway once the content is
-		// taller than the canvas - a 1280x720 screen at GUI scale 3 is a
-		// 427x240 canvas, and stacking there drew the second picker and the
-		// whole palette row outside the sheet, off the bottom of the screen.
-		boolean twoColumns = stacked > height - 16 && width >= 360;
-		int content = twoColumns
-				? HEADER_H + Math.max(windowPicker.height(), ringPicker.height())
-						+ 10 + 12 + SWATCH + 8 + 12 + PAD
-				: stacked;
-		// The pickers are the point of the sheet, so they are never the part
-		// that gets clipped; the height simply follows them.
+		// The picker is the point of the sheet, so it is never the part that
+		// gets clipped; the height simply follows it.
 		panelH = Math.min(height - 16, content);
 		panelY = (height - panelH) / 2;
-		placeRows(twoColumns);
+		placeRows();
 		swatchX = panelX + PAD;
 		closeX = panelX + panelW - PAD - 18;
 		closeY = panelY + 14;
 	}
 
-	/** Binds both pickers once the final panel origin is known. */
-	private void placeRows(boolean twoColumns) {
+	/** Binds the picker once the final panel origin is known. */
+	private void placeRows() {
 		windowRowY = panelY + HEADER_H;
-		if (twoColumns) {
-			int gap = 14;
-			int columnW = Math.max(150, (panelW - PAD * 2 - gap) / 2);
-			ringRowY = windowRowY;
-			windowPicker.bind(panelX + PAD, windowRowY, columnW, "Window accent");
-			ringPicker.bind(panelX + PAD + columnW + gap, ringRowY, columnW, "Ring accent");
-		} else {
-			windowPicker.bind(panelX + PAD, windowRowY, panelW - PAD * 2, "Window accent");
-			ringRowY = windowRowY + windowPicker.height() + 10;
-			ringPicker.bind(panelX + PAD, ringRowY, panelW - PAD * 2, "Ring accent");
-		}
-		presetY = ringRowY + Math.max(windowPicker.height(), ringPicker.height()) + 26;
+		windowPicker.bind(panelX + PAD, windowRowY, panelW - PAD * 2, "Window accent");
+		presetY = windowRowY + windowPicker.height() + 26;
 	}
 
 	/** True while the palette row is inside the sheet rather than past it. */
@@ -178,7 +148,7 @@ public final class UiAccentPanel {
 		UiText bold = type.bold();
 		UiText regular = type.regular();
 		bold.draw(c, "GUI COLOURS", panelX + PAD + 24, y + 13, Ui.withAlpha(UiTheme.TEXT, alpha));
-		regular.draw(c, "Window and ring accents", panelX + PAD + 24, y + 27,
+		regular.draw(c, "Window accent", panelX + PAD + 24, y + 27,
 				Ui.withAlpha(UiTheme.TEXT_3, alpha));
 
 		// Close.
@@ -193,7 +163,6 @@ public final class UiAccentPanel {
 		// Price of admission: the pickers draw with live theme tokens, which is
 		// exactly what the user is changing, so they preview the result.
 		windowPicker.render(c, regular, mouseX, mouseY, delta);
-		ringPicker.render(c, regular, mouseX, mouseY, delta);
 
 		// On a sheet too short to hold them the palettes are dropped along
 		// with their caption: half a row of swatches below the bottom edge
@@ -225,9 +194,7 @@ public final class UiAccentPanel {
 	}
 
 	private boolean isSelected(int color) {
-		int rgb = color & 0x00FFFFFF;
-		return (GuiColors.windowArgb() & 0x00FFFFFF) == rgb
-				&& (GuiColors.ringArgb() & 0x00FFFFFF) == rgb;
+		return (GuiColors.windowArgb() & 0x00FFFFFF) == (color & 0x00FFFFFF);
 	}
 
 	private static int contrast(int color) {
@@ -254,15 +221,9 @@ public final class UiAccentPanel {
 			GuiColors.sync();
 			return true;
 		}
-		if (ringPicker.mouseClicked(mx, my)) {
-			GuiColors.sync();
-			return true;
-		}
 		int preset = presetAt(mx, my);
 		if (preset >= 0) {
-			int color = PRESETS[preset];
-			GuiColors.window().set(color);
-			GuiColors.ring().set(color);
+			GuiColors.window().set(PRESETS[preset]);
 			GuiColors.sync();
 			return true;
 		}
@@ -274,7 +235,6 @@ public final class UiAccentPanel {
 			return false;
 		}
 		boolean dragged = windowPicker.mouseDragged(mx);
-		dragged |= ringPicker.mouseDragged(mx);
 		if (dragged) {
 			GuiColors.sync();
 		}
@@ -287,7 +247,6 @@ public final class UiAccentPanel {
 			return false;
 		}
 		boolean was = windowPicker.released();
-		was |= ringPicker.released();
 		if (was) {
 			GuiColors.sync();
 		}

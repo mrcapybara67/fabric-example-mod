@@ -51,6 +51,11 @@ public final class AtmosphereWorldRenderer {
 	private AtmosphereWorldRenderer() {
 	}
 
+	/** Allocated once for the unusual context without a matrix. */
+	private static final class FallbackStack {
+		private static final PoseStack INSTANCE = new PoseStack();
+	}
+
 	public static void render(WorldRenderContext context) {
 		if (!AtmosphereState.active) {
 			return;
@@ -60,18 +65,20 @@ public final class AtmosphereWorldRenderer {
 			return;
 		}
 		try {
+			AtmosphereState.advance();
 			Vec3 camera = mc.gameRenderer.getMainCamera().position();
 			PoseStack stack = context.matrices();
 			if (stack == null) {
-				stack = new PoseStack();
+				stack = FallbackStack.INSTANCE;
 			}
 			PoseStack.Pose pose = stack.last();
 			MultiBufferSource.BufferSource batches = batch();
 			VertexConsumer vc = batches.getBuffer(RenderTypes.debugQuads());
 
-			double px = mc.player.getX();
-			double py = mc.player.getY();
-			double pz = mc.player.getZ();
+			float partial = mc.getDeltaTracker().getGameTimeDeltaPartialTick(true);
+			double px = mc.player.getX(partial);
+			double py = mc.player.getY(partial);
+			double pz = mc.player.getZ(partial);
 			double ox = px - camera.x;
 			double oy = py - camera.y;
 			double oz = pz - camera.z;
@@ -197,6 +204,30 @@ public final class AtmosphereWorldRenderer {
 			double r = 0.035 + seed2 * 0.045;
 			mote(vc, pose, x, y, z, r, 0xB0B8F4FF);
 		}
+		for (int i = 0; i < 24; i++) {
+			double seed = hash(i * 53 + 3);
+			double seed2 = hash(i * 11 + 21);
+			double x = ox + (seed - 0.5) * 30 + Math.sin(now * 0.15 + i) * 2.0;
+			double y = oy + 3 + (seed2 + now * 0.02) % 10;
+			double z = oz + (seed2 - 0.5) * 30;
+			mote(vc, pose, x, y, z, 0.025 + seed * 0.025, 0x8058F0D0);
+		}
+		whale(vc, pose, ox, oy, oz, now);
+	}
+
+	/** A far, slow whale silhouette: two soft dark ovals crossing the water. */
+	private static void whale(VertexConsumer vc, PoseStack.Pose pose,
+			double ox, double oy, double oz, double now) {
+		double travel = Math.sin(now * 0.018) * 26.0;
+		double x = ox + 30.0 + travel;
+		double z = oz + 24.0;
+		double y = oy + 7.0;
+		int body = 0x38234A68;
+		// A flattened horizontal body and a raised tail: the two shapes read as
+		// a whale from the side without a model or a texture.
+		fan(vc, pose, x, y, z, 7.0, body, 1, 0, 0, 0, 0, 1);
+		fan(vc, pose, x + 7.0, y + 1.4, z, 3.0, body, 1, 0, 0, 0, 1, 0);
+		fan(vc, pose, x + 8.0, y + 3.8, z, 1.8, body, 1, 0, 0, 0, 1, 0);
 	}
 
 	/** Crimson: embers that rise and swing, with a coal-red core. */
@@ -212,6 +243,15 @@ public final class AtmosphereWorldRenderer {
 			double r = 0.045 + seed * 0.05;
 			mote(vc, pose, x, y, z, r, i % 4 == 0 ? 0xFFFFD08A : 0xD8FF5A2A);
 		}
+		for (int i = 0; i < 22; i++) {
+			double seed = hash(i * 47 + 9);
+			double seed2 = hash(i * 61 + 5);
+			double fall = (now * (0.6 + seed2) + seed * 12) % 12;
+			double x = ox + (seed - 0.5) * 20;
+			double y = oy + 11 - fall;
+			double z = oz + (seed2 - 0.5) * 20;
+			mote(vc, pose, x, y, z, 0.03 + seed * 0.03, 0x706E5A52);
+		}
 	}
 
 	/** Neon: a glowing ground grid and drifting circuit dust. */
@@ -220,10 +260,11 @@ public final class AtmosphereWorldRenderer {
 		double ground = oy - 1.2;
 		double spacing = 3.0;
 		double reach = 21.0;
+		double scroll = (now * 1.1) % spacing;
 		int lines = (int) (reach / spacing);
 		for (int i = -lines; i <= lines; i++) {
-			double x = ox + i * spacing;
-			double z = oz + i * spacing;
+			double x = ox + i * spacing + scroll;
+			double z = oz + i * spacing + scroll;
 			int color = (i & 1) == 0 ? 0x6A25F4E0 : 0x5AFF3FC8;
 			quad(vc, pose, x - 0.025, ground, oz - reach, x + 0.025, ground, oz - reach,
 					x + 0.025, ground, oz + reach, x - 0.025, ground, oz + reach, color, color);
@@ -237,6 +278,18 @@ public final class AtmosphereWorldRenderer {
 			double y = oy + 0.2 + (now * (0.25 + seed2 * 0.5) + seed * 8) % 8;
 			double z = oz + (seed2 - 0.5) * 20;
 			mote(vc, pose, x, y, z, 0.035 + seed * 0.035, i % 3 == 0 ? 0xFFFF56D8 : 0xFF3FF4E4);
+		}
+		// Neon rain: thin slanted streaks with a faded tail, not square drops.
+		for (int i = 0; i < 34; i++) {
+			double seed = hash(i * 71 + 4);
+			double seed2 = hash(i * 31 + 14);
+			double fall = (now * (8 + seed2 * 6) + seed * 18) % 18;
+			double x = ox + (seed - 0.5) * 24;
+			double y = oy + 14 - fall;
+			double z = oz + (seed2 - 0.5) * 24;
+			quad(vc, pose, x, y, z, x + 0.02, y, z, x + 0.16, y + 1.0, z + 0.06,
+					x + 0.14, y + 1.0, z + 0.06, 0x003FF4E4,
+					i % 2 == 0 ? 0x904FFFE8 : 0x80FF56D8);
 		}
 	}
 
@@ -259,9 +312,13 @@ public final class AtmosphereWorldRenderer {
 		for (int i = 0; i < 38; i++) {
 			double seed = hash(i * 31 + 17);
 			double seed2 = hash(i * 53 + 6);
-			double x2 = ox + (seed - 0.5) * 22 + Math.sin(now * 0.5 + i) * 1.2;
+			// A slow orbit around the rift, not a static scatter: the dust has
+			// to read as caught in something rather than pinned to the screen.
+			double orbit = now * 0.06 + i * 0.73;
+			double radius = 3.0 + seed * 10.0;
+			double x2 = ox + Math.cos(orbit) * radius;
 			double y2 = oy + (seed2 - 0.3) * 12 + Math.sin(now * 0.7 + i * 1.7) * 1.5;
-			double z2 = oz + (seed2 - 0.5) * 22;
+			double z2 = oz + Math.sin(orbit) * radius;
 			double r = 0.05 + seed * 0.07;
 			mote(vc, pose, x2, y2, z2, r, i % 5 == 0 ? 0xB0C46AFF : 0x702A1348);
 		}
@@ -347,13 +404,39 @@ public final class AtmosphereWorldRenderer {
 				.setNormal(0f, 1f, 0f);
 	}
 
-	/** A small flat billboard-ish spark; two crossed quads would be too many here. */
+	/**
+	 * A soft spark: two crossed radial fans instead of two square quads.
+	 *
+	 * <p>The centre keeps the colour and the rim fades to zero, so a mote is a
+	 * round glow from every angle rather than a flat sprite square. The second
+	 * plane stops it disappearing when the first is edge-on to the camera.</p>
+	 */
 	private static void mote(VertexConsumer vc, PoseStack.Pose pose,
 			double x, double y, double z, double size, int color) {
-		quad(vc, pose, x - size, y - size, z, x + size, y - size, z,
-				x + size, y + size, z, x - size, y + size, z, color, color);
-		quad(vc, pose, x, y - size, z - size, x, y - size, z + size,
-				x, y + size, z + size, x, y + size, z - size, color, color);
+		fan(vc, pose, x, y, z, size, color, 1, 0, 0, 0, 1, 0);
+		fan(vc, pose, x, y, z, size, color, 0, 0, 1, 0, 1, 0);
+	}
+
+	/** A radial fan on the plane spanned by two unit axes, with a soft rim. */
+	private static void fan(VertexConsumer vc, PoseStack.Pose pose, double x, double y, double z,
+			double size, int color, double ax, double ay, double az,
+			double bx, double by, double bz) {
+		int rim = 32;
+		int centre = withAlpha(color, (color >>> 24));
+		int edge = withAlpha(color, 0);
+		for (int i = 0; i < rim; i++) {
+			double a0 = Math.PI * 2.0 * i / rim;
+			double a1 = Math.PI * 2.0 * (i + 1) / rim;
+			double c0 = Math.cos(a0) * size;
+			double s0 = Math.sin(a0) * size;
+			double c1 = Math.cos(a1) * size;
+			double s1 = Math.sin(a1) * size;
+			vertex(vc, pose, x, y, z, centre);
+			vertex(vc, pose, x + ax * c0 + bx * s0, y + ay * c0 + by * s0,
+					z + az * c0 + bz * s0, edge);
+			vertex(vc, pose, x + ax * c1 + bx * s1, y + ay * c1 + by * s1,
+					z + az * c1 + bz * s1, edge);
+		}
 	}
 
 	private static void quad(VertexConsumer vc, PoseStack.Pose pose,

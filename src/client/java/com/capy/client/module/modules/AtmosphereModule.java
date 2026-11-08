@@ -1,6 +1,8 @@
 package com.capy.client.module.modules;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.module.ActionSetting;
+import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
 import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.ColorSetting;
@@ -68,8 +70,10 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 	private final ChoiceSetting weatherMode = setting(new ChoiceSetting("weather", 0, WEATHER_MODES));
 	private final ColorSetting skyTint = setting(new ColorSetting("sky_tint", 0xFF8FB8FF));
 	private final ColorSetting hazeTint = setting(new ColorSetting("haze_tint", 0xFFFFD980));
+	private final BooleanSetting themeDefaults = setting(new BooleanSetting("theme_defaults", true));
+	private final ActionSetting resetDefaults = setting(new ActionSetting("reset_defaults", this::resetThemeDefaults));
+	private final BooleanSetting debugTiming = setting(new BooleanSetting("debug_timing", false));
 
-	private long lastNanos;
 	/** The theme whose preset has already been loaded into the settings. */
 	private int appliedTheme = -1;
 
@@ -80,7 +84,6 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 	@Override
 	protected void onToggle(boolean state) {
 		AtmosphereState.active = state;
-		lastNanos = 0L;
 		if (state) {
 			// The theme is not re-applied here on purpose. A preset is loaded when
 			// the selection changes and when a saved config is read; reloading it
@@ -111,15 +114,13 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		// enabled without its toggle having run must still light the hooks.
 		AtmosphereState.active = true;
 
-		long now = System.nanoTime();
-		float dt = lastNanos == 0L ? 0.05f : (now - lastNanos) / 1.0e9f;
-		lastNanos = now;
-		dt = Math.max(0f, Math.min(0.1f, dt));
-
+		AtmosphereState.debugTiming = debugTiming.value();
 		int selected = theme.index();
 		AtmosphereState.theme = selected;
 		if (selected != appliedTheme) {
-			applyTheme(selected);
+			if (themeDefaults.value()) {
+				applyTheme(selected);
+			}
 			appliedTheme = selected;
 		}
 
@@ -135,7 +136,14 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		AtmosphereState.fogR = ((fog >> 16) & 0xFF) / 255f;
 		AtmosphereState.fogG = ((fog >> 8) & 0xFF) / 255f;
 		AtmosphereState.fogB = (fog & 0xFF) / 255f;
-		AtmosphereState.fogTintTarget = 0.88f;
+		// Crimson's fog has a slow pulse; every other theme keeps a steady
+		// tint. The eased state smooths the change between ticks.
+		float tint = 0.88f;
+		if (selected == 6) {
+			double seconds = System.currentTimeMillis() / 1000.0;
+			tint = 0.80f + 0.08f * (float) (0.5 + 0.5 * Math.sin(seconds * 0.45));
+		}
+		AtmosphereState.fogTintTarget = tint;
 		AtmosphereState.fbHotTarget = (float) bloom.real() / 100f;
 		AtmosphereState.fbAmbTarget = (float) warmth.real() / 100f;
 		AtmosphereState.fbLiveTarget = (float) brightness.real() / 100f;
@@ -153,7 +161,8 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		AtmosphereState.timeDayTarget = TIME_FRACTIONS[Math.min(timeMode.index(), TIME_FRACTIONS.length - 1)];
 		applyWeather(weatherMode.index());
 
-		AtmosphereState.tick(dt);
+		// Frame-time easing happens in the render hooks; the tick only writes
+		// targets, so a 20 Hz tick cannot make a 144 Hz sky step.
 		// Theme weather is vanilla particles spawned on the client: no packet,
 		// no server simulation, and it goes through the game's own particle
 		// renderer, so a replaced renderer still draws it.
@@ -222,6 +231,12 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 	 * would make every slider feel like it had been ignored, and the sliders are
 	 * the part of the card people actually tune.</p>
 	 */
+	private void resetThemeDefaults() {
+		themeDefaults.set(true);
+		applyTheme(theme.index());
+		appliedTheme = theme.index();
+	}
+
 	private void applyTheme(int index) {
 		switch (index) {
 			case 1 -> { // golden hour
@@ -301,6 +316,8 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		brightness.set(ConfigValues.intValue(json, "brightness", 100));
 		skyTint.set(ConfigValues.intValue(json, "sky_tint", 0xFF8FB8FF));
 		hazeTint.set(ConfigValues.intValue(json, "haze_tint", 0xFFFFD980));
+		themeDefaults.set(ConfigValues.boolValue(json, "theme_defaults", true));
+		debugTiming.set(ConfigValues.boolValue(json, "debug_timing", false));
 		// A stored preset is already loaded; do not load it again over a colour
 		// the player may have picked afterwards.
 		appliedTheme = theme.index();
@@ -318,6 +335,8 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		json.addProperty("brightness", brightness.get());
 		json.addProperty("sky_tint", skyTint.argb());
 		json.addProperty("haze_tint", hazeTint.argb());
+		json.addProperty("theme_defaults", themeDefaults.value());
+		json.addProperty("debug_timing", debugTiming.value());
 	}
 
 	/** Reads a choice by id, leaving the default when the stored id is gone. */

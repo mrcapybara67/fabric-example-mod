@@ -158,6 +158,26 @@ public final class SignalBuffer {
 		tick = 0L;
 	}
 
+	/** Drops one account's evidence and remembered name. */
+	public void clearSubject(UUID subject) {
+		if (subject == null) {
+			return;
+		}
+		buffers.remove(subject);
+		SUBJECT_NAMES.remove(subject);
+	}
+
+	/** Drops the evidence for a name, including a derived hidden subject. */
+	public void clearName(String name) {
+		if (name == null || name.isBlank()) {
+			return;
+		}
+		UUID subject = namedSubject(name);
+		if (subject != null) {
+			clearSubject(subject);
+		}
+	}
+
 	/** Remembers what an otherwise anonymous subject is called. */
 	public static void nameSubject(UUID subject, String name) {
 		if (subject == null || name == null || name.isBlank()) {

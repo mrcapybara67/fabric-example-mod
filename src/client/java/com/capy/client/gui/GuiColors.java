@@ -4,17 +4,12 @@ import com.capy.client.config.ClientConfig;
 import com.capy.client.module.ColorSetting;
 
 /**
- * The two user-chosen GUI accents.
+ * The user-chosen window accent.
  *
- * The window style and the radial ring deliberately keep separate accents:
- * someone who wants a green window may still want the ring to stay pink, and
- * switching styles must never silently recolour the other one.
- *
- * Both are stored as plain {@link ColorSetting}s so the existing colour picker
- * can edit them without a second, near-identical control. The settings are not
- * attached to a module — they belong to the client itself — and
- * {@link #sync()} is what pushes a change out to {@link UiTheme} and to the
- * config object.
+ * It is stored as a plain {@link ColorSetting} so the existing colour picker
+ * can edit it. The setting is not attached to a module — it belongs to the
+ * client itself — and {@link #sync()} is what pushes a change out to
+ * {@link UiTheme} and to the config object.
  */
 public final class GuiColors {
 	// The window default is the Sakura palette accent on purpose: while the
@@ -22,14 +17,11 @@ public final class GuiColors {
 	// accent with it. A default that differed would look customised from the
 	// first launch and the theme picker would leave it behind.
 	public static final int DEFAULT_WINDOW = 0xFFFF74A8;
-	public static final int DEFAULT_RING = 0xFFFF74A8;
 
 	private static final ColorSetting window = new ColorSetting("gui_accent", DEFAULT_WINDOW);
-	private static final ColorSetting ring = new ColorSetting("radial_accent", DEFAULT_RING);
 
-	/** Last values pushed out, so a frame only reacts to a real change. */
+	/** Last value pushed out, so a frame only reacts to a real change. */
 	private static int appliedWindow = DEFAULT_WINDOW;
-	private static int appliedRing = DEFAULT_RING;
 
 	private GuiColors() {
 	}
@@ -38,16 +30,8 @@ public final class GuiColors {
 		return window;
 	}
 
-	public static ColorSetting ring() {
-		return ring;
-	}
-
 	public static int windowArgb() {
 		return opaque(window.argb());
-	}
-
-	public static int ringArgb() {
-		return opaque(ring.argb());
 	}
 
 	/**
@@ -60,39 +44,28 @@ public final class GuiColors {
 		return argb | 0xFF000000;
 	}
 
-	/** Applies the persisted values once, at startup. */
-	public static void load(int windowArgb, int ringArgb) {
+	/** Applies the persisted value once, at startup. */
+	public static void load(int windowArgb) {
 		window.set(opaque(windowArgb));
-		ring.set(opaque(ringArgb));
 		appliedWindow = window.argb();
-		appliedRing = ring.argb();
-		// Write the sanitised values back, so an old translucent accent is not
+		// Write the sanitised value back, so an old translucent accent is not
 		// saved again on the next close and has to be corrected every launch.
 		ClientConfig.get().setGuiAccent(appliedWindow);
-		ClientConfig.get().setRadialAccent(appliedRing);
 		UiTheme.setAccent(appliedWindow);
 	}
 
 	/**
-	 * Pushes the current values into the live theme (window) and the config
-	 * (both). Returns true when something changed this frame.
+	 * Pushes the current value into the live theme and the config. Returns true
+	 * when something changed this frame.
 	 */
 	public static boolean sync() {
-		boolean changed = false;
 		int nowWindow = windowArgb();
-		int nowRing = ringArgb();
-		ClientConfig config = ClientConfig.get();
-		if (nowWindow != appliedWindow) {
-			appliedWindow = nowWindow;
-			UiTheme.setAccent(nowWindow);
-			config.setGuiAccent(nowWindow);
-			changed = true;
+		if (nowWindow == appliedWindow) {
+			return false;
 		}
-		if (nowRing != appliedRing) {
-			appliedRing = nowRing;
-			config.setRadialAccent(nowRing);
-			changed = true;
-		}
-		return changed;
+		appliedWindow = nowWindow;
+		UiTheme.setAccent(nowWindow);
+		ClientConfig.get().setGuiAccent(nowWindow);
+		return true;
 	}
 }

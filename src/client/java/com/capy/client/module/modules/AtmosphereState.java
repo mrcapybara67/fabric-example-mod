@@ -27,6 +27,8 @@ package com.capy.client.module.modules;
 public final class AtmosphereState {
 	/** Enabled flag — every hook checks this first and returns untouched if false. */
 	public static volatile boolean active = false;
+	/** Logs the sky pass time when the debug setting is on. */
+	public static volatile boolean debugTiming = false;
 
 	// Sky tint: blend strength (0 = vanilla, 1 = full tint) and the tint itself.
 	public static volatile float skyHot = 0f;
@@ -88,11 +90,40 @@ public final class AtmosphereState {
 
 	/** E-folds per second for every eased value. */
 	private static final float LERP_SPEED = 4.0f;
+	/** Frame pacing guard: two render hooks in one frame must not ease twice. */
+	private static final long MIN_FRAME_NANOS = 2_000_000L;
+	private static long lastFrameNanos;
 
 	private AtmosphereState() {
 	}
 
-	/** Eases every live value towards its target. Called once per client tick. */
+	/**
+	 * Advances the easing once per rendered frame.
+	 *
+	 * <p>Called by the render hooks, not by the 20 Hz tick: interpolating in the
+	 * tick and reading the result every frame made fog and light changes look
+	 * like they were running at 20 fps. The guard lets the sky and world hooks
+	 * both call this without easing twice in one frame.</p>
+	 */
+	public static void advance() {
+		if (!active) {
+			lastFrameNanos = 0L;
+			return;
+		}
+		long now = System.nanoTime();
+		if (lastFrameNanos != 0L && now - lastFrameNanos < MIN_FRAME_NANOS) {
+			return;
+		}
+		long previous = lastFrameNanos;
+		lastFrameNanos = now;
+		if (previous == 0L) {
+			return;
+		}
+		float dt = (now - previous) / 1.0e9f;
+		tick(Math.min(0.1f, Math.max(0f, dt)));
+	}
+
+	/** Eases every live value towards its target. Called once per frame. */
 	public static void tick(float dt) {
 		float step = Math.max(0f, Math.min(1f, LERP_SPEED * dt));
 		skyHot = ease(skyHot, skyHotTarget, step);
@@ -101,7 +132,7 @@ public final class AtmosphereState {
 		fbAmb = ease(fbAmb, fbAmbTarget, step);
 		fbHot = ease(fbHot, fbHotTarget, step);
 		fbLive = ease(fbLive, fbLiveTarget, step);
-		timeDay = easeOverride(timeDay, timeDayTarget, step);
+		timeDay = AtmosphereMath.easeTimeOfDay(timeDay, timeDayTarget, step);
 		rainOvr = easeOverride(rainOvr, rainOvrTarget, step);
 		thunderOvr = easeOverride(thunderOvr, thunderOvrTarget, step);
 	}
@@ -117,6 +148,7 @@ public final class AtmosphereState {
 		timeDayTarget = -1f;
 		rainOvrTarget = -1f;
 		thunderOvrTarget = -1f;
+		lastFrameNanos = 0L;
 	}
 
 	private static float ease(float current, float target, float step) {

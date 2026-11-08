@@ -10,6 +10,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.world.level.material.FogType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The animated, theme-owned skybox.
@@ -30,18 +32,27 @@ import net.minecraft.world.level.material.FogType;
  * are translucent layers over it.
  *
  * <h2>Budget</h2>
- * The base dome is 32 by 10 segments. Each theme adds only a few dozen small
- * quads. The whole sky is a static buffer source reused between frames, so a
- * phone pays for vertices, not for allocations.
+ * The base dome is 64 by 48 segments, cached until the theme changes. Each
+ * theme adds only a few dozen small quads. The whole sky is a static buffer
+ * source reused between frames, so a phone pays for vertices, not for
+ * allocations.
  */
 public final class AtmosphereSkyRenderer {
 	private static final int BUFFER_BYTES = 1024 * 1024;
 	private static final double RADIUS = 96.0;
-	private static final int SEGMENTS = 32;
-	private static final int RINGS = 10;
+	private static final int SEGMENTS = 64;
+	private static final int RINGS = 48;
 
 	private static MultiBufferSource.BufferSource batch;
 	private static ByteBufferBuilder buffer;
+	/** Static dome vertices for the last theme; rebuilt only when the theme changes. */
+	private static float[] domePositions;
+	private static int[] domeColors;
+	private static int domeTheme = -1;
+	private static final Logger LOGGER = LoggerFactory.getLogger(AtmosphereSkyRenderer.class);
+	private static long lastDebugLog;
+	private static final PoseStack FALLBACK_STACK = new PoseStack();
+	private static final Sky SKY = new Sky();
 
 	private AtmosphereSkyRenderer() {
 	}
@@ -63,20 +74,27 @@ public final class AtmosphereSkyRenderer {
 		if (type == null) {
 			return;
 		}
+		long passStart = AtmosphereState.debugTiming ? System.nanoTime() : 0L;
 		try {
-			PoseStack stack = context instanceof WorldRenderContext full ? full.matrices() : null;
-			if (stack == null) {
-				stack = new PoseStack();
-			}
+			AtmosphereState.advance();
+			PoseStack stack = context instanceof WorldRenderContext full && full.matrices() != null
+					? full.matrices() : FALLBACK_STACK;
 			MultiBufferSource.BufferSource batches = batch();
 			VertexConsumer vc = batches.getBuffer(type);
-			Sky sky = new Sky(vc, stack.last());
+			Sky sky = SKY;
+			sky.set(vc, stack.last());
 			double now = System.nanoTime() / 1.0e9;
 			int theme = AtmosphereState.theme;
-			int[] palette = palette(theme);
-			sky.dome(palette[0], palette[1], palette[2], palette[3]);
+			sky.dome(theme);
 			theme(sky, theme, now);
 			batches.endBatch();
+			if (passStart != 0L) {
+				long at = System.nanoTime();
+				if (at - lastDebugLog >= 5_000_000_000L) {
+					lastDebugLog = at;
+					LOGGER.info("Capy atmosphere sky pass: {} ns", at - passStart);
+				}
+			}
 		} catch (RuntimeException | LinkageError failure) {
 			discard();
 			Guard.report("atmosphere skybox", failure);
@@ -84,19 +102,21 @@ public final class AtmosphereSkyRenderer {
 	}
 
 	/** Top, middle, horizon and below-horizon colours for a theme. */
+	private static final int[][] PALETTES = {
+			{0xFF06101C, 0xFF12304A, 0xFF6C9BB8, 0xFF102028},
+			{0xFF180D22, 0xFF5B2731, 0xFFFF9860, 0xFF2A1512},
+			{0xFF01030A, 0xFF08142F, 0xFF213765, 0xFF05070D},
+			{0xFF010710, 0xFF062A32, 0xFF0B5B55, 0xFF020A0E},
+			{0xFF20262F, 0xFF48515E, 0xFF8D98A6, 0xFF171B21},
+			{0xFF01070F, 0xFF042B3E, 0xFF0B5D75, 0xFF010E16},
+			{0xFF120306, 0xFF3B0C12, 0xFF962A20, 0xFF190405},
+			{0xFF170A14, 0xFF4E2038, 0xFFE58DA8, 0xFF22101A},
+			{0xFF010006, 0xFF0B061B, 0xFF2A1550, 0xFF030008},
+			{0xFF01040B, 0xFF061B2A, 0xFF0B4A55, 0xFF02080D}
+	};
+
 	private static int[] palette(int theme) {
-		return switch (theme) {
-			case 1 -> new int[]{0xFF180D22, 0xFF5B2731, 0xFFFF9860, 0xFF2A1512};
-			case 2 -> new int[]{0xFF01030A, 0xFF08142F, 0xFF213765, 0xFF05070D};
-			case 3 -> new int[]{0xFF010710, 0xFF062A32, 0xFF0B5B55, 0xFF020A0E};
-			case 4 -> new int[]{0xFF20262F, 0xFF48515E, 0xFF8D98A6, 0xFF171B21};
-			case 5 -> new int[]{0xFF01070F, 0xFF042B3E, 0xFF0B5D75, 0xFF010E16};
-			case 6 -> new int[]{0xFF120306, 0xFF3B0C12, 0xFF962A20, 0xFF190405};
-			case 7 -> new int[]{0xFF170A14, 0xFF4E2038, 0xFFE58DA8, 0xFF22101A};
-			case 8 -> new int[]{0xFF010006, 0xFF0B061B, 0xFF2A1550, 0xFF030008};
-			case 9 -> new int[]{0xFF01040B, 0xFF061B2A, 0xFF0B4A55, 0xFF02080D};
-			default -> new int[]{0xFF06101C, 0xFF12304A, 0xFF6C9BB8, 0xFF102028};
-		};
+		return PALETTES[Math.max(0, Math.min(PALETTES.length - 1, theme))];
 	}
 
 	private static void theme(Sky sky, int theme, double now) {
@@ -119,7 +139,9 @@ public final class AtmosphereSkyRenderer {
 		double drift = now * 0.23;
 		sky.sun(41.0 + drift, 24.0, 5.2, 0xFFFFE3A8, 0x38FFD27A);
 		for (int i = 0; i < 6; i++) {
-			double yaw = i * 54 + now * 0.7;
+			// Slightly different speeds per layer give the clouds parallax as
+			// the player turns; one speed reads as a painted sheet.
+			double yaw = i * 54 + now * (0.7 + i * 0.035);
 			double pitch = 22 + (i % 3) * 7;
 			sky.puff(yaw, pitch, 13 + i % 2 * 4, 2.2, 0x42FFFFFF);
 		}
@@ -128,6 +150,11 @@ public final class AtmosphereSkyRenderer {
 			sky.star(hash(i * 13 + 4) * 360, 18 + hash(i * 29 + 7) * 55,
 					0.32, (int) (twinkle * 70), 0xFFE8F6FF);
 		}
+		// A slow, broad sheen along the horizon: the dome itself is cached, so
+		// this is the part that keeps the gradient from looking printed on.
+		double sheen = 0.5 + 0.5 * Math.sin(now * 0.18);
+		sky.band(-30 + Math.sin(now * 0.05) * 24, 6, 72, 18,
+				0x006C9BB8, withAlpha(0xFF8FC4E8, (int) (8 + sheen * 14)));
 	}
 
 	/** Golden Hour: a huge low sun, layered amber clouds and visible rays. */
@@ -143,7 +170,9 @@ public final class AtmosphereSkyRenderer {
 		}
 		for (int i = 0; i < 6; i++) {
 			double yaw = sunYaw + Math.sin(i * 2.1 + now * 0.04) * 40;
-			sky.band(yaw, 3, 9, 13, 0x001F0E08, 0x25FFB06A);
+			double shimmer = 0.5 + 0.5 * Math.sin(now * 0.42 + i * 1.7);
+			sky.band(yaw, 3, 9, 13, 0x001F0E08,
+					withAlpha(0xFFFFB06A, (int) (20 + shimmer * 24)));
 		}
 	}
 
@@ -154,6 +183,11 @@ public final class AtmosphereSkyRenderer {
 		sky.sun(moonYaw, moonPitch, 7.2, 0xFFF2F6FF, 0x2A9FB8FF);
 		sky.ellipse(moonYaw + 1.0, moonPitch + 1.2, 1.2, 1.8, 0x30223758, 5);
 		sky.ellipse(moonYaw - 0.9, moonPitch - 1.4, 1.0, 1.2, 0x28223758, 4);
+		// The phase shadow crosses the moon on a slow cycle, so the disc is not
+		// always full. It is drawn after the craters and before the stars.
+		double phase = (now % 240.0) / 240.0;
+		sky.ellipse(moonYaw + (phase - 0.5) * 10.0, moonPitch, 6.4, 6.8,
+				0xF0060A18, 32);
 		for (int i = 0; i < 130; i++) {
 			double yaw = hash(i * 17 + 3) * 360;
 			double pitch = 4 + hash(i * 37 + 9) * 86;
@@ -162,10 +196,14 @@ public final class AtmosphereSkyRenderer {
 			sky.star(yaw, pitch, i % 13 == 0 ? 0.48 : 0.24,
 					alpha, i % 7 == 0 ? 0xFFBFD8FF : 0xFFFFFFFF);
 		}
-		double pass = (now * 0.045 + 0.18) % 1.0;
-		double sy = -80 + pass * 160;
-		sky.streak(sy, 62 - pass * 18, sy + 12.6, 59 - pass * 18,
-				0xE8FFFFFF, 0x00FFFFFF);
+		// One shooting star every half minute, and only while it is crossing.
+		double cycle = now % 30.0;
+		if (cycle < 1.2) {
+			double pass = cycle / 1.2;
+			double sy = -80 + pass * 160;
+			sky.streak(sy, 62 - pass * 18, sy + 12.6, 59 - pass * 18,
+					0xE8FFFFFF, 0x00FFFFFF);
+		}
 	}
 
 	/** Aurora: three living curtains behind a cold star field. */
@@ -232,7 +270,9 @@ public final class AtmosphereSkyRenderer {
 
 	/** Crimson: a red sun under smoke, with sparks in the air. */
 	private static void crimson(Sky sky, double now) {
-		sky.sun(97.0, 16.0, 8.0, 0xFFFF7A54, 0x48FF3A24);
+		double pulse = 8.0 + Math.sin(now * 0.42) * 1.4;
+		sky.sun(97.0, 16.0, pulse, 0xFFFF7A54, 0x48FF3A24);
+		sky.ellipse(97.0, 16.0, pulse * 3.4, pulse * 3.4, 0x12FF2A18, 32);
 		for (int i = 0; i < 9; i++) {
 			double yaw = i * 45 + now * 0.6;
 			double pitch = 17 + (i % 4) * 6;
@@ -253,6 +293,10 @@ public final class AtmosphereSkyRenderer {
 			double yaw = i * 47 + now * 1.0;
 			double pitch = 21 + i % 3 * 8;
 			sky.puff(yaw, pitch, 14 + i % 2 * 5, 2.2, 0x3CFFD8E5);
+		}
+		for (int i = 0; i < 3; i++) {
+			double yaw = i * 120 - now * 0.4;
+			sky.band(yaw, 8 + i * 3, 34, 7, 0x00FFD0E2, 0x14FFC6DE);
 		}
 		for (int i = 0; i < 32; i++) {
 			double yaw = hash(i * 19 + 7) * 360 + Math.sin(now * 0.15 + i) * 4.5;
@@ -279,13 +323,20 @@ public final class AtmosphereSkyRenderer {
 		}
 		double bx = -32.0;
 		double by = 38.0;
-		sky.ellipse(bx, by, 9.0, 9.0, 0xFF07030D, 10);
-		sky.ellipse(bx, by, 12.0, 12.0, 0x304D2C80, 8);
-		sky.ellipse(bx, by, 15.0, 15.0, 0x166A42A8, 6);
-		for (int i = 0; i < 8; i++) {
-			double angle = now * 0.08 + i * 0.78;
-			sky.star(bx + Math.cos(angle) * 10.5, by + Math.sin(angle) * 9.5,
-					0.2, 80, 0xFFE0CCFF);
+		sky.ellipse(bx, by, 9.0, 9.0, 0xFF07030D, 32);
+		sky.ellipse(bx, by, 12.0, 12.0, 0x304D2C80, 32);
+		sky.ellipse(bx, by, 15.0, 15.0, 0x166A42A8, 32);
+		for (int i = 0; i < 32; i++) {
+			double angle = now * 0.08 + i * (Math.PI * 2.0 / 32.0);
+			sky.star(bx + Math.cos(angle) * 14.5, by + Math.sin(angle) * 13.2,
+					0.18, 55, 0xFFB48CFF);
+		}
+		// A slow rotating rift: three thin arcs whose phase never repeats
+		// within a play session.
+		for (int i = 0; i < 3; i++) {
+			double angle = now * 0.11 + i * 2.1;
+			sky.band(bx + Math.cos(angle) * 5.0, by + Math.sin(angle) * 4.0,
+					4.5, 0.7, 0x003C1A68, 0x3A8A5AD8);
 		}
 	}
 
@@ -362,33 +413,22 @@ public final class AtmosphereSkyRenderer {
 
 	/** Camera-centred geometry helpers. */
 	private static final class Sky {
-		private final VertexConsumer vc;
-		private final PoseStack.Pose pose;
+		private VertexConsumer vc;
+		private PoseStack.Pose pose;
 
-		Sky(VertexConsumer vc, PoseStack.Pose pose) {
+		void set(VertexConsumer vc, PoseStack.Pose pose) {
 			this.vc = vc;
 			this.pose = pose;
 		}
 
-		void dome(int top, int mid, int horizon, int below) {
-			double lower = -14;
-			double upper = 90;
-			for (int ring = 0; ring < RINGS; ring++) {
-				double p0 = lower + (upper - lower) * ring / RINGS;
-				double p1 = lower + (upper - lower) * (ring + 1) / RINGS;
-				int c0 = domeColor(p0, top, mid, horizon, below);
-				int c1 = domeColor(p1, top, mid, horizon, below);
-				for (int segment = 0; segment < SEGMENTS; segment++) {
-					double y0 = 360.0 * segment / SEGMENTS;
-					double y1 = 360.0 * (segment + 1) / SEGMENTS;
-					vertexAt(y0, p0, RADIUS, c0);
-					vertexAt(y1, p0, RADIUS, c0);
-					vertexAt(y1, p1, RADIUS, c1);
-					vertexAt(y0, p1, RADIUS, c1);
-				}
+		void dome(int theme) {
+			ensureDome(theme);
+			for (int i = 0; i < domeColors.length; i++) {
+				int offset = i * 3;
+				vc.addVertex(pose, domePositions[offset], domePositions[offset + 1],
+						domePositions[offset + 2]).setColor(domeColors[i]);
 			}
 		}
-
 		/** A vertical band between two yaw/pitch corners. */
 		void band(double yaw, double pitch, double width, double height,
 				int bottom, int top) {
@@ -434,8 +474,6 @@ public final class AtmosphereSkyRenderer {
 				vertexAt(yaw + Math.cos(a - spread / outer) * outer,
 						pitch + Math.sin(a - spread / outer) * outer,
 						RADIUS * 0.99, withAlpha(color, 0));
-				vertexAt(yaw + Math.cos(a) * inner, pitch + Math.sin(a) * inner,
-						RADIUS * 0.99, color);
 			}
 		}
 
@@ -453,9 +491,9 @@ public final class AtmosphereSkyRenderer {
 			if (alpha <= 2) {
 				return;
 			}
-			ellipse(yaw, pitch, size, size, withAlpha(color, alpha), 2);
-			ellipse(yaw, pitch, size * 2.2, size * 0.18, withAlpha(color, alpha / 4), 1);
-			ellipse(yaw, pitch, size * 0.18, size * 2.2, withAlpha(color, alpha / 4), 1);
+			// One soft disc, with the centre carrying the twinkle and the rim
+			// fading out. A cross of flat strips read as a diamond at small sizes.
+			ellipse(yaw, pitch, size * 1.35, size * 1.35, withAlpha(color, alpha), 32);
 		}
 
 		/** A falling streak: a tapered line across the dome. */
@@ -470,10 +508,8 @@ public final class AtmosphereSkyRenderer {
 
 		/** A diamond, used for petals and sparks high in the sky. */
 		void diamond(double yaw, double pitch, double size, int a, int b) {
-			vertexAt(yaw, pitch + size, RADIUS * 0.985, a);
-			vertexAt(yaw + size, pitch, RADIUS * 0.985, b);
-			vertexAt(yaw, pitch - size, RADIUS * 0.985, a);
-			vertexAt(yaw - size, pitch, RADIUS * 0.985, b);
+			ellipse(yaw, pitch, size, size * 1.6, b, 32);
+			ellipse(yaw, pitch, size * 0.55, size * 0.9, a, 32);
 		}
 
 		/**
@@ -535,33 +571,28 @@ public final class AtmosphereSkyRenderer {
 			double cy = dy * RADIUS * 0.994;
 			double cz = dz * RADIUS * 0.994;
 			double alpha = (color >>> 24) / 255.0;
-			double halfW = Math.toRadians(halfWidth);
-			double halfH = Math.toRadians(halfHeight);
-			// x0/y0 are angles. Turning them into a position on the dome
-			// needs the radius, or a 6-degree sun becomes six centimetres.
+			double sw = Math.sin(Math.toRadians(halfWidth));
+			double sh = Math.sin(Math.toRadians(halfHeight));
 			double rr = RADIUS * 0.994;
-			for (int i = 0; i < strips; i++) {
-				double t0 = -1.0 + 2.0 * i / strips;
-				double t1 = -1.0 + 2.0 * (i + 1) / strips;
-				double y0 = t0 * halfH;
-				double y1 = t1 * halfH;
-				double x0 = Math.sqrt(Math.max(0.0, 1.0 - t0 * t0)) * halfW;
-				double x1 = Math.sqrt(Math.max(0.0, 1.0 - t1 * t1)) * halfW;
-				vertex(cx + (rx * -x0 + ux * y0) * rr, cy + uy * y0 * rr,
-						cz + (rz * -x0 + uz * y0) * rr,
-						withAlpha(color, (int) (alpha * 210)));
-				vertex(cx + (rx * x0 + ux * y0) * rr, cy + uy * y0 * rr,
-						cz + (rz * x0 + uz * y0) * rr,
-						withAlpha(color, (int) (alpha * 235)));
-				vertex(cx + (rx * x1 + ux * y1) * rr, cy + uy * y1 * rr,
-						cz + (rz * x1 + uz * y1) * rr,
-						withAlpha(color, (int) (alpha * 235)));
-				vertex(cx + (rx * -x1 + ux * y1) * rr, cy + uy * y1 * rr,
-						cz + (rz * -x1 + uz * y1) * rr,
-						withAlpha(color, (int) (alpha * 210)));
+			// One centre and a ring of rim vertices: a radial fan instead of
+			// stacked horizontal strips. The rim fades to zero, so the edge is
+			// soft at any GUI scale and a star is a disc, not a diamond.
+			int rim = Math.max(32, strips * 4);
+			int centreColour = withAlpha(color, (int) (alpha * 235));
+			for (int i = 0; i < rim; i++) {
+				double a0 = Math.PI * 2.0 * i / rim;
+				double a1 = Math.PI * 2.0 * (i + 1) / rim;
+				double x0 = cx + (rx * Math.cos(a0) * sw + ux * Math.sin(a0) * sh) * rr;
+				double y0 = cy + uy * Math.sin(a0) * sh * rr;
+				double z0 = cz + (rz * Math.cos(a0) * sw + uz * Math.sin(a0) * sh) * rr;
+				double x1 = cx + (rx * Math.cos(a1) * sw + ux * Math.sin(a1) * sh) * rr;
+				double y1 = cy + uy * Math.sin(a1) * sh * rr;
+				double z1 = cz + (rz * Math.cos(a1) * sw + uz * Math.sin(a1) * sh) * rr;
+				vertex(cx, cy, cz, centreColour);
+				vertex(x0, y0, z0, withAlpha(color, 0));
+				vertex(x1, y1, z1, withAlpha(color, 0));
 			}
 		}
-
 		private void vertexAt(double yawDegrees, double pitchDegrees, double radius, int color) {
 			double yaw = Math.toRadians(yawDegrees);
 			double pitch = Math.toRadians(pitchDegrees);
@@ -575,21 +606,77 @@ public final class AtmosphereSkyRenderer {
 		}
 	}
 
-	private static int domeColor(double pitch, int top, int mid, int horizon, int below) {
+	private static void ensureDome(int theme) {
+		if (theme == domeTheme && domePositions != null) {
+			return;
+		}
+		int[] colours = palette(theme);
+		int quads = SEGMENTS * RINGS;
+		float[] positions = new float[quads * 4 * 3];
+		int[] vertexColours = new int[quads * 4];
+		double lower = -14;
+		double upper = 90;
+		int index = 0;
+		for (int ring = 0; ring < RINGS; ring++) {
+			double p0 = lower + (upper - lower) * ring / RINGS;
+			double p1 = lower + (upper - lower) * (ring + 1) / RINGS;
+			for (int segment = 0; segment < SEGMENTS; segment++) {
+				double y0 = 360.0 * segment / SEGMENTS;
+				double y1 = 360.0 * (segment + 1) / SEGMENTS;
+				int c0 = domeColor(p0, y0, colours[0], colours[1], colours[2], colours[3]);
+				int c1 = domeColor(p1, y1, colours[0], colours[1], colours[2], colours[3]);
+				index = writeDomeVertex(positions, vertexColours, index, y0, p0, c0);
+				index = writeDomeVertex(positions, vertexColours, index, y1, p0, c0);
+				index = writeDomeVertex(positions, vertexColours, index, y1, p1, c1);
+				index = writeDomeVertex(positions, vertexColours, index, y0, p1, c1);
+			}
+		}
+		domePositions = positions;
+		domeColors = vertexColours;
+		domeTheme = theme;
+	}
+
+	private static int writeDomeVertex(float[] positions, int[] colours, int index,
+			double yawDegrees, double pitchDegrees, int colour) {
+		double yaw = Math.toRadians(yawDegrees);
+		double pitch = Math.toRadians(pitchDegrees);
+		double cp = Math.cos(pitch);
+		int offset = index * 3;
+		positions[offset] = (float) (Math.sin(yaw) * cp * RADIUS);
+		positions[offset + 1] = (float) (Math.sin(pitch) * RADIUS);
+		positions[offset + 2] = (float) (Math.cos(yaw) * cp * RADIUS);
+		colours[index] = colour;
+		return index + 1;
+	}
+
+	private static int domeColor(double pitch, double yaw, int top, int mid, int horizon, int below) {
+		int colour;
 		if (pitch >= 45) {
-			return mix(mid, top, (float) Math.min(1.0, (pitch - 45) / 45.0));
+			colour = mix(mid, top, (float) Math.min(1.0, (pitch - 45) / 45.0));
+		} else if (pitch >= 0) {
+			colour = mix(horizon, mid, (float) (pitch / 45.0));
+		} else if (pitch >= -14) {
+			colour = mix(below, horizon, (float) ((pitch + 14) / 14.0));
+		} else {
+			colour = below;
 		}
-		if (pitch >= 0) {
-			return mix(horizon, mid, (float) (pitch / 45.0));
-		}
-		if (pitch >= -14) {
-			return mix(below, horizon, (float) ((pitch + 14) / 14.0));
-		}
-		return below;
+		// A sub-LSB dither breaks the remaining banding without a texture.
+		float noise = (float) ((hash((int) (pitch * 37 + yaw * 11)) - 0.5) * 1.8);
+		int alpha = (colour >>> 24) & 0xFF;
+		int r = clamp8(Math.round(((colour >> 16) & 0xFF) + noise));
+		int g = clamp8(Math.round(((colour >> 8) & 0xFF) + noise));
+		int b = clamp8(Math.round((colour & 0xFF) + noise));
+		return (alpha << 24) | (r << 16) | (g << 8) | b;
+	}
+
+	private static int clamp8(int value) {
+		return Math.max(0, Math.min(255, value));
 	}
 
 	private static int mix(int a, int b, float t) {
 		float f = Math.max(0f, Math.min(1f, t));
+		// Smoothstep: a linear ramp still shows its ends as bands.
+		f = f * f * (3f - 2f * f);
 		int aa = (a >>> 24) & 0xFF;
 		int ar = (a >> 16) & 0xFF;
 		int ag = (a >> 8) & 0xFF;
