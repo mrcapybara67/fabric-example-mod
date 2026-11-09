@@ -180,14 +180,12 @@ public final class AtmosphereSkyRenderer {
 	private static void midnight(Sky sky, double now) {
 		double moonYaw = -43.0;
 		double moonPitch = 42.0;
-		sky.sun(moonYaw, moonPitch, 7.2, 0xFFF2F6FF, 0x2A9FB8FF);
+		// The phase is a real terminator across the disc, not a second dark
+		// disc offset over the bright one. Craters are soft marks inside it.
+		double phase = (now % 240.0) / 240.0;
+		sky.moon(moonYaw, moonPitch, 7.2, (float) phase, 0xFFF2F6FF, 0xFF101827, 48);
 		sky.ellipse(moonYaw + 1.0, moonPitch + 1.2, 1.2, 1.8, 0x30223758, 5);
 		sky.ellipse(moonYaw - 0.9, moonPitch - 1.4, 1.0, 1.2, 0x28223758, 4);
-		// The phase shadow crosses the moon on a slow cycle, so the disc is not
-		// always full. It is drawn after the craters and before the stars.
-		double phase = (now % 240.0) / 240.0;
-		sky.ellipse(moonYaw + (phase - 0.5) * 10.0, moonPitch, 6.4, 6.8,
-				0xF0060A18, 32);
 		for (int i = 0; i < 130; i++) {
 			double yaw = hash(i * 17 + 3) * 360;
 			double pitch = 4 + hash(i * 37 + 9) * 86;
@@ -452,27 +450,83 @@ public final class AtmosphereSkyRenderer {
 			}
 		}
 
-		/** The sun or moon: a soft glow, then a bright core. */
+		/** The sun: a crisp opaque core with a soft glow ring around it. */
 		void sun(double yaw, double pitch, double radius, int core, int glow) {
 			ellipse(yaw, pitch, radius * 2.4, radius * 2.4, withAlpha(glow, 20), 8);
 			ellipse(yaw, pitch, radius * 1.55, radius * 1.55, withAlpha(glow, 40), 8);
-			ellipse(yaw, pitch, radius, radius, core, 9);
+			disc(yaw, pitch, radius, radius, withAlpha(core, 255), 48, 0.85f);
 		}
 
-		/** Radiating wedges, drawn behind a sun. */
+		/**
+		 * A moon with a real terminator. Each vertex is shaded by its horizontal
+		 * position on the disc, so the crescent is a shaded surface rather than
+		 * a dark circle drawn over a bright one.
+		 */
+		void moon(double yaw, double pitch, double radius, float phase,
+				int lit, int shadow, int segments) {
+			ellipse(yaw, pitch, radius * 2.1, radius * 2.1, withAlpha(lit, 16), 8);
+			basis(yaw, pitch);
+			double dx = basisDx;
+			double dy = basisDy;
+			double dz = basisDz;
+			double rx = basisRx;
+			double rz = basisRz;
+			double ux = basisUx;
+			double uy = basisUy;
+			double uz = basisUz;
+			double rr = RADIUS * 0.994;
+			double sw = Math.sin(Math.toRadians(radius));
+			double sh = sw;
+			int rim = Math.max(48, Math.min(96, segments));
+			int rings = 8;
+			for (int ring = 0; ring < rings; ring++) {
+				double t0 = (double) ring / rings;
+				double t1 = (double) (ring + 1) / rings;
+				for (int i = 0; i < rim; i++) {
+					double a0 = Math.PI * 2.0 * i / rim;
+					double a1 = Math.PI * 2.0 * (i + 1) / rim;
+					double c0 = Math.cos(a0);
+					double c1 = Math.cos(a1);
+					double x0 = dx + (rx * c0 * sw + ux * Math.sin(a0) * sh) * t1;
+					double y0 = dy + (uy * Math.sin(a0) * sh) * t1;
+					double z0 = dz + (rz * c0 * sw + uz * Math.sin(a0) * sh) * t1;
+					double x1 = dx + (rx * c1 * sw + ux * Math.sin(a1) * sh) * t1;
+					double y1 = dy + (uy * Math.sin(a1) * sh) * t1;
+					double z1 = dz + (rz * c1 * sw + uz * Math.sin(a1) * sh) * t1;
+					double ix0 = dx + (rx * c0 * sw + ux * Math.sin(a0) * sh) * t0;
+					double iy0 = dy + (uy * Math.sin(a0) * sh) * t0;
+					double iz0 = dz + (rz * c0 * sw + uz * Math.sin(a0) * sh) * t0;
+					double ix1 = dx + (rx * c1 * sw + ux * Math.sin(a1) * sh) * t0;
+					double iy1 = dy + (uy * Math.sin(a1) * sh) * t0;
+					double iz1 = dz + (rz * c1 * sw + uz * Math.sin(a1) * sh) * t0;
+					float fade = (float) (t1 > 0.85 ? (1.0 - t1) / 0.15 : 1.0);
+					vertex(ix0 * rr, iy0 * rr, iz0 * rr, moonColour(c0, phase, lit, shadow, fade));
+					vertex(ix1 * rr, iy1 * rr, iz1 * rr, moonColour(c1, phase, lit, shadow, fade));
+					vertex(x1 * rr, y1 * rr, z1 * rr, moonColour(c1, phase, lit, shadow, fade));
+					vertex(x0 * rr, y0 * rr, z0 * rr, moonColour(c0, phase, lit, shadow, fade));
+				}
+			}
+		}
+
+		/** Radiating wedges, drawn behind a sun as quads. */
 		void rays(double yaw, double pitch, int count, double phase, int color) {
 			for (int i = 0; i < count; i++) {
 				double a = i * Math.PI * 2 / count + phase;
 				double spread = 2.0 + 1.3 * Math.sin(i * 1.7);
 				double inner = 4.0;
 				double outer = 19.0;
-				vertexAt(yaw + Math.cos(a) * inner, pitch + Math.sin(a) * inner,
+				double offset = spread / outer;
+				double ia = a - offset * 0.35;
+				double ib = a + offset * 0.35;
+				double oa = a - offset;
+				double ob = a + offset;
+				vertexAt(yaw + Math.cos(ia) * inner, pitch + Math.sin(ia) * inner,
 						RADIUS * 0.99, color);
-				vertexAt(yaw + Math.cos(a + spread / outer) * outer,
-						pitch + Math.sin(a + spread / outer) * outer,
+				vertexAt(yaw + Math.cos(ib) * inner, pitch + Math.sin(ib) * inner,
+						RADIUS * 0.99, color);
+				vertexAt(yaw + Math.cos(ob) * outer, pitch + Math.sin(ob) * outer,
 						RADIUS * 0.99, withAlpha(color, 0));
-				vertexAt(yaw + Math.cos(a - spread / outer) * outer,
-						pitch + Math.sin(a - spread / outer) * outer,
+				vertexAt(yaw + Math.cos(oa) * outer, pitch + Math.sin(oa) * outer,
 						RADIUS * 0.99, withAlpha(color, 0));
 			}
 		}
@@ -486,14 +540,16 @@ public final class AtmosphereSkyRenderer {
 					withAlpha(color, Math.max(0, (color >>> 24) - 14)), 5);
 		}
 
-		/** A small star with a faint cross. */
+		/** A small star: a soft glow, a tight core and a faint cross. */
 		void star(double yaw, double pitch, double size, int alpha, int color) {
 			if (alpha <= 2) {
 				return;
 			}
-			// One soft disc, with the centre carrying the twinkle and the rim
-			// fading out. A cross of flat strips read as a diamond at small sizes.
-			ellipse(yaw, pitch, size * 1.35, size * 1.35, withAlpha(color, alpha), 32);
+			ellipse(yaw, pitch, size * 1.8, size * 1.8, withAlpha(color, alpha / 3), 14);
+			ellipse(yaw, pitch, size, size, withAlpha(color, alpha), 16);
+			int cross = withAlpha(color, Math.min(255, alpha * 2 / 3));
+			band(yaw, pitch, size * 0.55, 0.035, 0x00000000, cross);
+			band(yaw, pitch, 0.035, size * 0.55, 0x00000000, cross);
 		}
 
 		/** A falling streak: a tapered line across the dome. */
@@ -545,17 +601,91 @@ public final class AtmosphereSkyRenderer {
 		 */
 		void ellipse(double yaw, double pitch, double halfWidth, double halfHeight,
 				int color, int strips) {
+			disc(yaw, pitch, halfWidth, halfHeight, color,
+					Math.max(16, Math.min(64, strips * 2)), 0f);
+		}
+
+		/** A radius fade from a solid centre to a transparent rim, in quads. */
+		void disc(double yaw, double pitch, double halfWidth, double halfHeight,
+				int color, int segments, float coreFraction) {
 			if (halfWidth <= 0 || halfHeight <= 0) {
 				return;
 			}
+			basis(yaw, pitch);
+			double dx = basisDx;
+			double dy = basisDy;
+			double dz = basisDz;
+			double rx = basisRx;
+			double rz = basisRz;
+			double ux = basisUx;
+			double uy = basisUy;
+			double uz = basisUz;
+			double sw = Math.sin(Math.toRadians(halfWidth));
+			double sh = Math.sin(Math.toRadians(halfHeight));
+			double rr = RADIUS * 0.994;
+			int rim = Math.max(16, Math.min(96, segments));
+			int rings = coreFraction > 0.5f ? 6 : 5;
+			for (int ring = 0; ring < rings; ring++) {
+				double t0 = (double) ring / rings;
+				double t1 = (double) (ring + 1) / rings;
+				int c0 = discColour(color, t0, coreFraction);
+				int c1 = discColour(color, t1, coreFraction);
+				for (int i = 0; i < rim; i++) {
+					double a0 = Math.PI * 2.0 * i / rim;
+					double a1 = Math.PI * 2.0 * (i + 1) / rim;
+					double ix0 = dx + (rx * Math.cos(a0) * sw + ux * Math.sin(a0) * sh) * t0;
+					double iy0 = dy + (uy * Math.sin(a0) * sh) * t0;
+					double iz0 = dz + (rz * Math.cos(a0) * sw + uz * Math.sin(a0) * sh) * t0;
+					double ix1 = dx + (rx * Math.cos(a1) * sw + ux * Math.sin(a1) * sh) * t0;
+					double iy1 = dy + (uy * Math.sin(a1) * sh) * t0;
+					double iz1 = dz + (rz * Math.cos(a1) * sw + uz * Math.sin(a1) * sh) * t0;
+					double ox0 = dx + (rx * Math.cos(a0) * sw + ux * Math.sin(a0) * sh) * t1;
+					double oy0 = dy + (uy * Math.sin(a0) * sh) * t1;
+					double oz0 = dz + (rz * Math.cos(a0) * sw + uz * Math.sin(a0) * sh) * t1;
+					double ox1 = dx + (rx * Math.cos(a1) * sw + ux * Math.sin(a1) * sh) * t1;
+					double oy1 = dy + (uy * Math.sin(a1) * sh) * t1;
+					double oz1 = dz + (rz * Math.cos(a1) * sw + uz * Math.sin(a1) * sh) * t1;
+					vertex(ix0 * rr, iy0 * rr, iz0 * rr, c0);
+					vertex(ix1 * rr, iy1 * rr, iz1 * rr, c0);
+					vertex(ox1 * rr, oy1 * rr, oz1 * rr, c1);
+					vertex(ox0 * rr, oy0 * rr, oz0 * rr, c1);
+				}
+			}
+		}
+
+		private int discColour(int color, double t, float coreFraction) {
+			if (t <= coreFraction) {
+				return color;
+			}
+			double fade = 1.0 - (t - coreFraction) / Math.max(1.0e-5, 1.0 - coreFraction);
+			return withAlpha(color, (int) Math.round(((color >>> 24) & 0xFF) * fade * fade));
+		}
+
+		private int moonColour(double x, float phase, int lit, int shadow, float fade) {
+			float light = AtmosphereMath.moonLight((float) x, phase);
+			int rgb = mix(shadow, lit, light);
+			return withAlpha(rgb, (int) Math.round(((lit >>> 24) & 0xFF) * fade));
+		}
+
+		private double basisDx;
+		private double basisDy;
+		private double basisDz;
+		private double basisRx;
+		private double basisRz;
+		private double basisUx;
+		private double basisUy;
+		private double basisUz;
+
+		/** Reusable tangent basis; no allocation in the per-frame sky path. */
+		private void basis(double yaw, double pitch) {
 			double yawRad = Math.toRadians(yaw);
 			double pitchRad = Math.toRadians(pitch);
 			double cp = Math.cos(pitchRad);
-			double dx = Math.sin(yawRad) * cp;
-			double dy = Math.sin(pitchRad);
-			double dz = Math.cos(yawRad) * cp;
-			double rx = dz;
-			double rz = -dx;
+			basisDx = Math.sin(yawRad) * cp;
+			basisDy = Math.sin(pitchRad);
+			basisDz = Math.cos(yawRad) * cp;
+			double rx = basisDz;
+			double rz = -basisDx;
 			double length = Math.hypot(rx, rz);
 			if (length < 1.0e-5) {
 				rx = 1.0;
@@ -564,34 +694,11 @@ public final class AtmosphereSkyRenderer {
 			}
 			rx /= length;
 			rz /= length;
-			double ux = dy * rz;
-			double uy = dz * rx - dx * rz;
-			double uz = -dy * rx;
-			double cx = dx * RADIUS * 0.994;
-			double cy = dy * RADIUS * 0.994;
-			double cz = dz * RADIUS * 0.994;
-			double alpha = (color >>> 24) / 255.0;
-			double sw = Math.sin(Math.toRadians(halfWidth));
-			double sh = Math.sin(Math.toRadians(halfHeight));
-			double rr = RADIUS * 0.994;
-			// One centre and a ring of rim vertices: a radial fan instead of
-			// stacked horizontal strips. The rim fades to zero, so the edge is
-			// soft at any GUI scale and a star is a disc, not a diamond.
-			int rim = Math.max(32, strips * 4);
-			int centreColour = withAlpha(color, (int) (alpha * 235));
-			for (int i = 0; i < rim; i++) {
-				double a0 = Math.PI * 2.0 * i / rim;
-				double a1 = Math.PI * 2.0 * (i + 1) / rim;
-				double x0 = cx + (rx * Math.cos(a0) * sw + ux * Math.sin(a0) * sh) * rr;
-				double y0 = cy + uy * Math.sin(a0) * sh * rr;
-				double z0 = cz + (rz * Math.cos(a0) * sw + uz * Math.sin(a0) * sh) * rr;
-				double x1 = cx + (rx * Math.cos(a1) * sw + ux * Math.sin(a1) * sh) * rr;
-				double y1 = cy + uy * Math.sin(a1) * sh * rr;
-				double z1 = cz + (rz * Math.cos(a1) * sw + uz * Math.sin(a1) * sh) * rr;
-				vertex(cx, cy, cz, centreColour);
-				vertex(x0, y0, z0, withAlpha(color, 0));
-				vertex(x1, y1, z1, withAlpha(color, 0));
-			}
+			basisRx = rx;
+			basisRz = rz;
+			basisUx = basisDy * rz;
+			basisUy = basisDz * rx - basisDx * rz;
+			basisUz = -basisDy * rx;
 		}
 		private void vertexAt(double yawDegrees, double pitchDegrees, double radius, int color) {
 			double yaw = Math.toRadians(yawDegrees);

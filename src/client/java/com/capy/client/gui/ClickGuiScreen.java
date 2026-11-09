@@ -46,10 +46,10 @@ public class ClickGuiScreen extends Screen {
 	/** The typefaces are created once and reused for every frame. */
 	private static final UiType UI_TYPE = new McType();
 
-	/** Seconds the window takes to open. */
-	private static final float OPEN_SECONDS = 0.26f;
-	/** Seconds the window takes to close. Shorter: leaving should feel instant. */
-	private static final float CLOSE_SECONDS = 0.17f;
+	/** Seconds the window takes to open: 180 ms, eased out. */
+	private static final float OPEN_SECONDS = 0.18f;
+	/** Seconds the window takes to close: 120 ms. */
+	private static final float CLOSE_SECONDS = 0.12f;
 
 	private static final float NANOS_PER_SECOND = 1.0e9f;
 
@@ -97,6 +97,10 @@ public class ClickGuiScreen extends Screen {
 		// it draws nothing.
 		if (shownAt == 0L) {
 			shownAt = System.nanoTime();
+			GuiSounds.open();
+			if (ClientConfig.get().reduceAnimations()) {
+				shownAt = System.nanoTime() - (long) (OPEN_SECONDS * NANOS_PER_SECOND);
+			}
 		}
 	}
 
@@ -207,6 +211,10 @@ public class ClickGuiScreen extends Screen {
 		}
 		closingFrom = progress();
 		closingAt = System.nanoTime();
+		GuiSounds.close();
+		if (ClientConfig.get().reduceAnimations()) {
+			closingAt = System.nanoTime() - (long) (CLOSE_SECONDS * NANOS_PER_SECOND);
+		}
 	}
 
 	/**

@@ -1,5 +1,8 @@
 package com.capy.client.mixin;
 
+import com.capy.client.module.ModuleManager;
+import com.capy.client.module.modules.FreecamModule;
+import com.capy.client.module.modules.FreelookModule;
 import com.capy.client.module.modules.knife.KnifePose;
 import com.capy.client.util.Guard;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -42,6 +45,27 @@ public class ItemInHandRendererMixin {
 	private void capy$knifeFrame(float partialTick, PoseStack pose, SubmitNodeCollector collector,
 			LocalPlayer player, int light, CallbackInfo ci) {
 		Guard.run("knife frame", () -> KnifePose.frame(player, partialTick));
+	}
+
+	/**
+	 * A detached first-person camera is still the entity's first person as far
+	 * as vanilla is concerned, so the hand keeps drawing at the bottom of the
+	 * screen. Skipping the hand entry keeps the body in world rendering while
+	 * the camera is Freecam or Freelook.
+	 */
+	@Inject(method = "renderHandsWithItems", at = @At("HEAD"), cancellable = true)
+	private void capy$hideDetachedHands(float partialTick, PoseStack pose,
+			SubmitNodeCollector collector, LocalPlayer player, int light, CallbackInfo ci) {
+		try {
+			FreecamModule freecam = ModuleManager.get().get(FreecamModule.class);
+			FreelookModule freelook = ModuleManager.get().get(FreelookModule.class);
+			if ((freecam != null && freecam.isActive())
+					|| (freelook != null && freelook.isActive())) {
+				ci.cancel();
+			}
+		} catch (Throwable failure) {
+			Guard.report("detached hands", failure);
+		}
 	}
 
 	@Inject(method = "renderItem", at = @At("HEAD"))

@@ -121,8 +121,7 @@ public class CapyClient implements ClientModInitializer {
 		// Restore the persisted configuration: the GUI theme and the settings
 		// of every module that keeps state.
 		ClientConfig config = ClientConfig.load(FabricLoader.getInstance().getConfigDir());
-		UiTheme.setPalette(config.theme());
-		GuiColors.load(config.guiAccent());
+		GuiColors.load(GuiColors.DEFAULT_WINDOW);
 
 		ClientKeybinds.register();
 
@@ -274,6 +273,7 @@ public class CapyClient implements ClientModInitializer {
 		// disconnect: the players of the old world are gone.
 		StaffListModule staffList = modules.get(StaffListModule.class);
 		ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register((before, after) -> {
+			Guard.run("atmosphere world reset", AtmosphereWorldRenderer::reset);
 			Guard.run("anti-admin reset", antiAdmin::reset);
 			Guard.run("staff-list reset", () -> {
 				if (staffList != null) {
@@ -282,6 +282,7 @@ public class CapyClient implements ClientModInitializer {
 			});
 		});
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+			Guard.run("atmosphere world disconnect", AtmosphereWorldRenderer::reset);
 			Guard.run("anti-admin disconnect", () -> {
 				antiAdmin.reset();
 				if (staffList != null) {

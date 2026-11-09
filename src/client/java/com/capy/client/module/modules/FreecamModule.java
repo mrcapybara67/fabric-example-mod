@@ -141,6 +141,11 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		return isEnabled() && primed;
 	}
 
+	/** True when the body's input is held empty while the camera is out. */
+	public boolean freezeBodyEnabled() {
+		return freezeBody.value();
+	}
+
 	@Override
 	protected void onToggle(boolean state) {
 		primed = false;
@@ -173,14 +178,8 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		if (mc.level != lastLevel) {
 			prime(player);
 		}
-		// The body is the camera's anchor, not its co-pilot. Clearing the
-		// movement input stops the body walking away underneath a detached
-		// camera; the zeroed velocity stops gravity from dropping it while the
-		// keys are being spent on the camera.
-		if (freezeBody.value() && !player.isPassenger() && player.input != null) {
-			player.input.keyPresses = net.minecraft.world.entity.player.Input.EMPTY;
-			player.setDeltaMovement(0.0, 0.0, 0.0);
-		}
+		// Body input is frozen in FreecamInputMixin at the end of ClientInput.tick,
+		// where vanilla has already read the keys and before movement runs.
 		// Advance once from the tick as well as once from the frame. The flight
 		// integration is time based, so calling it twice does not double the
 		// speed; it only guarantees the camera still moves on a renderer whose

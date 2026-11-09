@@ -44,16 +44,20 @@ public final class ClientConfig {
 	private static final String FILE_NAME = "capy-client.json";
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
-	private static final String KEY_THEME = "theme";
-	private static final String KEY_GUI_ACCENT = "gui_accent";
 	private static final String KEY_MODULES = "modules";
+	private static final String KEY_GUI_SOUNDS = "gui_sounds";
+	private static final String KEY_GUI_VOLUME = "gui_volume";
+	private static final String KEY_REDUCE_ANIMATIONS = "reduce_animations";
+	private static final String KEY_BLUR = "blur";
 	/** Per module: whether it was switched on when the game was last closed. */
 	private static final String KEY_ENABLED = "enabled";
 
 	private static ClientConfig instance = new ClientConfig();
 
-	private String theme = "sakura";
-	private int guiAccent = 0xFFFF74A8;
+	private boolean guiSounds = true;
+	private int guiVolume = 100;
+	private boolean reduceAnimations = false;
+	private boolean blur = false;
 	private final Map<String, JsonObject> moduleData = new LinkedHashMap<>();
 
 	private ClientConfig() {
@@ -63,23 +67,38 @@ public final class ClientConfig {
 		return instance;
 	}
 
-	public String theme() {
-		return theme;
+	public boolean guiSounds() {
+		return guiSounds;
 	}
 
-	public void setTheme(String theme) {
-		if (theme != null && !theme.isEmpty()) {
-			this.theme = theme;
-		}
+	public void setGuiSounds(boolean value) {
+		this.guiSounds = value;
 	}
 
-	/** Accent of the window, packed ARGB. */
-	public int guiAccent() {
-		return guiAccent;
+	/** GUI sound volume, 0 to 100. */
+	public int guiVolume() {
+		return guiVolume;
 	}
 
-	public void setGuiAccent(int argb) {
-		this.guiAccent = argb;
+	public void setGuiVolume(int value) {
+		this.guiVolume = Math.max(0, Math.min(100, value));
+	}
+
+	public boolean reduceAnimations() {
+		return reduceAnimations;
+	}
+
+	public void setReduceAnimations(boolean value) {
+		this.reduceAnimations = value;
+	}
+
+	/** Vanilla menu blur is optional and off by default. */
+	public boolean blur() {
+		return blur;
+	}
+
+	public void setBlur(boolean value) {
+		this.blur = value;
 	}
 
 	/** The stored JSON of a module (never null). */
@@ -115,10 +134,12 @@ public final class ClientConfig {
 	}
 
 	private void readFrom(JsonObject root) {
+		// Old theme and gUI accent keys are discarded before anything reads.
 		ConfigMigration.removeLegacyGuiKeys(root);
-		String storedTheme = ConfigValues.stringValue(root, KEY_THEME, theme);
-		theme = storedTheme;
-		guiAccent = ConfigValues.intValue(root, KEY_GUI_ACCENT, guiAccent);
+		guiSounds = ConfigValues.boolValue(root, KEY_GUI_SOUNDS, true);
+		guiVolume = Math.max(0, Math.min(100, ConfigValues.intValue(root, KEY_GUI_VOLUME, 100)));
+		reduceAnimations = ConfigValues.boolValue(root, KEY_REDUCE_ANIMATIONS, false);
+		blur = ConfigValues.boolValue(root, KEY_BLUR, false);
 
 		JsonElement modulesElement = root.get(KEY_MODULES);
 		if (modulesElement != null && modulesElement.isJsonObject()) {
@@ -153,8 +174,10 @@ public final class ClientConfig {
 	/** Collects the current module state into the JSON tree. */
 	private JsonObject toJson() {
 		JsonObject root = new JsonObject();
-		root.addProperty(KEY_THEME, theme);
-		root.addProperty(KEY_GUI_ACCENT, guiAccent);
+		root.addProperty(KEY_GUI_SOUNDS, guiSounds);
+		root.addProperty(KEY_GUI_VOLUME, guiVolume);
+		root.addProperty(KEY_REDUCE_ANIMATIONS, reduceAnimations);
+		root.addProperty(KEY_BLUR, blur);
 
 		JsonObject modules = new JsonObject();
 		for (Module module : ModuleManager.get().modules()) {

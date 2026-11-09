@@ -10,7 +10,7 @@ package com.capy.client.gui;
  */
 public class UiToggle {
 	private final Anim hover = new Anim(0f, 12f);
-	private final Anim on = new Anim(0f, 16f);
+	private final Anim on = new Anim(0f, 10f);
 	private boolean hovered;
 
 	public void update(boolean isOn, boolean isHovered, float delta) {
@@ -41,7 +41,10 @@ public class UiToggle {
 		// The knob: a pale cherry disc with a soft shadow. It stays smaller
 		// than the track so the coloured groove remains visible.
 		int d = h - 8;
-		int kx = x + 4 + Math.round(t * (w - d - 8));
+		// A short overshoot on the knob: the track crossfades underneath while
+		// the knob arrives with a little spring, not a linear slide.
+		float knobT = Math.max(0f, Math.min(1f, Motion.easeOutBack(t, 1.35f)));
+		int kx = x + 4 + Math.round(knobT * (w - d - 8));
 		int ky = y + 4;
 		Ui.roundRect(c, kx + 1, ky + 2, d, d, d / 2, 0x4D000000);
 		Ui.surface(c, kx, ky, d, d, d / 2,

@@ -13,12 +13,14 @@ public final class ConfigMigration {
 	private ConfigMigration() {
 	}
 
-	/** Removes the two Radial-era root keys, if present. */
+	/** Removes retired GUI keys, including the old theme and window accent. */
 	public static void removeLegacyGuiKeys(JsonObject root) {
 		if (root == null) {
 			return;
 		}
 		root.remove("gui_style");
 		root.remove("radial_accent");
+		root.remove("theme");
+		root.remove("gui_accent");
 	}
 }

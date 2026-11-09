@@ -46,6 +46,51 @@ public final class AtmosphereMath {
 		return wrapped < 0f ? wrapped + 1f : wrapped;
 	}
 
+	/**
+	 * Moon terminator shading for one point on the disc.
+	 *
+	 * <p>{@code dx} is the horizontal position across the visible disc,
+	 * normalised to -1 on the left rim and +1 on the right. The phase runs
+	 * from 0 (full) through 0.5 (new) and back towards 1 (full). The
+	 * terminator is the phase's cosine, with a narrow smooth edge so a
+	 * crescent has a soft, curved boundary rather than a hard line.</p>
+	 *
+	 * @return 1 for the lit side, 0 for the shadowed side
+	 */
+	public static float moonLight(float dx, float phase) {
+		float x = Math.max(-1f, Math.min(1f, dx));
+		float terminator = (float) Math.cos(wrap(phase) * Math.PI * 2.0);
+		float edge = 0.10f;
+		float t = smoothstep(terminator - edge, terminator + edge, x);
+		return 1f - t;
+	}
+
+	/**
+	 * A neon grid line's world coordinate. Lines sit on exact multiples of the
+	 * spacing; the camera position is subtracted only when the vertex is
+	 * emitted, never stored into the grid itself.
+	 */
+	public static double neonLineCoordinate(int index, double spacing) {
+		return index * spacing;
+	}
+
+	/**
+	 * The refresh rule for the neon height cache: ten game ticks, or any chunk
+	 * change, whichever happens first.
+	 */
+	public static boolean heightCacheNeedsRefresh(long nowTick, long lastRefreshTick,
+			boolean chunkChanged) {
+		return chunkChanged || lastRefreshTick < 0L || nowTick - lastRefreshTick >= 10L;
+	}
+
+	private static float smoothstep(float edge0, float edge1, float value) {
+		if (edge1 <= edge0) {
+			return value < edge0 ? 0f : 1f;
+		}
+		float t = Math.max(0f, Math.min(1f, (value - edge0) / (edge1 - edge0)));
+		return t * t * (3f - 2f * t);
+	}
+
 	private static float clamp01(float value) {
 		return Math.max(0f, Math.min(1f, value));
 	}

@@ -17,8 +17,10 @@ class ConfigMigrationTest {
 				""").getAsJsonObject();
 
 		assertDoesNotThrow(() -> ConfigMigration.removeLegacyGuiKeys(root));
+		assertFalse(root.has("theme"));
+		assertFalse(root.has("gui_accent"));
 		assertFalse(root.has("gui_style"));
 		assertFalse(root.has("radial_accent"));
-		assertEquals(-16740568, root.get("gui_accent").getAsInt());
+		assertEquals(0, root.get("modules").getAsJsonObject().size());
 	}
 }

@@ -1,331 +1,58 @@
 package com.capy.client.gui;
 
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
 /**
- * Design tokens for the Capy Client GUI.
+ * The single Glass design language.
  *
- * The visual language is "Sakura": a dark, warm plum canvas where pink is the
- * <em>accent</em>, never the background. Every surface is a slightly different
- * value of the same plum hue, so the interface reads as one continuous sheet
- * of tinted paper rather than a pile of coloured boxes.
- *
- * Three palettes ship with the client and the user can switch between them
- * from the GUI (the choice is persisted by {@code ClientConfig}):
- *
- *   <ul>
- *     <li>{@code sakura} — the default: warm plum surfaces, soft pink accent.</li>
- *     <li>{@code sakura_deep} — darker canvas and a hotter pink, for players
- *         who want maximum contrast against a bright world.</li>
- *     <li>{@code sakura_blush} — softer, lighter and pinker, a calmer sheet.</li>
- *     <li>{@code liquid_glass} — polished gray glass with white light on its
- *         edges: the second family, picked with the same picker.</li>
- *   </ul>
- *
- * Colours are plain ARGB ints so they can be blended and alpha-scaled without
- * allocating. The palette fields are mutable because the active palette is
- * swapped at runtime when the user changes the theme; they are only ever
- * written from the client thread during configuration load.
+ * <p>There is no palette switching anymore. Every colour below is fixed: a
+ * dark, cool-grey translucent body with a light-blue accent. Panels keep a
+ * vertical value change so a large surface does not read as one flat block.</p>
  */
 public final class UiTheme {
 	private UiTheme() {
 	}
 
-	// ------------------------------------------------------------------ palette
-
-	/** One complete colour set. */
-	public record Palette(
-			String id,
-			String label,
-			int scrim,
-			int shellTop,
-			int shellBottom,
-			int panelTop,
-			int panelBottom,
-			int panelAlt,
-			int cardTop,
-			int cardBottom,
-			int cardHoverTop,
-			int cardHoverBottom,
-			int wellTop,
-			int wellBottom,
-			int trackTop,
-			int trackBottom,
-			int border,
-			int accent,
-			int accentSoft,
-			int accentDeep,
-			int accentGlow,
-			int blossom,
-			int paleCherry,
-			int text,
-			int textSecondary,
-			int textMuted,
-			int placeholder,
-			int onAccent
-	) {
-	}
-
-	private static final Palette SAKURA = new Palette(
-			"sakura",
-			"Sakura",
-			0x8C0A0710,
-			0xFF221B28,
-			0xFF171220,
-			0xFF2B2231,
-			0xFF231B29,
-			0xFF332838,
-			0xFF322839,
-			0xFF281F2E,
-			0xFF3D3147,
-			0xFF302639,
-			0xFF1D1624,
-			0xFF17111C,
-			0xFF241D2B,
-			0xFF1D1624,
-			0xFF463342,
-			0xFFFF8FB8,
-			0xFFFFC4D8,
-			0xFFD9578B,
-			0x33FF8FB8,
-			0xFFFFD1E1,
-			0xFFFFEAF1,
-			0xFFFFF4F8,
-			0xFFBBAAB7,
-			// Muted text is used for every description in the interface. It was
-			// two contrast steps below the body text, which made the interface
-			// look softer than it read; this keeps it quiet but legible.
-			0xFF9C8C99,
-			0xFF8C7C8A,
-			0xFF3A0F22
-	);
-
-	private static final Palette SAKURA_DEEP = new Palette(
-			"sakura_deep",
-			"Deep Sakura",
-			0x9A06050C,
-			0xFF1A1522,
-			0xFF0D0A11,
-			0xFF221B2B,
-			0xFF1A1523,
-			0xFF2A2133,
-			0xFF282031,
-			0xFF1E1928,
-			0xFF362A44,
-			0xFF2A2135,
-			0xFF171120,
-			0xFF120E18,
-			0xFF20182A,
-			0xFF181222,
-			0xFF3B2B3A,
-			0xFFFF74A8,
-			0xFFFFB3D2,
-			0xFFC23A70,
-			0x33FF74A8,
-			0xFFFFC2DC,
-			0xFFFFE2EE,
-			0xFFFFF4F8,
-			0xFFBBAAB7,
-			0xFF99899A,
-			0xFF8A7A8B,
-			0xFF36091F
-	);
-
-	private static final Palette SAKURA_BLUSH = new Palette(
-			"sakura_blush",
-			"Blush Sakura",
-			0x8A140A14,
-			0xFF2B2230,
-			0xFF1F1824,
-			0xFF342939,
-			0xFF2A2130,
-			0xFF3C3044,
-			0xFF3A2D40,
-			0xFF302636,
-			0xFF473A52,
-			0xFF392C3F,
-			0xFF241C2C,
-			0xFF1D1626,
-			0xFF2A2130,
-			0xFF221A29,
-			0xFF513C4D,
-			0xFFFFA0C4,
-			0xFFFFD3E4,
-			0xFFE0699A,
-			0x33FFA0C4,
-			0xFFFFD8E8,
-			0xFFFFEFF5,
-			0xFFFFF6FA,
-			0xFFC7B4C2,
-			0xFFA795A2,
-			0xFF978593,
-			0xFF401327
-	);
-
-	/**
-	 * Liquid Glass: a translucent, neutral pane with white light on its edges.
-	 *
-	 * <p>This is the family the glass theme is named for, and it is deliberately
-	 * not Sakura in a different hue. Every surface is <em>partly transparent</em>,
-	 * so the world behind the window shows through the way it does through a
-	 * sheet of ground glass: the shell is the most opaque plate (it has to keep
-	 * the content readable), the wells and cards are thinner, and the ridged
-	 * tracks are thinner still. The alpha values are the material - an opaque
-	 * grey palette with a white rim is a metal panel, not glass.
-	 *
-	 * <p>There is no pink left anywhere in it. The accent is reflected light
-	 * (white), the secondary is a colder white, the text is neutral, and the
-	 * only tinted thing is the world showing through. The cherry
-	 * blossom decoration is skipped for this family in the window itself: petals
-	 * belong to the paper theme, and white petals over a pane of glass read as
-	 * dust on the screen.
-	 */
-	private static final Palette LIQUID_GLASS = new Palette(
-			"liquid_glass",
-			"Liquid Glass",
-			// A neutral scrim: glass should dim the world without tinting it.
-			0x8C0A0C0F,
-			// The shell keeps the most body of any plate: it carries the content.
-			0xE63A3F46,
-			0xD923272C,
-			// Panels are a pane held over the world, not a wall in front of it.
-			0xD93F444C,
-			0xCC2A2F35,
-			// The brightest plate: the polished face of the glass.
-			0xB34A5058,
-			0xCC41464E,
-			0xD92E333A,
-			0xE6525963,
-			0xD93A4048,
-			// Wells and tracks are the thinnest plates: they sit inside a card
-			// and have to let its colour through.
-			0xB324282E,
-			0xB31A1E23,
-			0xCC555C66,
-			0xB33B4149,
-			// A bright rim: on a translucent sheet this line is what defines the
-			// shape, and it is the same white the specular band uses.
-			0xE6C7D0DA,
-			// White light for enabled state, soft white for hover, grey for the
-			// deep end - the accent is a reflection, not a colour.
-			0xFFF2F6FA,
-			0xFFFFFFFF,
-			0xFFAEB8C4,
-			0x4DFFFFFF,
-			0xFFF7FAFD,
-			0xFFFFFFFF,
-			0xFFFFFFFF,
-			0xFFDCE3EB,
-			0xFFAFB8C3,
-			0xFF86909C,
-			0xFF1A1E23
-	);
-
-	private static final Map<String, Palette> PALETTES = new LinkedHashMap<>();
-
-	static {
-		for (Palette palette : List.of(SAKURA, SAKURA_DEEP, SAKURA_BLUSH, LIQUID_GLASS)) {
-			PALETTES.put(palette.id(), palette);
-		}
-	}
-
-	private static Palette active = SAKURA;
-	/**
-	 * User chosen accent (0 when the palette's own accent is used).
-	 *
-	 * The accent is the one colour that defines the client's identity, so it is
-	 * the one colour the user is allowed to override without changing the rest
-	 * of the sheet. Every derived accent token is recomputed from it, which
-	 * keeps hover states, glows and text-on-accent in step instead of leaving a
-	 * single recoloured button in a pink interface.
-	 */
-	private static int customAccent;
-
-	/** The palette currently in use. */
-	public static Palette palette() {
-		return active;
-	}
-
-	/**
-	 * True when the active palette is the glass family.
-	 *
-	 * <p>The two families are not the same material with a different hue: Sakura
-	 * is matte paper and Liquid Glass is a lit pane. The one place that matters
-	 * to the drawing code is the specular band, which a paper surface must not
-	 * have - it reads as wet - so surfaces ask this rather than comparing ids
-	 * themselves in five different places.</p>
-	 */
-	public static boolean isGlass() {
-		return "liquid_glass".equals(active.id());
-	}
-
-	/** All selectable palettes, in display order. */
-	public static List<Palette> palettes() {
-		return List.copyOf(PALETTES.values());
-	}
-
 	// ---- Backdrop ---------------------------------------------------------
-	/** Dims and tints the world behind the GUI so the panels have a base. */
-	public static int SCRIM = active.scrim();
+	public static final int SCRIM = 0x8C0A0C0F;
 
 	// ---- Surfaces (top -> bottom gradient pairs) -------------------------
-	/** Main window shell. */
-	public static int SHELL_TOP = active.shellTop();
-	public static int SHELL_BOTTOM = active.shellBottom();
-	/** Sidebar, search field, header band. */
-	public static int PANEL_TOP = active.panelTop();
-	public static int PANEL_BOTTOM = active.panelBottom();
-	/** Secondary surface: chips, dropdown list, badges. */
-	public static int PANEL_ALT = active.panelAlt();
-	/** Module cards. */
-	public static int CARD_TOP = active.cardTop();
-	public static int CARD_BOTTOM = active.cardBottom();
-	/** Module cards under the pointer. */
-	public static int CARD_HOVER_TOP = active.cardHoverTop();
-	public static int CARD_HOVER_BOTTOM = active.cardHoverBottom();
-	/** Inset well holding a module's settings. */
-	public static int WELL_TOP = active.wellTop();
-	public static int WELL_BOTTOM = active.wellBottom();
-	/** Slider / toggle tracks. */
-	public static int TRACK_TOP = active.trackTop();
-	public static int TRACK_BOTTOM = active.trackBottom();
+	public static final int SHELL_TOP = 0xB33A4048;
+	public static final int SHELL_BOTTOM = 0xB3282D33;
+	public static final int PANEL_TOP = 0xB33F444C;
+	public static final int PANEL_BOTTOM = 0xA82A2F35;
+	public static final int PANEL_ALT = 0xB34A5058;
+	public static final int CARD_TOP = 0xB341464E;
+	public static final int CARD_BOTTOM = 0xA82E333A;
+	public static final int CARD_HOVER_TOP = 0xC0525963;
+	public static final int CARD_HOVER_BOTTOM = 0xB33A4048;
+	public static final int WELL_TOP = 0xA824282E;
+	public static final int WELL_BOTTOM = 0xA81A1E23;
+	public static final int TRACK_TOP = 0xB3555C66;
+	public static final int TRACK_BOTTOM = 0xA83B4149;
 
 	// ---- Lines ------------------------------------------------------------
-	/** Hairline border colour. */
-	public static int BORDER = active.border();
-	/** Subtle top highlight on a surface. */
-	public static int HIGHLIGHT = 0x1FFFFFFF;
-	/** Bottom inner shade, gives the surface depth. */
-	public static int SHADE = 0x3A000000;
+	public static final int BORDER = 0xB3C7D0DA;
+	public static final int HIGHLIGHT = 0x47FFFFFF;
+	public static final int SHADE = 0x3A000000;
 
-	// ---- Accent -----------------------------------------------------------
-	/** Sakura pink — used for active, enabled and focus. */
-	public static int ACCENT = active.accent();
-	/** Cherry blossom — hover states and secondary highlights. */
-	public static int ACCENT_2 = active.accentSoft();
-	/** Deep rose — pressed states and warning text. */
-	public static int ACCENT_DEEP = active.accentDeep();
-	/** Very low alpha accent for washes and bloom. */
-	public static int ACCENT_GLOW = active.accentGlow();
-	/** Blossom highlight - the lightest pink, used on fine details. */
-	public static int BLOSSOM = active.blossom();
-	/** Pale cherry - a near white pink for the brightest highlights. */
-	public static int PALE_CHERRY = active.paleCherry();
+	// ---- Accent (cool light blue; no pink anywhere) ----------------------
+	public static final int ACCENT = 0xFF8FD3FF;
+	public static final int ACCENT_2 = 0xFFBFE7FF;
+	public static final int ACCENT_DEEP = 0xFF4A9BD1;
+	public static final int ACCENT_GLOW = 0x338FD3FF;
+	public static final int BLOSSOM = 0xFFD9F2FF;
+	public static final int PALE_CHERRY = 0xFFEAF8FF;
 
 	// ---- Text -------------------------------------------------------------
-	public static int TEXT = active.text();
-	public static int TEXT_2 = active.textSecondary();
-	public static int TEXT_3 = active.textMuted();
-	public static int PLACEHOLDER = active.placeholder();
-	/** Text drawn on top of the accent colour. */
-	public static int ON_ACCENT = active.onAccent();
+	public static final int TEXT = 0xFFF7FAFD;
+	public static final int TEXT_2 = 0xFFDCE3EB;
+	public static final int TEXT_3 = 0xFFAFB8C3;
+	public static final int PLACEHOLDER = 0xFF86909C;
+	public static final int ON_ACCENT = 0xFF101820;
 
 	// ---- Shadows ----------------------------------------------------------
-	public static int SHADOW_WIDE = 0x4D000000;
-	public static int SHADOW_MID = 0x38000000;
-	public static int SHADOW_TIGHT = 0x44000000;
+	public static final int SHADOW_WIDE = 0x4D000000;
+	public static final int SHADOW_MID = 0x38000000;
+	public static final int SHADOW_TIGHT = 0x44000000;
 
 	// ---- Spacing scale (2 / 4 / 6 / 8 / 12 / 16 / 20 / 24) ---------------
 	public static final int SP_1 = 2;
@@ -338,16 +65,16 @@ public final class UiTheme {
 	public static final int SP_8 = 24;
 
 	// ---- Radii ------------------------------------------------------------
-	public static final int RADIUS = 10;      // controls
-	public static final int RADIUS_LG = 14;   // inner panels
-	public static final int RADIUS_XL = 20;   // window shell
-	public static final int RADIUS_PILL = 99; // clamped by the drawing layer
+	public static final int RADIUS = 10;
+	public static final int RADIUS_LG = 14;
+	public static final int RADIUS_XL = 20;
+	public static final int RADIUS_PILL = 99;
 
 	// ---- Layout -----------------------------------------------------------
 	public static final int HEADER_H = 58;
 	public static final int SIDEBAR_W = 190;
 	public static final int CARD_H = 54;
-	public static final int CARD_GAP = 10;
+	public static final int CARD_GAP = 8;
 	public static final int TOGGLE_W = 40;
 	public static final int TOGGLE_H = 22;
 	public static final int SEARCH_W = 190;
@@ -355,83 +82,8 @@ public final class UiTheme {
 	public static final int CLOSE_BTN = 26;
 	public static final int CATEGORY_H = 34;
 
-	/** Copies the palette values into the mutable token fields above. */
-	private static void refresh() {
-		SCRIM = active.scrim();
-		SHELL_TOP = active.shellTop();
-		SHELL_BOTTOM = active.shellBottom();
-		PANEL_TOP = active.panelTop();
-		PANEL_BOTTOM = active.panelBottom();
-		PANEL_ALT = active.panelAlt();
-		CARD_TOP = active.cardTop();
-		CARD_BOTTOM = active.cardBottom();
-		CARD_HOVER_TOP = active.cardHoverTop();
-		CARD_HOVER_BOTTOM = active.cardHoverBottom();
-		WELL_TOP = active.wellTop();
-		WELL_BOTTOM = active.wellBottom();
-		TRACK_TOP = active.trackTop();
-		TRACK_BOTTOM = active.trackBottom();
-		BORDER = active.border();
-		if (customAccent == 0) {
-			ACCENT = active.accent();
-			ACCENT_2 = active.accentSoft();
-			ACCENT_DEEP = active.accentDeep();
-			ACCENT_GLOW = active.accentGlow();
-			BLOSSOM = active.blossom();
-			PALE_CHERRY = active.paleCherry();
-			ON_ACCENT = active.onAccent();
-		} else {
-			// One source colour, five derived tokens. Keeping the derivation
-			// here (rather than in the picker) means every widget sees a
-			// consistent set no matter where the accent was changed from.
-			ACCENT = customAccent;
-			ACCENT_2 = Ui.lighten(customAccent, 0.34f);
-			ACCENT_DEEP = Ui.darken(customAccent, 0.24f);
-			ACCENT_GLOW = Ui.withAlpha(customAccent, 0x33);
-			BLOSSOM = Ui.lighten(customAccent, 0.54f);
-			PALE_CHERRY = Ui.lighten(customAccent, 0.80f);
-			ON_ACCENT = Ui.luminance(customAccent) > 0.62f ? 0xFF3A0F22 : 0xFFFFFFFF;
-		}
-		TEXT = active.text();
-		TEXT_2 = active.textSecondary();
-		TEXT_3 = active.textMuted();
-		PLACEHOLDER = active.placeholder();
-	}
-
-	static {
-		refresh();
-	}
-
-	/**
-	 * Applies the palette with the given id and refreshes every token.
-	 * Unknown ids keep the current palette, so a corrupted config can never
-	 * leave the GUI unstyled.
-	 */
-	public static void setPalette(String paletteId) {
-		Palette palette = PALETTES.get(paletteId);
-		if (palette != null) {
-			active = palette;
-			refresh();
-		}
-	}
-
-	/**
-	 * Overrides the palette accent. A fully transparent value is treated as
-	 * "use the palette", so a broken config cannot make the whole interface
-	 * invisible.
-	 */
-	public static void setAccent(int argb) {
-		customAccent = (argb >>> 24) == 0 ? 0 : argb;
-		refresh();
-	}
-
-	/** True when the user has overridden the palette accent. */
-	public static boolean hasCustomAccent() {
-		return customAccent != 0;
-	}
-
-	/** The current custom accent, or 0 when the palette is in use. */
-	public static int customAccent() {
-		return customAccent;
+	/** Kept for source compatibility with the single Glass surface. */
+	public static boolean isGlass() {
+		return true;
 	}
 }

@@ -70,11 +70,14 @@ public final class GuiFrame {
 	private final Map<Category, List<ModuleCard>> cards = new EnumMap<>(Category.class);
 	private final UiScrollbar scrollbar = new UiScrollbar();
 	private final UiSearch search = new UiSearch();
-	private final UiDropdown themePicker = new UiDropdown();
-	private final UiPetals petals = new UiPetals();
 	private final UiTooltip tooltip = new UiTooltip();
-	/** Shared colour studio. */
-	private final UiAccentPanel accentPanel = new UiAccentPanel();
+	private final UiToggle soundsToggle = new UiToggle();
+	private final UiToggle animationsToggle = new UiToggle();
+	private final UiToggle blurToggle = new UiToggle();
+	private boolean guiSettingsOpen;
+	private boolean volumeDragging;
+	private int settingsPanelX;
+	private int settingsPanelY;
 
 	private final Anim windowHeight = new Anim(0f, 12f);
 	private final float[] select = new float[CATEGORIES.length];
@@ -84,14 +87,8 @@ public final class GuiFrame {
 	private int lastSelected = -1;
 	private float switchProgress = 1f;
 	private String cachedQuery;
-	private int themeIndex;
-	/** True while the header's theme chip is under the pointer. */
-	private boolean themeHovered;
-	private int themeBtnX;
-	private int themeBtnY;
-	private boolean accentHovered;
-	private int accentBtnX;
-	private int accentBtnY;
+	private int settingsBtnX;
+	private int settingsBtnY;
 	/** True while the header's HUD editor chip is under the pointer. */
 	private boolean hudHovered;
 	private int hudBtnX;
@@ -109,8 +106,6 @@ public final class GuiFrame {
 	public GuiFrame() {
 		selected = lastCategory;
 		rebuild();
-		themeIndex = indexOfTheme(ClientConfig.get().theme());
-		themePicker.setOptions(themeLabels(), themeIndex);
 	}
 
 	/** Wires the header's HUD editor chip to the screen that owns Minecraft. */
@@ -141,13 +136,7 @@ public final class GuiFrame {
 	public void resize(int width, int height) {
 		this.width = width;
 		this.height = height;
-		petals.reset(width, height);
 		windowHeight.snap(targetWindowHeight());
-	}
-
-	/** Toggles the colour studio (used by the offline preview). */
-	void toggleAccentPanel() {
-		accentPanel.toggle();
 	}
 
 	/** Selects a category by index (used by the offline preview). */
@@ -339,7 +328,6 @@ public final class GuiFrame {
 		if (fade <= 0.02f) {
 			return;
 		}
-		GuiColors.sync();
 		// The backdrop: a plum veil that is darkest at the edges, so the
 		// window reads as the lit object in the middle.
 		c.fill(0, 0, width, height, Ui.lerpColor(0x00000000, UiTheme.SCRIM, fade));
@@ -365,23 +353,13 @@ public final class GuiFrame {
 			windowHeight.snap(targetWindowHeight());
 		}
 
-		// Petals belong to the paper theme. On the glass theme they would be white
-		// specks drifting over a translucent pane - dust on the screen - so the
-		// whole layer is skipped rather than recoloured.
-		if (!UiTheme.isGlass()) {
-			petals.update(delta, width, height);
-			petals.render(c, UiPetals.Layer.BACK, fade);
-		}
-
-		// The window pops into place: it grows out of 88% with a small
-		// overshoot, drops in from above and fades up. The overshoot is what
-		// makes the opening feel springy instead of merely fading.
-		float ease = Motion.easeOutQuint(fade);
-		float pop = Motion.easeOutBack(fade, 2.2f);
-		int ww = Math.round(windowWidth() * (0.88f + 0.12f * pop));
-		int wh = Math.round(windowHeight() * (0.88f + 0.12f * pop));
+		// Open from 94% over 8 px of upward travel, using ease-out-cubic. The
+		// screen owns the 180 ms clock, so this reads the same at any frame rate.
+		float ease = Motion.easeOutCubic(fade);
+		int ww = Math.round(windowWidth() * (0.94f + 0.06f * ease));
+		int wh = Math.round(windowHeight() * (0.94f + 0.06f * ease));
 		int wx = (width - ww) / 2;
-		int wy = (height - wh) / 2 + Math.round((1f - ease) * 18f);
+		int wy = (height - wh) / 2 + Math.round((1f - ease) * 8f);
 		int r = UiTheme.RADIUS_XL;
 
 		Ui.shadow(c, wx, wy, ww, wh, r);
@@ -427,33 +405,10 @@ public final class GuiFrame {
 		renderSidebar(c, type, wx, wy, ww, wh, mouseX, mouseY, delta, (1f - ease) * 22f);
 		renderContent(c, type, mouseX, mouseY, delta, (1f - contentEase) * 26f);
 
-		// A few petals pass in front of the window for depth. They are very
-		// faint so they never compete with the content, and they are absent from
-		// the glass theme for the same reason as the back layer.
-		if (!UiTheme.isGlass()) {
-			petals.render(c, UiPetals.Layer.FRONT, fade * 0.7f);
-		}
-
-		if (footerFitted()) {
-			themePicker.renderOverlay(c, type.regular(), mouseX, mouseY, delta);
-		}
 		tooltip.render(c, type.regular());
-		// The colour studio floats over the window, so it is always drawn last.
-		accentPanel.render(c, type, width, height, mouseX, mouseY, delta);
-	}
-
-	/** Moves to the next interface palette and remembers it. */
-	private void cycleTheme() {
-		List<UiTheme.Palette> palettes = UiTheme.palettes();
-		if (palettes.isEmpty()) {
-			return;
+		if (guiSettingsOpen) {
+			renderGuiSettings(c, type, mouseX, mouseY, delta);
 		}
-		int next = (indexOfTheme(UiTheme.palette().id()) + 1) % palettes.size();
-		// Written through the same dropdown the footer shows, so the two
-		// controls cannot disagree about which theme is selected.
-		themePicker.setOptions(themeLabels(), next);
-		applyThemeIfChanged();
-		clearAllTextFocus();
 	}
 
 	/** Slow drift of the specular band, so the window never looks static. */
@@ -496,7 +451,7 @@ public final class GuiFrame {
 		int pillH = 18;
 		int pillX = titleX + titleW + UiTheme.SP_4;
 		int pillY = wy + (UiTheme.HEADER_H - pillH) / 2;
-		if (!compactHeader() && pillX + pillW < accentX(wx, ww) - UiTheme.SP_4) {
+		if (!compactHeader() && pillX + pillW < settingsX(wx, ww) - UiTheme.SP_4) {
 			boolean hot = mouseX >= pillX && mouseX < pillX + pillW
 					&& mouseY >= pillY && mouseY < pillY + pillH;
 			Ui.surface(c, pillX, pillY, pillW, pillH, pillH / 2,
@@ -510,11 +465,9 @@ public final class GuiFrame {
 
 		int fieldX = searchX(wx, ww);
 
-		// The editor, palette and theme switches sit between the page title and
-		// the search field.
+		// The editor and settings chips sit between the page title and the search field.
 		renderHudButton(c, type, wx, wy, ww, mouseX, mouseY);
-		renderThemeButton(c, type, wx, wy, ww, mouseX, mouseY);
-		renderAccentButton(c, type, wx, wy, ww, mouseX, mouseY);
+		renderSettingsButton(c, type, wx, wy, ww, mouseX, mouseY);
 
 		// Search.
 		search.bind(fieldX, wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2, searchWidth(), UiTheme.SEARCH_H);
@@ -555,29 +508,20 @@ public final class GuiFrame {
 
 	private int searchX(int wx, int ww) {
 		return wx + ww - UiTheme.SP_6 - UiTheme.CLOSE_BTN - UiTheme.SP_3 - searchWidth();
+	}	/** The fixed-width settings chip. */
+	private int settingsX(int wx, int ww) {
+		return searchX(wx, ww) - UiTheme.SP_3 - settingsButtonWidth();
 	}
 
-	/**
-	 * The palette chip is one spacing step left of the search field.
-	 */
-	private int accentX(int wx, int ww) {
-		return searchX(wx, ww) - UiTheme.SP_3 - UiTheme.SEARCH_H;
+	private int settingsButtonWidth() {
+		return compactHeader() ? UiTheme.SEARCH_H : 92;
 	}
 
-	/** The theme chip sits left of the palette swatch. */
-	private int themeX(int wx, int ww) {
-		return accentX(wx, ww) - UiTheme.SP_3 - themeButtonWidth();
-	}
-
-	/** Theme chip width: the swatch alone when the header is compact. */
-	private int themeButtonWidth() {
-		return compactHeader() ? UiTheme.SEARCH_H : 108;
-	}
-
-	/** The HUD editor chip sits one spacing step left of the theme chip. */
+	/** The HUD editor chip sits one spacing step left of the settings chip. */
 	private int hudX(int wx, int ww) {
-		return themeX(wx, ww) - UiTheme.SP_3 - hudButtonWidth();
+		return settingsX(wx, ww) - UiTheme.SP_3 - hudButtonWidth();
 	}
+
 
 	/**
 	 * The editor chip's width: its name while there is room, the layout icon
@@ -628,67 +572,67 @@ public final class GuiFrame {
 		font.draw(c, "Edit HUD", x + 22, Ui.centerTextY(y, h, font), ink);
 	}
 
-	/**
-	 * The button that switches the interface palette.
-	 *
-	 * <p>It sits in the header, beside the palette chip, because that is where a
-	 * theme is looked for. The footer picker is still there on a tall window,
-	 * but the footer is dropped on a short one - which is exactly how a player
-	 * ended up with no way to change the theme at all. A header chip is always
-	 * on screen, always labelled with the palette in use, and clicking it moves
-	 * to the next one.
-	 */
-	private void renderThemeButton(UiCanvas c, UiType type, int wx, int wy, int ww,
+	/** The GUI settings chip: one fixed Glass look, no theme switching. */
+	private void renderSettingsButton(UiCanvas c, UiType type, int wx, int wy, int ww,
 			int mouseX, int mouseY) {
-		int x = themeX(wx, ww);
+		int x = settingsX(wx, ww);
 		int y = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
-		int w = themeButtonWidth();
+		int w = settingsButtonWidth();
 		int h = UiTheme.SEARCH_H;
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
-		themeHovered = hovered;
-		themeBtnX = x;
-		themeBtnY = y;
-
+		settingsBtnX = x;
+		settingsBtnY = y;
 		Ui.surface(c, x, y, w, h, UiTheme.RADIUS,
-				hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
-				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
-		Ui.outline(c, x, y, w, h, UiTheme.RADIUS, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
-		// A dot in the palette's own accent, so the chip previews the theme it
-		// names rather than only spelling it.
-		Ui.circle(c, x + 10, y + h / 2, 3, UiTheme.palette().accent());
-
-		if (compactHeader()) {
-			return;
+				hovered || guiSettingsOpen ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
+				hovered || guiSettingsOpen ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, x, y, w, h, UiTheme.RADIUS,
+				hovered || guiSettingsOpen ? UiTheme.ACCENT : UiTheme.BORDER);
+		int ink = hovered || guiSettingsOpen ? UiTheme.TEXT : UiTheme.TEXT_2;
+		UiIcons.draw(c, UiIcons.Icon.CREST, x + 9, y + (h - 8) / 2, 8, ink);
+		if (!compactHeader()) {
+			type.regular().draw(c, "GUI", x + 22, Ui.centerTextY(y, h, type.regular()), ink);
 		}
-		UiText font = type.regular();
-		Ui.drawEllipsized(c, font, UiTheme.palette().label(), x + 17,
-				Ui.centerTextY(y, h, font), w - 17 - 16,
-				hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
-		UiIcons.draw(c, UiIcons.Icon.CHEVRON, x + w - 14, y + h / 2 - 3, 8,
-				hovered ? UiTheme.TEXT : UiTheme.TEXT_3);
 	}
 
-	private void renderAccentButton(UiCanvas c, UiType type, int wx, int wy, int ww,
-			int mouseX, int mouseY) {
-		int x = accentX(wx, ww);
-		int y = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
-		int s = UiTheme.SEARCH_H;
-		boolean hovered = mouseX >= x && mouseX < x + s && mouseY >= y && mouseY < y + s;
-		// The tooltip is owned by the sidebar pass, which runs after this one.
-		// Showing it here would be undone by that pass's hide() in the same
-		// frame.
-		accentHovered = hovered;
-		accentBtnX = x;
-		accentBtnY = y;
-		Ui.surface(c, x, y, s, s, UiTheme.RADIUS,
-				hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
-				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
-		Ui.outline(c, x, y, s, s, UiTheme.RADIUS, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
-		int r = 7;
-		Ui.circle(c, x + s / 2, y + s / 2, r, GuiColors.windowArgb());
-		Ui.ring(c, x + s / 2, y + s / 2, r, 1, 0x88FFFFFF);
-	}
+	private void renderGuiSettings(UiCanvas c, UiType type, int mouseX, int mouseY, float delta) {
+		ClientConfig config = ClientConfig.get();
+		int w = Math.min(300, width - 24);
+		int h = 190;
+		settingsPanelX = Math.min(width - w - 8, settingsBtnX + settingsButtonWidth() - w);
+		settingsPanelY = settingsBtnY + UiTheme.SEARCH_H + UiTheme.SP_2;
+		int x = settingsPanelX;
+		int y = settingsPanelY;
+		Ui.shadow(c, x, y, w, h, UiTheme.RADIUS_LG);
+		Ui.surface(c, x, y, w, h, UiTheme.RADIUS_LG, UiTheme.PANEL_TOP, UiTheme.PANEL_BOTTOM);
+		Ui.outline(c, x, y, w, h, UiTheme.RADIUS_LG, UiTheme.BORDER);
+		Ui.sheen(c, x, y, w, h, UiTheme.RADIUS_LG, sheenPhase());
+		type.medium().draw(c, "GUI SETTINGS", x + UiTheme.SP_5,
+				y + UiTheme.SP_4, UiTheme.TEXT);
 
+		int rowX = x + UiTheme.SP_5;
+		int rowW = w - UiTheme.SP_5 * 2;
+		int toggleX = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W;
+		int[] rows = {y + 34, y + 66, y + 98, y + 134};
+		String[] labels = {"Sounds", "Reduce animations", "Blur (optional)", "Volume"};
+		for (int i = 0; i < 3; i++) {
+			boolean hovered = mouseX >= rowX && mouseX < rowX + rowW
+					&& mouseY >= rows[i] && mouseY < rows[i] + UiTheme.TOGGLE_H + 4;
+			UiToggle toggle = i == 0 ? soundsToggle : i == 1 ? animationsToggle : blurToggle;
+			boolean value = i == 0 ? config.guiSounds() : i == 1 ? config.reduceAnimations() : config.blur();
+			toggle.update(value, hovered, delta);
+			toggle.render(c, toggleX, rows[i], UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
+			type.regular().draw(c, labels[i], rowX, Ui.centerTextY(rows[i], UiTheme.TOGGLE_H, type.regular()),
+					hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+		}
+		type.regular().draw(c, "Volume", rowX, rows[3], UiTheme.TEXT_2);
+		int trackX = rowX + 72;
+		int trackY = rows[3] + type.regular().lineHeight() / 2;
+		int trackW = x + w - UiTheme.SP_5 - trackX;
+		Ui.surface(c, trackX, trackY - 4, trackW, 8, 4, UiTheme.TRACK_TOP, UiTheme.TRACK_BOTTOM);
+		int fill = Math.round(trackW * config.guiVolume() / 100f);
+		Ui.surface(c, trackX, trackY - 4, fill, 8, 4, UiTheme.ACCENT, UiTheme.ACCENT_DEEP);
+		Ui.circle(c, trackX + fill, trackY, 6, UiTheme.PALE_CHERRY);
+	}
 	private void renderSidebar(UiCanvas c, UiType type, int wx, int wy, int ww, int wh, int mouseX, int mouseY,
 			float delta, float slide) {
 		int px = sidebarX() - Math.round(slide);
@@ -765,15 +709,8 @@ public final class GuiFrame {
 			return;
 		}
 
-		// Theme picker at the foot of the sidebar. The caption is placed from
-		// the bottom of its own band, so it can never sit on top of the button.
-		int pickerY = py + ph - UiTheme.SP_8 - THEME_PICKER_H;
-		int captionY = pickerY - UiTheme.SP_2 - type.regular().lineHeight();
-		Ui.drawEllipsized(c, type.regular(), "THEME", sx0 + UiTheme.SP_5, captionY,
-				sw - UiTheme.SP_6, UiTheme.TEXT_3);
-		themePicker.bind(sx0 + UiTheme.SP_2, pickerY, sw - UiTheme.SP_4, THEME_PICKER_H, true);
-		themePicker.render(c, type.regular(), mouseX, mouseY, delta);
-
+		// Theme switching and the old colour studio are gone; the footer keeps
+		// only the keybind hint.
 		// Keybind hint. Escape always works, so it is named next to the
 		// player's own binding instead of being discoverable only by trying it.
 		String hint = ClientKeybinds.openClickGui() == null
@@ -790,11 +727,6 @@ public final class GuiFrame {
 		} else if (hudHovered) {
 			tooltip.show("HUD Editor - drag chips and boxes to place them.",
 					hudBtnX, hudBtnY + UiTheme.SEARCH_H);
-		} else if (accentHovered) {
-			tooltip.show("GUI colours", accentBtnX - 4, accentBtnY + UiTheme.SEARCH_H + 4);
-		} else if (themeHovered) {
-			tooltip.show("Theme: " + UiTheme.palette().label() + " — click to switch.",
-					themeBtnX, themeBtnY + UiTheme.SEARCH_H);
 		} else {
 			tooltip.hide();
 		}
@@ -935,17 +867,6 @@ public final class GuiFrame {
 		double my = event.y();
 		int button = event.button();
 
-		// The colour studio is the topmost layer, even outside the window.
-		// Dismissing it with a click is a finished edit, so it is written out
-		// here just like a released slider.
-		boolean accentWasOpen = accentPanel.isOpen();
-		if (accentPanel.mouseClicked(mx, my)) {
-			if (accentWasOpen && !accentPanel.isOpen()) {
-				ClientConfig.saveNow();
-			}
-			return true;
-		}
-
 		// A mouse button bound to the GUI closes it.
 		if (ClientKeybinds.openClickGui() != null && ClientKeybinds.openClickGui().matchesMouse(event)) {
 			closeRequested = true;
@@ -960,14 +881,6 @@ public final class GuiFrame {
 			return true; // swallow clicks outside the window
 		}
 
-		// The theme list floats above everything, so it gets the first refusal.
-		// It is skipped while the footer is hidden on a very short window, so a
-		// stale hit region can never change a theme from off screen.
-		if (footerFitted() && themePicker.isExpanded() && themePicker.mouseClicked(mx, my)) {
-			applyThemeIfChanged();
-			return true;
-		}
-
 		// The header chips are checked before the search field because they sit
 		// on the same row.
 		if (button == 0) {
@@ -980,16 +893,19 @@ public final class GuiFrame {
 				openHudEditor.run();
 				return true;
 			}
-			int ax = accentX(windowX(), windowWidth());
-			if (mx >= ax && mx < ax + UiTheme.SEARCH_H && my >= sy && my < sy + UiTheme.SEARCH_H) {
-				accentPanel.toggle();
+			int gx = settingsX(windowX(), windowWidth());
+			if (mx >= gx && mx < gx + settingsButtonWidth() && my >= sy && my < sy + UiTheme.SEARCH_H) {
+				guiSettingsOpen = !guiSettingsOpen;
+				GuiSounds.click();
 				return true;
 			}
-			int tx = themeX(windowX(), windowWidth());
-			if (mx >= tx && mx < tx + themeButtonWidth() && my >= sy && my < sy + UiTheme.SEARCH_H) {
-				cycleTheme();
+		}
+
+		if (guiSettingsOpen) {
+			if (guiSettingsClicked(mx, my)) {
 				return true;
 			}
+			guiSettingsOpen = false;
 		}
 
 		// Search.
@@ -1032,13 +948,6 @@ public final class GuiFrame {
 			}
 		}
 
-		// Theme picker (only when the footer is on screen).
-		if (footerFitted() && themePicker.contains(mx, my)) {
-			themePicker.mouseClicked(mx, my);
-			applyThemeIfChanged();
-			return true;
-		}
-
 		// Scrollbar rail.
 		int railX = contentX() + contentW() + UiTheme.SP_3;
 		if (mx >= railX - 3 && mx < railX + 8 && my >= contentTop() && my < contentBottom()) {
@@ -1065,7 +974,8 @@ public final class GuiFrame {
 	}
 
 	public boolean mouseDragged(double mx, double my) {
-		if (accentPanel.mouseDragged(mx, my)) {
+		if (volumeDragging) {
+			setGuiVolume(mx);
 			return true;
 		}
 		if (scrollbar.isDragging()) {
@@ -1081,8 +991,8 @@ public final class GuiFrame {
 	}
 
 	public boolean mouseReleased(double mx, double my) {
-		boolean accent = accentPanel.mouseReleased();
-		if (accent) {
+		if (volumeDragging) {
+			volumeDragging = false;
 			ClientConfig.saveNow();
 		}
 		scrollbar.released();
@@ -1094,10 +1004,48 @@ public final class GuiFrame {
 		return true;
 	}
 
-	public boolean mouseScrolled(double mx, double my, double amount) {
-		if (accentPanel.isOpen()) {
+	private boolean guiSettingsClicked(double mx, double my) {
+		int w = Math.min(300, width - 24);
+		int x = settingsPanelX;
+		int y = settingsPanelY;
+		if (mx < x || mx >= x + w || my < y || my >= y + 190) {
+			return false;
+		}
+		ClientConfig config = ClientConfig.get();
+		int[] rows = {y + 34, y + 66, y + 98};
+		for (int i = 0; i < 3; i++) {
+			if (my >= rows[i] && my < rows[i] + UiTheme.TOGGLE_H + 4) {
+				if (i == 0) {
+					config.setGuiSounds(!config.guiSounds());
+				} else if (i == 1) {
+					config.setReduceAnimations(!config.reduceAnimations());
+				} else {
+					config.setBlur(!config.blur());
+				}
+				ClientConfig.saveNow();
+				GuiSounds.click();
+				return true;
+			}
+		}
+		int trackX = x + UiTheme.SP_5 + 72;
+		int trackW = w - UiTheme.SP_5 * 2 - 72;
+		if (my >= y + 126 && my < y + 158 && mx >= trackX - 8 && mx < trackX + trackW + 8) {
+			volumeDragging = true;
+			setGuiVolume(mx);
 			return true;
 		}
+		return true;
+	}
+
+	private void setGuiVolume(double mx) {
+		int w = Math.min(300, width - 24);
+		int trackX = settingsPanelX + UiTheme.SP_5 + 72;
+		int trackW = w - UiTheme.SP_5 * 2 - 72;
+		int value = Math.round((float) ((mx - trackX) / Math.max(1, trackW)) * 100f);
+		ClientConfig.get().setGuiVolume(value);
+	}
+
+	public boolean mouseScrolled(double mx, double my, double amount) {
 		// Only the workspace scrolls. A wheel turn over the sidebar used to move
 		// the module list, which made the category panel feel like it was
 		// dragging the content with it.
@@ -1133,13 +1081,6 @@ public final class GuiFrame {
 		// blurred the field and the window stayed open over a frozen world -
 		// which reads as "the GUI will not close".
 		if (event.isEscape()) {
-			// First Escape closes the colour studio, the second closes the GUI.
-			// Closing the whole interface while a picker is open used to feel
-			// like the picker's own dismiss was being ignored.
-			if (accentPanel.closeIfOpen()) {
-				ClientConfig.saveNow();
-				return true;
-			}
 			clearAllTextFocus();
 			closeRequested = true;
 			return true;
@@ -1191,49 +1132,4 @@ public final class GuiFrame {
 		clearCardTextFocus();
 	}
 
-	// ----------------------------------------------------------------- theme
-
-	private List<String> themeLabels() {
-		List<String> labels = new ArrayList<>();
-		for (UiTheme.Palette palette : UiTheme.palettes()) {
-			labels.add(palette.label());
-		}
-		return labels;
 	}
-
-	private int indexOfTheme(String themeId) {
-		List<UiTheme.Palette> palettes = UiTheme.palettes();
-		for (int i = 0; i < palettes.size(); i++) {
-			if (palettes.get(i).id().equals(themeId)) {
-				return i;
-			}
-		}
-		return 0;
-	}
-
-	private void applyThemeIfChanged() {
-		int index = themePicker.selected();
-		if (index == themeIndex) {
-			return;
-		}
-		themeIndex = index;
-		List<UiTheme.Palette> palettes = UiTheme.palettes();
-		if (index < 0 || index >= palettes.size()) {
-			return;
-		}
-		// A theme carries its own accent. Follow it while the accent is still
-		// the previous palette's (that is, not customised): otherwise choosing
-		// Deep Sakura would repaint the surfaces but leave the old pink accent,
-		// which makes the theme picker look broken. A custom accent is kept.
-		UiTheme.Palette next = palettes.get(index);
-		boolean followAccent = GuiColors.windowArgb() == UiTheme.palette().accent();
-		UiTheme.setPalette(next.id());
-		if (followAccent) {
-			GuiColors.window().set(next.accent());
-			GuiColors.sync();
-		}
-		ClientConfig config = ClientConfig.get();
-		config.setTheme(next.id());
-		ClientConfig.saveNow();
-	}
-}

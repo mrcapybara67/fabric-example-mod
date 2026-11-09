@@ -94,8 +94,8 @@ public class UiSlider {
 					0x73FFFFFF, 0x2EFFFFFF);
 		}
 
-		// Knob: a small pale disc riding the track.
-		int d = trackH + 6;
+		// The thumb grows while dragging, so the active control is obvious.
+		int d = Math.round((trackH + 6) * (dragging ? 1.25f : 1f));
 		int kx = knobX - d / 2;
 		int ky = trackY - d / 2;
 		Ui.roundRect(c, kx + 1, ky + 2, d, d, UiTheme.RADIUS_PILL, 0x59000000);
@@ -108,7 +108,11 @@ public class UiSlider {
 		if (model == null) {
 			return;
 		}
+		double before = model.fraction();
 		double f = (mx - trackX0) / (double) Math.max(1, trackX1 - trackX0);
 		model.setFraction(f);
+		if (Math.abs(model.fraction() - before) > 1.0e-6) {
+			GuiSounds.slider(model.fraction());
+		}
 	}
 }

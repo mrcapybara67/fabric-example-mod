@@ -1,5 +1,8 @@
 package com.capy.client.gui;
 
+import com.capy.client.config.ClientConfig;
+
+
 /**
  * A single animated value.
  *
@@ -26,6 +29,10 @@ public class Anim {
 	 */
 	public void to(float target, float delta) {
 		this.target = target;
+		if (ClientConfig.get().reduceAnimations()) {
+			this.value = target;
+			return;
+		}
 		this.value = Motion.approach(this.value, target, speed, delta / 20f);
 	}
 

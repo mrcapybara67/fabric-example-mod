@@ -76,6 +76,9 @@ public class ModuleCard {
 	private final Anim expand = new Anim(0f, 16f);
 	/** Eased press, so a click darkens the card instead of snapping it. */
 	private final Anim press = new Anim(0f, 26f);
+	private final Anim ripple = new Anim(0f, 10f);
+	private int rippleX;
+	private int rippleY;
 	private boolean expanded;
 	private boolean pressed;
 
@@ -353,6 +356,14 @@ public class ModuleCard {
 			bottom = Ui.lerpColor(bottom, 0xFF140E19, 0.42f * pressT);
 		}
 		Ui.surface(c, x, y, w, h, r, top, bottom);
+		// A single expanding wash from the click point. It is cheap: one disc,
+		// no extra buffer, and it fades out in about 260 ms.
+		ripple.to(0f, delta);
+		if (ripple.value() > 0.01f) {
+			int radius = Math.round((1f - ripple.value()) * 34f);
+			Ui.circle(c, rippleX, rippleY, radius,
+					Ui.withAlpha(UiTheme.ACCENT, Math.round(46 * ripple.value())));
+		}
 		if (onv > 0.02f) {
 			Ui.surface(c, x, y, w, h, r,
 					Ui.withAlpha(UiTheme.ACCENT, Math.round(22 * onv)),
@@ -694,12 +705,17 @@ public class ModuleCard {
 		// Chevron strip expands/collapses settings.
 		if (overChevron(mx, my)) {
 			expanded = !expanded;
+			GuiSounds.click();
 			return true;
 		}
 
 		// Everything else (switch, name, body) toggles the module.
 		pressed = true;
+		rippleX = (int) Math.round(mx);
+		rippleY = (int) Math.round(my);
+		ripple.snap(1f);
 		module.toggle();
+		GuiSounds.toggle(module.isEnabled());
 		return true;
 	}
 
@@ -736,6 +752,7 @@ public class ModuleCard {
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
 				entry.getKey().toggle();
+				GuiSounds.toggle(entry.getKey().value());
 				return true;
 			}
 		}

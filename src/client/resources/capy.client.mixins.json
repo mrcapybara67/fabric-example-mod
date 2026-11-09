@@ -18,6 +18,8 @@
 		"MouseHandlerAccessor",
 		"GameRendererAccessor",
 		"FreecamCameraMixin",
+		"FreecamInputMixin",
+		"FreecamActionsMixin",
 		"FreecamExtractMixin",
 		"FreecamMouseMixin",
 		"FreelookCameraMixin",
