@@ -29,6 +29,7 @@ public final class ConfigValues {
 		try {
 			return element.getAsInt();
 		} catch (RuntimeException e) {
+			com.capy.client.util.Guard.report("config value", e);
 			return fallback;
 		}
 	}
@@ -45,6 +46,7 @@ public final class ConfigValues {
 		try {
 			return element.getAsLong();
 		} catch (RuntimeException e) {
+			com.capy.client.util.Guard.report("config value", e);
 			return fallback;
 		}
 	}
@@ -61,6 +63,7 @@ public final class ConfigValues {
 		try {
 			return element.getAsBoolean();
 		} catch (RuntimeException e) {
+			com.capy.client.util.Guard.report("config value", e);
 			return fallback;
 		}
 	}
@@ -77,6 +80,7 @@ public final class ConfigValues {
 		try {
 			return element.getAsString();
 		} catch (RuntimeException e) {
+			com.capy.client.util.Guard.report("config value", e);
 			return fallback;
 		}
 	}

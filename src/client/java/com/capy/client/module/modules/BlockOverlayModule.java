@@ -154,6 +154,7 @@ public class BlockOverlayModule extends Module implements Configurable {
 			}
 			batch().endBatch();
 		} catch (RuntimeException e) {
+			com.capy.client.util.Guard.report("block overlay", e);
 			// A failed draw must cost the overlay, not the frame.
 			dropBatch();
 		}
@@ -346,16 +347,16 @@ public class BlockOverlayModule extends Module implements Configurable {
 		if (batch != null) {
 			try {
 				batch.endBatch();
-			} catch (RuntimeException ignored) {
-				// Already unusable; it is dropped either way.
+			} catch (RuntimeException failure) {
+				com.capy.client.util.Guard.report("block overlay flush", failure);
 			}
 			batch = null;
 		}
 		if (buffer != null) {
 			try {
 				buffer.close();
-			} catch (RuntimeException ignored) {
-				// Nothing left to release.
+			} catch (RuntimeException failure) {
+				com.capy.client.util.Guard.report("block overlay release", failure);
 			}
 			buffer = null;
 		}

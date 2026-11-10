@@ -3,7 +3,7 @@ package com.capy.client.mixin;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.modules.FreecamModule;
 import com.capy.client.module.modules.FreelookModule;
-import com.capy.client.module.modules.knife.KnifePose;
+import com.capy.client.module.modules.ItemInspectPose;
 import com.capy.client.util.Guard;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.player.LocalPlayer;
@@ -18,7 +18,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Feeds the knife pose system from the first person hand renderer.
+ * Feeds the Item Inspect pose system from the first person hand renderer.
  *
  * Two hooks, and they are deliberately separate:
  *
@@ -44,7 +44,7 @@ public class ItemInHandRendererMixin {
 	@Inject(method = "renderHandsWithItems", at = @At("HEAD"))
 	private void capy$knifeFrame(float partialTick, PoseStack pose, SubmitNodeCollector collector,
 			LocalPlayer player, int light, CallbackInfo ci) {
-		Guard.run("knife frame", () -> KnifePose.frame(player, partialTick));
+		Guard.run("inspect frame", () -> ItemInspectPose.frame(player, partialTick));
 	}
 
 	/**
@@ -72,7 +72,7 @@ public class ItemInHandRendererMixin {
 	private void capy$knifeBegin(LivingEntity entity, ItemStack stack,
 			ItemDisplayContext context, PoseStack pose, SubmitNodeCollector collector,
 			int light, CallbackInfo ci) {
-		Guard.run("knife pose begin", () -> KnifePose.begin(pose, entity, stack, context));
+		Guard.run("inspect pose begin", () -> ItemInspectPose.begin(pose, entity, stack, context));
 	}
 
 	@Inject(method = "renderItem", at = @At("RETURN"))
@@ -82,6 +82,6 @@ public class ItemInHandRendererMixin {
 		// Never guarded through a lambda that skips the pop: a pose left pushed
 		// would corrupt every later draw of the frame. Guard.run still returns
 		// normally on failure, so the pop always happens.
-		Guard.run("knife pose end", () -> KnifePose.end(pose));
+		Guard.run("inspect pose end", () -> ItemInspectPose.end(pose));
 	}
 }

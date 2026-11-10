@@ -12,7 +12,7 @@ class ConfigMigrationTest {
 	@Test
 	void oldGuiStyleAndRadialAccentAreIgnored() {
 		JsonObject root = JsonParser.parseString("""
-				{"theme":"sakura","gui_style":"radial","radial_accent":-1,
+				{"theme":"sakura","gui_style":"radial","radial_accent":-1,"custom_knife":{"style":"karambit"},
 				 "gui_accent":-16740568,"modules":{}}
 				""").getAsJsonObject();
 
@@ -21,6 +21,7 @@ class ConfigMigrationTest {
 		assertFalse(root.has("gui_accent"));
 		assertFalse(root.has("gui_style"));
 		assertFalse(root.has("radial_accent"));
+		assertFalse(root.has("custom_knife"));
 		assertEquals(0, root.get("modules").getAsJsonObject().size());
 	}
 }

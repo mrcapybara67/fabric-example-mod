@@ -330,7 +330,8 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 			float gain = (float) (volume.real() / 100.0);
 			mc.getSoundManager().play(SimpleSoundInstance.forUI(
 					SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, Math.max(0.05f, gain)));
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			com.capy.client.util.Guard.report("anticheat sound", failure);
 			// A missing sound must not cost the banner.
 		}
 	}
@@ -417,7 +418,8 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 			if (server != null && server.ip != null && !server.ip.isBlank()) {
 				return server.ip.trim().toLowerCase(Locale.ROOT);
 			}
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			com.capy.client.util.Guard.report("anticheat host", failure);
 			// Single player, a replaced server list, an old build: no host.
 		}
 		return "";
@@ -430,7 +432,8 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 			if (server != null && server.name != null) {
 				return server.name.trim();
 			}
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			com.capy.client.util.Guard.report("anticheat name", failure);
 			// Nothing to read.
 		}
 		return "";

@@ -55,6 +55,16 @@ public final class AtmosphereState {
 	/** The selected theme index, read by the world-space theme renderer. */
 	public static volatile int theme = 0;
 
+	/** Particle pool controls, written by the module and read by the pool. */
+	public static volatile int particleQuality = 1200;
+	public static volatile float particleDensity = 1f;
+	public static volatile float particleSize = 1f;
+	public static volatile float particleSpeed = 1f;
+	public static volatile float particleWind = 1f;
+
+	/** Debug overlays for the custom sky and the freecam diagnostics. */
+	public static volatile boolean skyDebug = false;
+
 	/** Ambient warmth: lifts the floor of the lightmap. */
 	public static volatile float fbAmb = 0f;
 	public static volatile float fbAmbTarget = 0f;

@@ -74,6 +74,23 @@ public final class AtmosphereMath {
 		return index * spacing;
 	}
 
+	/** The only conversion a world-space vertex needs before it is submitted. */
+	public static double cameraRelative(double world, double camera) {
+		return world - camera;
+	}
+
+	/** Linear position interpolation used by the detached camera. */
+	public static double interpolate(double previous, double current, float partialTick) {
+		float t = clamp01(partialTick);
+		return previous + (current - previous) * t;
+	}
+
+	/** One step of the freecam inertia model. */
+	public static double inertia(double velocity, double target, double inertia) {
+		double kept = Math.max(0.0, Math.min(0.9, inertia));
+		return velocity * kept + target * (1.0 - kept);
+	}
+
 	/**
 	 * The refresh rule for the neon height cache: ten game ticks, or any chunk
 	 * change, whichever happens first.

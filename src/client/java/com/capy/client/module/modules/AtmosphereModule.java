@@ -73,6 +73,12 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 	private final BooleanSetting themeDefaults = setting(new BooleanSetting("theme_defaults", true));
 	private final ActionSetting resetDefaults = setting(new ActionSetting("reset_defaults", this::resetThemeDefaults));
 	private final BooleanSetting debugTiming = setting(new BooleanSetting("debug_timing", false));
+	private final SliderSetting particleDensity = setting(new SliderSetting("particle_density", 100, 0, 200));
+	private final SliderSetting particleSize = setting(new SliderSetting("particle_size", 100, 25, 250));
+	private final SliderSetting particleSpeed = setting(new SliderSetting("particle_speed", 100, 25, 250));
+	private final SliderSetting particleWind = setting(new SliderSetting("particle_wind", 100, 0, 250));
+	private final SliderSetting particleQuality = setting(new SliderSetting("particle_quality", 1200, 100, 4000));
+	private final BooleanSetting skyDebug = setting(new BooleanSetting("sky_debug", false));
 
 	/** The theme whose preset has already been loaded into the settings. */
 	private int appliedTheme = -1;
@@ -103,6 +109,7 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		AtmosphereState.timeDay = -1f;
 		AtmosphereState.rainOvr = -1f;
 		AtmosphereState.thunderOvr = -1f;
+		AtmosphereState.skyDebug = false;
 	}
 
 	@Override
@@ -115,6 +122,12 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		AtmosphereState.active = true;
 
 		AtmosphereState.debugTiming = debugTiming.value();
+		AtmosphereState.skyDebug = skyDebug.value();
+		AtmosphereState.particleDensity = (float) particleDensity.real() / 100f;
+		AtmosphereState.particleSize = (float) particleSize.real() / 100f;
+		AtmosphereState.particleSpeed = (float) particleSpeed.real() / 100f;
+		AtmosphereState.particleWind = (float) particleWind.real() / 100f;
+		AtmosphereState.particleQuality = particleQuality.get();
 		int selected = theme.index();
 		AtmosphereState.theme = selected;
 		if (selected != appliedTheme) {
@@ -162,11 +175,8 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		applyWeather(weatherMode.index());
 
 		// Frame-time easing happens in the render hooks; the tick only writes
-		// targets, so a 20 Hz tick cannot make a 144 Hz sky step.
-		// Theme weather is vanilla particles spawned on the client: no packet,
-		// no server simulation, and it goes through the game's own particle
-		// renderer, so a replaced renderer still draws it.
-		AtmosphereEffects.tick(mc, selected);
+		// targets, so a 20 Hz tick cannot make a 144 Hz sky step. The world
+		// particle pool owns all theme air; there is no per-tick spawner here.
 	}
 
 	/** The fog hue each theme owns. */
@@ -318,6 +328,12 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		hazeTint.set(ConfigValues.intValue(json, "haze_tint", 0xFFFFD980));
 		themeDefaults.set(ConfigValues.boolValue(json, "theme_defaults", true));
 		debugTiming.set(ConfigValues.boolValue(json, "debug_timing", false));
+		particleDensity.set(ConfigValues.intValue(json, "particle_density", 100));
+		particleSize.set(ConfigValues.intValue(json, "particle_size", 100));
+		particleSpeed.set(ConfigValues.intValue(json, "particle_speed", 100));
+		particleWind.set(ConfigValues.intValue(json, "particle_wind", 100));
+		particleQuality.set(ConfigValues.intValue(json, "particle_quality", 1200));
+		skyDebug.set(ConfigValues.boolValue(json, "sky_debug", false));
 		// A stored preset is already loaded; do not load it again over a colour
 		// the player may have picked afterwards.
 		appliedTheme = theme.index();
@@ -337,6 +353,12 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		json.addProperty("haze_tint", hazeTint.argb());
 		json.addProperty("theme_defaults", themeDefaults.value());
 		json.addProperty("debug_timing", debugTiming.value());
+		json.addProperty("particle_density", particleDensity.get());
+		json.addProperty("particle_size", particleSize.get());
+		json.addProperty("particle_speed", particleSpeed.get());
+		json.addProperty("particle_wind", particleWind.get());
+		json.addProperty("particle_quality", particleQuality.get());
+		json.addProperty("sky_debug", skyDebug.value());
 	}
 
 	/** Reads a choice by id, leaving the default when the stored id is gone. */

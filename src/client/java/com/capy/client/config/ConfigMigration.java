@@ -22,5 +22,8 @@ public final class ConfigMigration {
 		root.remove("radial_accent");
 		root.remove("theme");
 		root.remove("gui_accent");
+		// The old knife module had no replacement: its keys are retired, but
+		// leaving them in an old file must not fail the load.
+		root.remove("custom_knife");
 	}
 }

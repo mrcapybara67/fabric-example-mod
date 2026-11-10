@@ -396,7 +396,8 @@ public final class AdminDetector {
 				if (player instanceof AbstractClientPlayer client) {
 					return client.getSkin();
 				}
-			} catch (RuntimeException | LinkageError ignored) {
+			} catch (RuntimeException | LinkageError failure) {
+				Guard.report("admin skin entity", failure);
 				// Fall through to the player list below.
 			}
 		}
@@ -406,7 +407,8 @@ public final class AdminDetector {
 				if (info != null) {
 					return info.getSkin();
 				}
-			} catch (RuntimeException | LinkageError ignored) {
+			} catch (RuntimeException | LinkageError failure) {
+				Guard.report("admin skin tab", failure);
 				// No entry left to read.
 			}
 		}

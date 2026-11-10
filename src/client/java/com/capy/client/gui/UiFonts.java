@@ -198,7 +198,8 @@ public final class UiFonts {
 			for (GlyphProvider provider : loaded) {
 				try {
 					provider.close();
-				} catch (Throwable ignored) {
+				} catch (Throwable failure) {
+					com.capy.client.util.Guard.report("font close", failure);
 					// Nothing else to do, the face is gone either way.
 				}
 			}

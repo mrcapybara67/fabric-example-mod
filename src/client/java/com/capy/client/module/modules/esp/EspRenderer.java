@@ -190,6 +190,7 @@ public final class EspRenderer {
 			// the fills first also means the outlines are always drawn over them.
 			drawLayers(batches, pose, guiScale, anyFill, anyLine);
 		} catch (RuntimeException e) {
+			com.capy.client.util.Guard.report("esp render", e);
 			// The see-through pipelines are copies of vanilla's, built at
 			// runtime. If one of them cannot be compiled on this machine, the
 			// overlay must still be drawn - with occlusion - instead of taking
@@ -309,16 +310,16 @@ public final class EspRenderer {
 		if (batch != null) {
 			try {
 				batch.endBatch();
-			} catch (RuntimeException | LinkageError ignored) {
-				// The source is already unusable; it is dropped either way.
+			} catch (RuntimeException | LinkageError failure) {
+				com.capy.client.util.Guard.report("esp flush", failure);
 			}
 			batch = null;
 		}
 		if (buffer != null) {
 			try {
 				buffer.close();
-			} catch (RuntimeException | LinkageError ignored) {
-				// Nothing left to release.
+			} catch (RuntimeException | LinkageError failure) {
+				com.capy.client.util.Guard.report("esp release", failure);
 			}
 			buffer = null;
 		}

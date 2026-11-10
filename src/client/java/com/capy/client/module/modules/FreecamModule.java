@@ -2,17 +2,25 @@ package com.capy.client.module.modules;
 
 import com.capy.client.config.ConfigValues;
 import com.capy.client.gui.Motion;
+import com.capy.client.mixin.ClientInputAccessor;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
+import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Freecam — the camera leaves the body and flies on its own.
@@ -85,6 +93,8 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	private static final float LOOK_SCALE = 0.35f;
 	/** Velocity kept after the distance guard pulls the camera back in. */
 	private static final double CLAMP_DAMPING = 0.15;
+	private static final Logger LOGGER = LoggerFactory.getLogger("capy-freecam");
+	private static final String[] BODY_MODES = {"latch", "freeze", "off"};
 
 	private final SliderSetting horizontalSpeed =
 			setting(new SliderSetting("horizontal_speed", 10, 1, 48, 0));
@@ -106,16 +116,9 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	private final SliderSetting maxDistance =
 			setting(new SliderSetting("max_distance", 96, 0, 256, 0));
 	private final BooleanSetting sprintBoost = setting(new BooleanSetting("sprint_boost", true));
-	/**
-	 * Whether the body is held still while the camera is detached.
-	 *
-	 * <p>On by default, which is what a viewer expects: the point of freecam is
-	 * to look from somewhere else, not to walk the body into a wall while the
-	 * player is not looking at it. The movement keys belong to the camera while
-	 * this is on; they are read from the options directly, so the camera still
-	 * flies. Off restores the old behaviour where the body keeps walking.</p>
-	 */
-	private final BooleanSetting freezeBody = setting(new BooleanSetting("freeze_body", true));
+	private final ChoiceSetting bodyMode = setting(new ChoiceSetting("body_mode", 0, BODY_MODES));
+	private final BooleanSetting interact = setting(new BooleanSetting("interact", false));
+	private final BooleanSetting debug = setting(new BooleanSetting("freecam_debug", false));
 
 	// Velocity in blocks per second, and the resulting position.
 	private double vx;
@@ -131,6 +134,13 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	private boolean primed;
 	/** The level the camera was primed in, so a new world re-primes. */
 	private Level lastLevel;
+	/** The input object that was replaced while the body is latched. */
+	private ClientInput savedInput;
+	private LatchedInput latchedInput;
+	private boolean inputLatched;
+	private boolean attackAtEnable;
+	private BlockPos latchedTarget;
+	private boolean debugLogged;
 
 	public FreecamModule() {
 		super(Category.DONUT_SMP, "freecam");
@@ -141,16 +151,108 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		return isEnabled() && primed;
 	}
 
-	/** True when the body's input is held empty while the camera is out. */
-	public boolean freezeBodyEnabled() {
-		return freezeBody.value();
+	/** True when the player explicitly allows world interaction while detached. */
+	public boolean interactEnabled() {
+		return interact.value();
+	}
+
+	/**
+	 * Called at the very start of the local player's tick, before vanilla reads
+	 * the keys. This is an object swap, not a tail injection: KeyboardInput
+	 * overrides ClientInput.tick, so a tail injector on the base class never
+	 * runs for the input the player actually uses.
+	 */
+	public void beforePlayerTick(LocalPlayer player) {
+		if (player == null) {
+			return;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		if (!isActive() || mc == null || mc.player != player) {
+			releaseInput(player);
+			return;
+		}
+		if (mc.screen != null || bodyModeId().equals("off")) {
+			releaseInput(player);
+			return;
+		}
+		if (inputLatched && latchedInput != null) {
+			if (player.input != latchedInput) {
+				player.input = latchedInput;
+			}
+			return;
+		}
+		savedInput = player.input;
+		var keys = savedInput == null ? net.minecraft.world.entity.player.Input.EMPTY : savedInput.keyPresses;
+		var move = savedInput == null ? net.minecraft.world.phys.Vec2.ZERO
+				: ((ClientInputAccessor) savedInput).capy$moveVector();
+		if (bodyModeId().equals("freeze")) {
+			keys = net.minecraft.world.entity.player.Input.EMPTY;
+			move = net.minecraft.world.phys.Vec2.ZERO;
+		} else {
+			attackAtEnable = mc.options != null && mc.options.keyAttack.isDown();
+			latchedTarget = targetBlock(mc);
+		}
+		latchedInput = new LatchedInput(keys, move);
+		player.input = latchedInput;
+		inputLatched = true;
+	}
+
+	/** Restores the real input object. Safe to call repeatedly. */
+	public void releaseInput(LocalPlayer player) {
+		if (!inputLatched) {
+			return;
+		}
+		if (player != null && player.input == latchedInput && savedInput != null) {
+			player.input = savedInput;
+		}
+		inputLatched = false;
+		latchedInput = null;
+		savedInput = null;
+		attackAtEnable = false;
+		latchedTarget = null;
+	}
+
+	/** True only for LATCH after attack was held before detachment. */
+	public boolean allowContinueAttack() {
+		if (!isEnabled() || !bodyModeId().equals("latch") || !attackAtEnable || !inputLatched) {
+			return false;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		BlockPos current = targetBlock(mc);
+		return current != null && current.equals(latchedTarget);
+	}
+
+	public String bodyModeId() {
+		return bodyMode.option();
+	}
+
+	private static BlockPos targetBlock(Minecraft mc) {
+		if (mc == null || mc.hitResult == null || mc.hitResult.getType() != HitResult.Type.BLOCK
+				|| !(mc.hitResult instanceof BlockHitResult hit)) {
+			return null;
+		}
+		return hit.getBlockPos();
+	}
+
+	private void logDebug(LocalPlayer player) {
+		if (!debug.value() || debugLogged) {
+			return;
+		}
+		debugLogged = true;
+		BlockPos pos = BlockPos.containing(x, y, z);
+		boolean loaded = player.level().hasChunkAt(pos);
+		LOGGER.info("Capy freecam at {}: chunkLoaded={}, block={}, body={}",
+				pos, loaded, loaded ? player.level().getBlockState(pos) : "unloaded", player.blockPosition());
 	}
 
 	@Override
 	protected void onToggle(boolean state) {
+		Minecraft mc = Minecraft.getInstance();
+		releaseInput(mc == null ? null : mc.player);
 		primed = false;
 		lastLevel = null;
 		lastFrameNanos = 0L;
+		debugLogged = false;
 		stop();
 	}
 
@@ -167,23 +269,26 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 			return;
 		}
 		if (mc == null || mc.player == null || mc.level == null) {
+			releaseInput(null);
 			primed = false;
 			return;
 		}
 		LocalPlayer player = mc.player;
 		if (player.isDeadOrDying() || player.isSleeping() || player.isRemoved()) {
+			releaseInput(player);
 			setEnabled(false);
 			return;
 		}
+		if (mc.screen != null) {
+			releaseInput(player);
+		}
 		if (mc.level != lastLevel) {
+			releaseInput(player);
 			prime(player);
 		}
-		// Body input is frozen in FreecamInputMixin at the end of ClientInput.tick,
-		// where vanilla has already read the keys and before movement runs.
-		// Advance once from the tick as well as once from the frame. The flight
-		// integration is time based, so calling it twice does not double the
-		// speed; it only guarantees the camera still moves on a renderer whose
-		// Camera hook never runs (a replaced renderer, for example).
+		// The flight is advanced here as well as from the camera hook. It is
+		// time based, so the second call does not double the speed; it simply
+		// keeps the camera alive on a renderer that replaced the camera hook.
 		updateCamera(mc);
 	}
 
@@ -204,6 +309,7 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		if (!primed || mc.level != lastLevel) {
 			prime(player);
 		}
+		logDebug(player);
 		long now = System.nanoTime();
 		float dt = lastFrameNanos == 0L ? 1f / 60f : (now - lastFrameNanos) / 1.0e9f;
 		lastFrameNanos = now;
@@ -387,7 +493,13 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		acceleration.set(ConfigValues.intValue(json, "acceleration", 14));
 		maxDistance.set(ConfigValues.intValue(json, "max_distance", 96));
 		sprintBoost.set(ConfigValues.boolValue(json, "sprint_boost", true));
-		freezeBody.set(ConfigValues.boolValue(json, "freeze_body", true));
+		if (json.has("body_mode")) {
+			bodyMode.select(ConfigValues.stringValue(json, "body_mode", "latch"));
+		} else if (json.has("freeze_body")) {
+			bodyMode.select(ConfigValues.boolValue(json, "freeze_body", true) ? "latch" : "off");
+		}
+		interact.set(ConfigValues.boolValue(json, "interact", false));
+		debug.set(ConfigValues.boolValue(json, "freecam_debug", false));
 	}
 
 	@Override
@@ -398,6 +510,8 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		json.addProperty("acceleration", acceleration.get());
 		json.addProperty("max_distance", maxDistance.get());
 		json.addProperty("sprint_boost", sprintBoost.value());
-		json.addProperty("freeze_body", freezeBody.value());
+		json.addProperty("body_mode", bodyModeId());
+		json.addProperty("interact", interact.value());
+		json.addProperty("freecam_debug", debug.value());
 	}
 }

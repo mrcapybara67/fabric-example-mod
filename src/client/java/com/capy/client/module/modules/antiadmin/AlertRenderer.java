@@ -330,6 +330,7 @@ public final class AlertRenderer {
 				PlayerFaceRenderer.draw(graphics, skin, x, y, size, tint);
 				return;
 			} catch (RuntimeException e) {
+				com.capy.client.util.Guard.report("alert renderer skin", e);
 				// A broken skin must not stop the alert from being shown.
 			}
 		}

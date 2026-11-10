@@ -15,39 +15,43 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class FreecamActionsMixin {
 	@Inject(method = "startAttack", at = @At("HEAD"), cancellable = true)
 	private void capy$freecamAttack(CallbackInfoReturnable<Boolean> cir) {
-		if (capy$freecamActive()) {
+		FreecamModule freecam = capy$freecam();
+		if (freecam != null && !freecam.interactEnabled()) {
 			cir.setReturnValue(false);
 		}
 	}
 
 	@Inject(method = "startUseItem", at = @At("HEAD"), cancellable = true)
 	private void capy$freecamUse(CallbackInfo ci) {
-		if (capy$freecamActive()) {
+		FreecamModule freecam = capy$freecam();
+		if (freecam != null && !freecam.interactEnabled()) {
 			ci.cancel();
 		}
 	}
 
 	@Inject(method = "pickBlock", at = @At("HEAD"), cancellable = true)
 	private void capy$freecamPick(CallbackInfo ci) {
-		if (capy$freecamActive()) {
+		FreecamModule freecam = capy$freecam();
+		if (freecam != null && !freecam.interactEnabled()) {
 			ci.cancel();
 		}
 	}
 
 	@Inject(method = "continueAttack", at = @At("HEAD"), cancellable = true)
 	private void capy$freecamContinueAttack(boolean leftClick, CallbackInfo ci) {
-		if (capy$freecamActive()) {
+		FreecamModule freecam = capy$freecam();
+		if (freecam != null && !freecam.interactEnabled() && !freecam.allowContinueAttack()) {
 			ci.cancel();
 		}
 	}
 
-	private static boolean capy$freecamActive() {
+	private static FreecamModule capy$freecam() {
 		try {
 			FreecamModule freecam = ModuleManager.get().get(FreecamModule.class);
-			return freecam != null && freecam.isEnabled();
+			return freecam != null && freecam.isActive() ? freecam : null;
 		} catch (Throwable failure) {
 			Guard.report("freecam actions", failure);
-			return false;
+			return null;
 		}
 	}
 }

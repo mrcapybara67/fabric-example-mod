@@ -5,9 +5,9 @@ import com.capy.client.gui.ClickGuiScreen;
 import com.capy.client.gui.GuiColors;
 import com.capy.client.gui.HudEditorScreen;
 import com.capy.client.gui.UiFonts;
-import com.capy.client.gltf.GltfReloadListener;
 import com.capy.client.gui.UiTheme;
 import com.capy.client.keybind.ClientKeybinds;
+import com.capy.client.mixin.CapyMixinPlugin;
 import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.Tickable;
@@ -21,11 +21,11 @@ import com.capy.client.module.modules.BlockOverlayModule;
 import com.capy.client.module.modules.BoatFlyModule;
 import com.capy.client.module.modules.BoatNoclipModule;
 import com.capy.client.module.modules.CustomFOVModule;
-import com.capy.client.module.modules.CustomKnifeModule;
 import com.capy.client.module.modules.FlyModule;
 import com.capy.client.module.modules.FreecamModule;
 import com.capy.client.module.modules.FreelookModule;
 import com.capy.client.module.modules.FullbrightModule;
+import com.capy.client.module.modules.ItemInspectModule;
 import com.capy.client.module.modules.HandAuraModule;
 import com.capy.client.module.modules.SmoothCameraModule;
 import com.capy.client.module.modules.StaffListModule;
@@ -45,10 +45,8 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.resources.Identifier;
-import net.minecraft.server.packs.PackType;
 
 /**
  * Client entrypoint: registers the modules, restores the saved settings,
@@ -62,8 +60,9 @@ public class CapyClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		ModuleManager modules = ModuleManager.get();
+		Guard.run("mixin audit", CapyMixinPlugin::audit);
 		modules.register(new SwingSpeedModule());
-		modules.register(new CustomKnifeModule());
+		modules.register(new ItemInspectModule());
 		WeatherNotifierModule weather = new WeatherNotifierModule();
 		modules.register(weather);
 		// The movement modules: the body flies, or the boat does. Both read
@@ -125,12 +124,6 @@ public class CapyClient implements ClientModInitializer {
 
 		ClientKeybinds.register();
 
-		// The knife meshes are data, so a resource pack that replaces one has to
-		// be able to change it without restarting the game. The listener drops
-		// the parsed meshes on every reload; the next draw reads them again.
-		ResourceManagerHelper.get(PackType.CLIENT_RESOURCES)
-				.registerReloadListener(new GltfReloadListener());
-
 		// One tick listener drives the keybind and every tickable module.
 		//
 		// The body is guarded as a whole, not only piece by piece: it opens
@@ -189,9 +182,9 @@ public class CapyClient implements ClientModInitializer {
 			}
 			boolean inspect = ClientKeybinds.consumeInspectClick();
 			if (inspect && client.screen == null) {
-				CustomKnifeModule knife = modules.get(CustomKnifeModule.class);
-				if (knife != null) {
-					knife.triggerInspect();
+				ItemInspectModule itemInspect = modules.get(ItemInspectModule.class);
+				if (itemInspect != null) {
+					itemInspect.triggerInspect();
 				}
 			}
 			for (Module module : modules.modules()) {

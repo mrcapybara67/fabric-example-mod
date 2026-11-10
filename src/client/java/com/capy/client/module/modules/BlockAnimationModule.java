@@ -214,6 +214,7 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 			}
 			batch().endBatch();
 		} catch (RuntimeException e) {
+			com.capy.client.util.Guard.report("block animation", e);
 			// A failed draw must cost the animation, not the frame.
 			dropBatch();
 		}
@@ -540,16 +541,16 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 		if (batch != null) {
 			try {
 				batch.endBatch();
-			} catch (RuntimeException ignored) {
-				// Already unusable; it is dropped either way.
+			} catch (RuntimeException failure) {
+				com.capy.client.util.Guard.report("block animation flush", failure);
 			}
 			batch = null;
 		}
 		if (buffer != null) {
 			try {
 				buffer.close();
-			} catch (RuntimeException ignored) {
-				// Nothing left to release.
+			} catch (RuntimeException failure) {
+				com.capy.client.util.Guard.report("block animation release", failure);
 			}
 			buffer = null;
 		}

@@ -70,8 +70,8 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 	private final WatchlistSetting watchlist = setting(new WatchlistSetting("watchlist"));
 	private final BooleanSetting showHeader = setting(new BooleanSetting("show_header", false));
 	private final BooleanSetting hideWhenEmpty = setting(new BooleanSetting("hide_when_empty", true));
-	private final SliderSetting background = setting(new SliderSetting("background", 92, 0, 100));
-	private final SliderSetting anchor = setting(new SliderSetting("anchor", HudElementModule.ANCHOR_TOP_RIGHT,
+	private final SliderSetting background = setting(new SliderSetting("background", 100, 0, 100));
+	private final SliderSetting anchor = setting(new SliderSetting("anchor", HudElementModule.ANCHOR_TOP_LEFT,
 			HudElementModule.ANCHOR_TOP_LEFT, HudElementModule.ANCHOR_BOTTOM_RIGHT));
 	private final SliderSetting offsetX = setting(new SliderSetting("offset_x", 0, -MAX_NUDGE, MAX_NUDGE));
 	private final SliderSetting offsetY = setting(new SliderSetting("offset_y", 0, -MAX_NUDGE, MAX_NUDGE));
@@ -310,6 +310,14 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 				}
 			}
 
+			// A watchlist name that is offline and has never been seen online
+			// must not create a row. The old default alpha of 1.0 made one
+			// appear at full opacity every tick and fade back to nothing.
+			boolean seen = lastOnline.containsKey(key) || fade.containsKey(key);
+			if (!StaffListFilter.shouldConsiderCandidate(online, seen)) {
+				continue;
+			}
+
 			long absentFor = now - lastOnline.getOrDefault(key, 0L);
 			if (lastOnline.get(key) != null
 					&& !StaffListFilter.keepAfterAbsence(online, absentFor)
@@ -323,10 +331,7 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 
 			float target = absentFor <= ABSENT_GRACE_MS ? 1f : 0f;
 			float current = fade.getOrDefault(key, online ? 0f : 1f);
-			if (elapsed > 0L) {
-				float step = elapsed / (float) FADE_MS;
-				current = current + Math.max(-step, Math.min(step, target - current));
-			}
+			current = StaffListFilter.nextAlpha(current, target, elapsed, FADE_MS);
 			fade.put(key, current);
 			if (current <= 0.01f && absentFor > ABSENT_GRACE_MS) {
 				lastOnline.remove(key);
@@ -459,8 +464,9 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 					return info;
 				}
 			}
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
 			// Connection closing: an online row stays until its grace expires.
+			Guard.report("staff-list tab entry", failure);
 		}
 		return null;
 	}
@@ -480,8 +486,9 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 				PlayerFaceRenderer.draw(graphics, skin, headX, headY, HEAD,
 						Ui.withAlpha(0xFFFFFF, Math.round(255 * row.alpha())));
 				drawn = true;
-			} catch (RuntimeException ignored) {
+			} catch (RuntimeException failure) {
 				// A skin that cannot be drawn costs the face, not the row.
+				Guard.report("staff-list skin", failure);
 			}
 		}
 		if (!drawn && graphics != null && row.alpha() > 0.01f) {
@@ -518,8 +525,8 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 		watchlist.set(ConfigValues.stringList(json, "watchlist"));
 		showHeader.set(ConfigValues.boolValue(json, "show_header", false));
 		hideWhenEmpty.set(ConfigValues.boolValue(json, "hide_when_empty", true));
-		background.set(ConfigValues.intValue(json, "background", 92));
-		anchor.set(ConfigValues.intValue(json, "anchor", HudElementModule.ANCHOR_TOP_RIGHT));
+		background.set(ConfigValues.intValue(json, "background", 100));
+		anchor.set(ConfigValues.intValue(json, "anchor", HudElementModule.ANCHOR_TOP_LEFT));
 		offsetX.set(ConfigValues.intValue(json, "offset_x", 0));
 		offsetY.set(ConfigValues.intValue(json, "offset_y", 0));
 	}

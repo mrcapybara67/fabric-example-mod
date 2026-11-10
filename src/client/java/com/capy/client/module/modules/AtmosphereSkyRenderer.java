@@ -86,7 +86,11 @@ public final class AtmosphereSkyRenderer {
 			double now = System.nanoTime() / 1.0e9;
 			int theme = AtmosphereState.theme;
 			sky.dome(theme);
-			theme(sky, theme, now);
+			if (AtmosphereState.skyDebug) {
+				sky.debug(now);
+			} else {
+				theme(sky, theme, now);
+			}
 			batches.endBatch();
 			if (passStart != 0L) {
 				long at = System.nanoTime();
@@ -348,16 +352,16 @@ public final class AtmosphereSkyRenderer {
 		// glows instead of ending in a hard colour seam.
 		sky.ellipse(sunYaw, 5.0, 54.0, 8.0, 0x24FF3FBF, 10);
 		sky.ellipse(sunYaw, 2.0, 30.0, 4.5, 0x30FF5AC8, 8);
-		sky.sun(sunYaw, sunPitch, 16.0, 0xFFFF8ADA, 0x38FF48D0);
+		// Only the glow is drawn under the striped disc; drawing a normal sun
+		// first would show through every gap and turn the stripes back into
+		// dark bars laid over a solid disc.
+		sky.ellipse(sunYaw, sunPitch, 38.4, 38.4, 0x14FF48D0, 10);
+		sky.ellipse(sunYaw, sunPitch, 24.8, 24.8, 0x28FF48D0, 10);
 
-		// Opaque cutout bars, not translucent shading: they have to hide the
-		// sun behind them. The slight phase offset makes the stripes breathe.
-		for (int i = 0; i < 6; i++) {
-			double cutPitch = sunPitch - 10.0 + i * 3.8
-					+ Math.sin(now * 0.35 + i * 0.7) * 0.22;
-			sky.band(sunYaw - 17.5, cutPitch, 17.5, 1.1,
-					0xFF03101A, 0xFF061A24);
-		}
+		// The stripes are holes in the disc itself. A dark band drawn over the
+		// sun left an opaque rectangle hanging in the sky and could never make
+		// the gaps wider towards the bottom.
+		sky.stripedSun(sunYaw, sunPitch, 16.0, now);
 
 		// Two cloud layers, one cyan and one magenta, drifting in opposite
 		// directions across the upper half of the frame.
@@ -410,7 +414,7 @@ public final class AtmosphereSkyRenderer {
 	// ------------------------------------------------------------------ sky
 
 	/** Camera-centred geometry helpers. */
-	private static final class Sky {
+	static final class Sky {
 		private VertexConsumer vc;
 		private PoseStack.Pose pose;
 
@@ -427,13 +431,19 @@ public final class AtmosphereSkyRenderer {
 						domePositions[offset + 2]).setColor(domeColors[i]);
 			}
 		}
-		/** A vertical band between two yaw/pitch corners. */
+		/**
+		 * A vertical band between two yaw/pitch corners. Width is specified in
+		 * degrees on the great circle, not in raw yaw degrees: one degree of yaw
+		 * is almost a whole great-circle degree at the horizon but a fraction of
+		 * one near the pole. The correction is what stops clouds and bars
+		 * squeezing as they climb.
+		 */
 		void band(double yaw, double pitch, double width, double height,
 				int bottom, int top) {
-			vertexAt(yaw - width, pitch, RADIUS * 0.985, bottom);
-			vertexAt(yaw + width, pitch, RADIUS * 0.985, bottom);
-			vertexAt(yaw + width, pitch + height, RADIUS * 0.985, top);
-			vertexAt(yaw - width, pitch + height, RADIUS * 0.985, top);
+			vertexAt(greatYaw(yaw, pitch, -width), pitch, RADIUS * 0.985, bottom);
+			vertexAt(greatYaw(yaw, pitch, width), pitch, RADIUS * 0.985, bottom);
+			vertexAt(greatYaw(yaw, pitch + height, width), pitch + height, RADIUS * 0.985, top);
+			vertexAt(greatYaw(yaw, pitch + height, -width), pitch + height, RADIUS * 0.985, top);
 		}
 
 		/**
@@ -520,13 +530,13 @@ public final class AtmosphereSkyRenderer {
 				double ib = a + offset * 0.35;
 				double oa = a - offset;
 				double ob = a + offset;
-				vertexAt(yaw + Math.cos(ia) * inner, pitch + Math.sin(ia) * inner,
+				vertexTangent(yaw, pitch, Math.cos(ia) * inner, Math.sin(ia) * inner,
 						RADIUS * 0.99, color);
-				vertexAt(yaw + Math.cos(ib) * inner, pitch + Math.sin(ib) * inner,
+				vertexTangent(yaw, pitch, Math.cos(ib) * inner, Math.sin(ib) * inner,
 						RADIUS * 0.99, color);
-				vertexAt(yaw + Math.cos(ob) * outer, pitch + Math.sin(ob) * outer,
+				vertexTangent(yaw, pitch, Math.cos(ob) * outer, Math.sin(ob) * outer,
 						RADIUS * 0.99, withAlpha(color, 0));
-				vertexAt(yaw + Math.cos(oa) * outer, pitch + Math.sin(oa) * outer,
+				vertexTangent(yaw, pitch, Math.cos(oa) * outer, Math.sin(oa) * outer,
 						RADIUS * 0.99, withAlpha(color, 0));
 			}
 		}
@@ -556,10 +566,10 @@ public final class AtmosphereSkyRenderer {
 		void streak(double yaw0, double pitch0, double yaw1, double pitch1,
 				int head, int tail) {
 			double width = 0.10;
-			vertexAt(yaw0 - width, pitch0, RADIUS * 0.985, tail);
-			vertexAt(yaw0 + width, pitch0, RADIUS * 0.985, tail);
-			vertexAt(yaw1 + width, pitch1, RADIUS * 0.985, head);
-			vertexAt(yaw1 - width, pitch1, RADIUS * 0.985, head);
+			vertexAt(greatYaw(yaw0, pitch0, -width), pitch0, RADIUS * 0.985, tail);
+			vertexAt(greatYaw(yaw0, pitch0, width), pitch0, RADIUS * 0.985, tail);
+			vertexAt(greatYaw(yaw1, pitch1, width), pitch1, RADIUS * 0.985, head);
+			vertexAt(greatYaw(yaw1, pitch1, -width), pitch1, RADIUS * 0.985, head);
 		}
 
 		/** A diamond, used for petals and sparks high in the sky. */
@@ -592,6 +602,65 @@ public final class AtmosphereSkyRenderer {
 				vertexAt(y1, high + wave1 + 1, RADIUS * 0.991, withAlpha(lowColor, 0));
 				vertexAt(y0, high + wave0 + 1, RADIUS * 0.991, withAlpha(lowColor, 0));
 			}
+		}
+
+		/**
+		 * A sun cut into horizontal strips. The lower strips contain real gaps,
+		 * so the sky shows through instead of an opaque bar being painted over
+		 * the disc. Gap rows grow towards the bottom and drift with the phase.
+		 */
+		void stripedSun(double yaw, double pitch, double radius, double now) {
+			int rows = 32;
+			int cols = 10;
+			int drift = (int) Math.round(Math.sin(now * 0.35));
+			for (int row = 0; row < rows; row++) {
+				double y0 = -radius + radius * 2.0 * row / rows;
+				double y1 = -radius + radius * 2.0 * (row + 1) / rows;
+				double middle = (y0 + y1) * 0.5;
+				if (middle < radius * 0.52) {
+					int gapEvery = middle < 0 ? 3 : 4;
+					if (Math.floorMod(row + drift + (middle < 0 ? 1 : 0), gapEvery) == 0) {
+						continue;
+					}
+				}
+				double half = Math.sqrt(Math.max(0.0, radius * radius - middle * middle));
+				if (half <= 0.0) {
+					continue;
+				}
+				for (int col = 0; col < cols; col++) {
+					double x0 = -half + half * 2.0 * col / cols;
+					double x1 = -half + half * 2.0 * (col + 1) / cols;
+					double cx = (x0 + x1) * 0.5;
+					double cy = middle;
+					double distance = Math.sqrt(cx * cx + cy * cy);
+					int alpha = distance > radius * 0.93 ? 120 : 255;
+					int color = withAlpha(0xFFFF8ADA, alpha);
+					vertexTangent(yaw, pitch, x0, y0, RADIUS * 0.997, color);
+					vertexTangent(yaw, pitch, x1, y0, RADIUS * 0.997, color);
+					vertexTangent(yaw, pitch, x1, y1, RADIUS * 0.997, color);
+					vertexTangent(yaw, pitch, x0, y1, RADIUS * 0.997, color);
+				}
+			}
+		}
+
+		/** One flat-coloured sample of every primitive, with compass marks. */
+		void debug(double now) {
+			disc(0.0, 35.0, 9.0, 9.0, 0xFFFF4040, 24, 0.8f);
+			band(0.0, 8.0, 24.0, 8.0, 0xFF00E060, 0xFF00FF80);
+			ring(55.0, 1.2, 48, 0xFFFFD000, 0xFFFFF060);
+			puff(-60.0, 34.0, 8.0, 5.0, 0xFF4080FF);
+			star(80.0, 46.0, 1.4, 255, 0xFFFFFFFF);
+			curtain(120.0, 42.0, 22.0, 58.0, 12, now * 0.2, 0xFFFF40FF, 0x8040FF80);
+			streak(-120.0, 54.0, -108.0, 48.0, 0xFFFFFF00, 0x00FF8000);
+			rays(170.0, 38.0, 12, 0.0, 0xFFFF8000);
+			diamond(-30.0, 18.0, 1.2, 0xFF00FFFF, 0xFF80FFFF);
+			for (int i = 0; i < 4; i++) {
+				double mark = i * 90.0;
+				star(mark, 0.0, 1.0, 255, i % 2 == 0 ? 0xFFFF0000 : 0xFF00FFFF);
+				band(mark, -1.0, 3.0, 3.0, 0x00FFFFFF, 0xFFFFFFFF);
+			}
+			ring(30.0, 0.35, 96, 0x4020A0FF, 0x8040C0FF);
+			ring(60.0, 0.35, 96, 0x4020A0FF, 0x8040C0FF);
 		}
 
 		/**
@@ -706,6 +775,18 @@ public final class AtmosphereSkyRenderer {
 			double cp = Math.cos(pitch);
 			vertex(Math.sin(yaw) * cp * radius, Math.sin(pitch) * radius,
 					Math.cos(yaw) * cp * radius, color);
+		}
+
+		/** Horizontal angular offset converted to the great circle at pitch. */
+		private static double greatYaw(double yaw, double pitch, double offset) {
+			double scale = Math.max(0.20, Math.cos(Math.toRadians(pitch)));
+			return yaw + offset / scale;
+		}
+
+		/** A point in the tangent plane at (yaw, pitch), offsets in degrees. */
+		private void vertexTangent(double yaw, double pitch, double right, double up,
+				double radius, int color) {
+			vertexAt(greatYaw(yaw, pitch, right), pitch + up, radius, color);
 		}
 
 		private void vertex(double x, double y, double z, int color) {

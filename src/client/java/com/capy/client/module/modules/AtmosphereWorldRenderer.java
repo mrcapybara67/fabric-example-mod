@@ -4,57 +4,41 @@ import com.capy.client.util.Guard;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.LightTexture;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.rendertype.RenderTypes;
-import net.minecraft.core.BlockPos;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.phys.Vec3;
 import java.util.HashMap;
 import java.util.Map;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
+import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.Vec3;
 
 /**
- * The part of Atmosphere that is geometry instead of a colour.
+ * The geometry part of Atmosphere: the Neon lattice, aurora curtains, the
+ * distant ocean whale and the Void rift.
  *
- * <h2>Why this exists</h2>
- * Particle lists alone cannot make an aurora: vanilla has no ribbon that hangs
- * in the sky, no petal with two crossed faces, and no light shaft. Those are
- * custom quads, so they are submitted here, in the world pass, with the
- * camera's matrix and camera-relative vertices. They are not painted on the
- * HUD and they do not replace the sky; they sit in the same depth buffer as the
- * terrain, which is what lets a petal pass behind a tree.
- *
- * <h2>Budget</h2>
- * This runs on phones, so every theme has a hard, small object count and every
- * object is one or two quads. All positions are computed from a cheap hash and
- * the frame time; nothing is allocated inside the loops, and the buffer is
- * reused between frames. Sakura is 72 textured petals, two crossed faces each:
- * 1,152 vertices, not 72 models.
- *
- * <h2>Theme ownership</h2>
- * {@link AtmosphereState#theme} is written by the module on the tick. The
- * renderer never reads the settings object, so a theme change is a single
- * integer read and cannot race the GUI.
+ * <p>Every ordinary particle in every theme is drawn by
+ * {@link AtmosphereParticles}; this class only owns shapes that a single quad
+ * pool cannot make. All positions here are camera-relative when emitted. Neon's
+ * lattice is anchored to exact world coordinates and converted at the vertex,
+ * which is why it stays on the ground while the camera flies.</p>
  */
 public final class AtmosphereWorldRenderer {
 	private static final int BUFFER_BYTES = 2 * 1024 * 1024;
-	/**
-	 * The opal petal is the one theme sprite drawn from a real texture. It is
-	 * not a vanilla particle: the shape, the iridescent veins and the pearl
-	 * flecks all belong to the client, and the texture is sampled on both
-	 * crossed faces of every falling petal.
-	 */
-	private static final Identifier OPAL_PETAL =
-			Identifier.fromNamespaceAndPath("capy", "textures/atmosphere/opal_petal.png");
+	private static final int NEON_SPACING = 3;
+	private static final int NEON_REACH = 24;
+	private static final int NEON_STEP = 2;
+	private static final int NEON_MAX_SEGMENTS = 1400;
+	private static final int NEON_GRID = 49;
+	private static final int NEON_HALF = NEON_GRID / 2;
 	private static MultiBufferSource.BufferSource batch;
 	private static ByteBufferBuilder buffer;
 	private static final Map<Long, Integer> NEON_HEIGHTS = new HashMap<>();
 	private static long neonRefreshTick = -1L;
 	private static Object neonLevel;
 	private static long neonChunk = Long.MIN_VALUE;
+	private static Vec3 neonCenter;
 
 	private AtmosphereWorldRenderer() {
 	}
@@ -70,6 +54,8 @@ public final class AtmosphereWorldRenderer {
 		neonRefreshTick = -1L;
 		neonLevel = null;
 		neonChunk = Long.MIN_VALUE;
+		neonCenter = null;
+		AtmosphereParticles.reset();
 		discard();
 	}
 
@@ -83,7 +69,8 @@ public final class AtmosphereWorldRenderer {
 		}
 		try {
 			AtmosphereState.advance();
-			Vec3 camera = mc.gameRenderer.getMainCamera().position();
+			Camera camera = mc.gameRenderer.getMainCamera();
+			Vec3 eye = camera.position();
 			PoseStack stack = context.matrices();
 			if (stack == null) {
 				stack = FallbackStack.INSTANCE;
@@ -96,25 +83,20 @@ public final class AtmosphereWorldRenderer {
 			double px = mc.player.getX(partial);
 			double py = mc.player.getY(partial);
 			double pz = mc.player.getZ(partial);
-			double ox = px - camera.x;
-			double oy = py - camera.y;
-			double oz = pz - camera.z;
-			// Keep time continuous: wrapping it every minute made every particle
-			// cycle jump back to its start while the sky kept moving.
+			double ox = px - eye.x;
+			double oy = py - eye.y;
+			double oz = pz - eye.z;
 			double now = System.nanoTime() / 1.0e9;
 
 			switch (AtmosphereState.theme) {
-				case 1 -> dust(vc, pose, ox, oy, oz, now, 0xFFFFC47A, 0xFFFFE0A8, 54);
-				case 2 -> midnight(vc, pose, ox, oy, oz, now);
 				case 3 -> aurora(vc, pose, ox, oy, oz, now);
-				case 4 -> rain(vc, pose, ox, oy, oz, now);
 				case 5 -> ocean(vc, pose, ox, oy, oz, now);
-				case 6 -> embers(vc, pose, ox, oy, oz, now);
-				case 7 ->			sakura(batches, pose, ox, oy, oz, now);
 				case 8 -> voidRift(vc, pose, ox, oy, oz, now);
-				case 9 -> neon(vc, pose, camera, now);
-				default -> dust(vc, pose, ox, oy, oz, now, 0xFFBFE0FF, 0xFFFFFFFF, 38);
+				case 9 -> neon(vc, pose, ox, oy, oz, eye, now);
+				default -> {
+				}
 			}
+			AtmosphereParticles.render(batches, pose, camera, partial);
 			batches.endBatch();
 		} catch (RuntimeException | LinkageError failure) {
 			discard();
@@ -122,14 +104,11 @@ public final class AtmosphereWorldRenderer {
 		}
 	}
 
-	// ------------------------------------------------------------- themes
+	// ------------------------------------------------------------- geometry
 
 	/** Curtains of light: a few tall, segmented planes with a vertical fade. */
 	private static void aurora(VertexConsumer vc, PoseStack.Pose pose,
 			double ox, double oy, double oz, double now) {
-		// Four planes, not one: a single ribbon is edge-on from half the world.
-		// Each plane is a different distance and a different phase, so walking
-		// through the ring changes which ribbon is in front.
 		for (int plane = 0; plane < 4; plane++) {
 			double angle = plane * Math.PI * 0.5 + 0.35;
 			double radius = 72 + plane * 11;
@@ -149,7 +128,6 @@ public final class AtmosphereWorldRenderer {
 				double top = oy + 86 + wave1;
 				int low = 0x001E9C8E;
 				int high = 0x7A65FFCE;
-				// Alternating violet edge, so the curtain is not one flat sheet.
 				if (i % 3 == 0) {
 					high = 0x708A9BFF;
 				}
@@ -158,205 +136,17 @@ public final class AtmosphereWorldRenderer {
 		}
 	}
 
-	/**
-	 * Opal leaves with a real texture on two crossed faces. The texture is the
-	 * petal's silhouette, so the quads do not need to fake one with colour
-	 * strips; the two crossed copies give the leaf thickness and let its
-	 * iridescence catch the light as it turns.
-	 */
-	private static void sakura(MultiBufferSource.BufferSource batches, PoseStack.Pose pose,
-			double ox, double oy, double oz, double now) {
-		VertexConsumer vc = batches.getBuffer(RenderTypes.entityTranslucent(OPAL_PETAL));
-		int petals = 72;
-		for (int i = 0; i < petals; i++) {
-			double seed = hash(i * 17 + 3);
-			double seed2 = hash(i * 31 + 11);
-			double seed3 = hash(i * 47 + 5);
-			double size = 0.10 + seed3 * 0.12;
-			double speed = 0.42 + seed2 * 0.62;
-			double fall = 15.0;
-			double cycle = (now * speed + seed * fall) % fall;
-			double x = ox + (seed - 0.5) * 26 + Math.sin(now * 0.8 + i * 0.7) * 1.8;
-			double y = oy + 12.5 - cycle + Math.sin(now * 1.3 + i) * 0.35;
-			double z = oz + (seed2 - 0.5) * 26 + Math.cos(now * 0.65 + i * 0.9) * 1.5;
-			// One quad, two independent tumble angles. The texture has a
-			// transparent border so linear sampling cannot bleed into it.
-			double angle = now * 0.55 + seed * Math.PI * 2.0;
-			double tilt = now * 0.37 + seed2 * Math.PI * 2.0;
-			double ux = Math.cos(angle) * size;
-			double uy = Math.sin(angle) * size * 0.22;
-			double uz = Math.sin(angle) * size;
-			double vx = -Math.sin(angle) * Math.sin(tilt) * size;
-			double vy = Math.cos(tilt) * size;
-			double vz = Math.cos(angle) * Math.sin(tilt) * size;
-			int tint = (i % 4) == 0 ? 0xFFFFF4FB
-					: (i % 4) == 1 ? 0xFFFFD6EA
-					: (i % 4) == 2 ? 0xFFD6FFF8 : 0xFFFFC8DE;
-			texturedPetal(vc, pose, x, y, z, ux, uy, uz, vx, vy, vz, tint);
-		}
-	}
-
-	/** Deep Ocean: light shafts, then rising bubbles. */
+	/** A far, slow whale silhouette: three soft dark ovals crossing the water. */
 	private static void ocean(VertexConsumer vc, PoseStack.Pose pose,
-			double ox, double oy, double oz, double now) {
-		for (int i = 0; i < 7; i++) {
-			double seed = hash(i * 23 + 7);
-			double angle = seed * Math.PI * 2;
-			double radius = 10 + seed * 28;
-			double x = ox + Math.cos(angle) * radius;
-			double z = oz + Math.sin(angle) * radius;
-			double width = 1.4 + hash(i * 9) * 2.8;
-			double sway = Math.sin(now * 0.25 + i) * 2.0;
-			double top = oy + 24 + hash(i * 5) * 12;
-			double bottom = oy - 4;
-			int low = 0x1548B8E8;
-			int high = 0x4A9BEAFF;
-			quad(vc, pose, x - width, bottom, z, x + width, bottom, z,
-					x + width + sway, top, z - sway, x - width + sway, top, z - sway, low, high);
-		}
-		for (int i = 0; i < 34; i++) {
-			double seed = hash(i * 41 + 1);
-			double seed2 = hash(i * 13 + 9);
-			double rise = (now * (0.6 + seed2) + seed * 12) % 12;
-			double x = ox + (seed - 0.5) * 16 + Math.sin(now + i) * 0.3;
-			double y = oy - 5 + rise;
-			double z = oz + (seed2 - 0.5) * 16;
-			double r = 0.035 + seed2 * 0.045;
-			mote(vc, pose, x, y, z, r, 0xB0B8F4FF);
-		}
-		for (int i = 0; i < 24; i++) {
-			double seed = hash(i * 53 + 3);
-			double seed2 = hash(i * 11 + 21);
-			double x = ox + (seed - 0.5) * 30 + Math.sin(now * 0.15 + i) * 2.0;
-			double y = oy + 3 + (seed2 + now * 0.02) % 10;
-			double z = oz + (seed2 - 0.5) * 30;
-			mote(vc, pose, x, y, z, 0.025 + seed * 0.025, 0x8058F0D0);
-		}
-		whale(vc, pose, ox, oy, oz, now);
-	}
-
-	/** A far, slow whale silhouette: two soft dark ovals crossing the water. */
-	private static void whale(VertexConsumer vc, PoseStack.Pose pose,
 			double ox, double oy, double oz, double now) {
 		double travel = Math.sin(now * 0.018) * 26.0;
 		double x = ox + 30.0 + travel;
 		double z = oz + 24.0;
 		double y = oy + 7.0;
 		int body = 0x38234A68;
-		// A flattened horizontal body and a raised tail: the two shapes read as
-		// a whale from the side without a model or a texture.
-		fan(vc, pose, x, y, z, 7.0, body, 1, 0, 0, 0, 0, 1);
+		fan(vc, pose, x, y, z, 7.0, body, 1, 0, 0, 0, 1, 0);
 		fan(vc, pose, x + 7.0, y + 1.4, z, 3.0, body, 1, 0, 0, 0, 1, 0);
 		fan(vc, pose, x + 8.0, y + 3.8, z, 1.8, body, 1, 0, 0, 0, 1, 0);
-	}
-
-	/** Crimson: embers that rise and swing, with a coal-red core. */
-	private static void embers(VertexConsumer vc, PoseStack.Pose pose,
-			double ox, double oy, double oz, double now) {
-		for (int i = 0; i < 60; i++) {
-			double seed = hash(i * 29 + 4);
-			double seed2 = hash(i * 37 + 13);
-			double rise = (now * (0.35 + seed2 * 0.8) + seed * 9) % 9;
-			double x = ox + (seed - 0.5) * 18 + Math.sin(now * 1.4 + i) * 0.6;
-			double y = oy - 1 + rise;
-			double z = oz + (seed2 - 0.5) * 18 + Math.cos(now * 1.1 + i) * 0.6;
-			double r = 0.045 + seed * 0.05;
-			mote(vc, pose, x, y, z, r, i % 4 == 0 ? 0xFFFFD08A : 0xD8FF5A2A);
-		}
-		for (int i = 0; i < 22; i++) {
-			double seed = hash(i * 47 + 9);
-			double seed2 = hash(i * 61 + 5);
-			double fall = (now * (0.6 + seed2) + seed * 12) % 12;
-			double x = ox + (seed - 0.5) * 20;
-			double y = oy + 11 - fall;
-			double z = oz + (seed2 - 0.5) * 20;
-			mote(vc, pose, x, y, z, 0.03 + seed * 0.03, 0x706E5A52);
-		}
-	}
-
-	/** Neon: a glowing ground grid and drifting circuit dust. */
-	private static final int NEON_SPACING = 3;
-	private static final int NEON_REACH = 24;
-	private static final int NEON_STEP = 2;
-	private static final int NEON_MAX_SEGMENTS = 1400;
-
-	private static void neon(VertexConsumer vc, PoseStack.Pose pose, Vec3 camera, double now) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null) {
-			return;
-		}
-		refreshNeonHeights(mc, camera);
-		int minX = Math.floorDiv((int) Math.floor(camera.x) - NEON_REACH, NEON_SPACING);
-		int maxX = Math.floorDiv((int) Math.floor(camera.x) + NEON_REACH, NEON_SPACING);
-		int minZ = Math.floorDiv((int) Math.floor(camera.z) - NEON_REACH, NEON_SPACING);
-		int maxZ = Math.floorDiv((int) Math.floor(camera.z) + NEON_REACH, NEON_SPACING);
-		int startX = Math.floorDiv((int) Math.floor(camera.x) - NEON_REACH, NEON_STEP) * NEON_STEP;
-		int startZ = Math.floorDiv((int) Math.floor(camera.z) - NEON_REACH, NEON_STEP) * NEON_STEP;
-		int drawn = 0;
-
-		for (int ix = minX; ix <= maxX && drawn < NEON_MAX_SEGMENTS; ix++) {
-			double x = AtmosphereMath.neonLineCoordinate(ix, NEON_SPACING);
-			if (Math.abs(x - camera.x) > NEON_REACH) {
-				continue;
-			}
-			for (int z = startZ; z <= camera.z + NEON_REACH && drawn < NEON_MAX_SEGMENTS; z += NEON_STEP) {
-				if (!loaded(mc, x, z) || !loaded(mc, x, z + NEON_STEP)) {
-					continue;
-				}
-				double y0 = neonHeight(mc, x, z) + 0.03;
-				double y1 = neonHeight(mc, x, z + NEON_STEP) + 0.03;
-				int color = neonColor(x, z, camera, now, (ix & 1) == 0);
-				if ((color >>> 24) < 5) {
-					continue;
-				}
-				quad(vc, pose, x - 0.025, y0, z, x + 0.025, y0, z,
-						x + 0.025, y1, z + NEON_STEP, x - 0.025, y1, z + NEON_STEP, color, color);
-				drawn++;
-			}
-		}
-		for (int iz = minZ; iz <= maxZ && drawn < NEON_MAX_SEGMENTS; iz++) {
-			double z = AtmosphereMath.neonLineCoordinate(iz, NEON_SPACING);
-			if (Math.abs(z - camera.z) > NEON_REACH) {
-				continue;
-			}
-			for (int x = startX; x <= camera.x + NEON_REACH && drawn < NEON_MAX_SEGMENTS; x += NEON_STEP) {
-				if (!loaded(mc, x, z) || !loaded(mc, x + NEON_STEP, z)) {
-					continue;
-				}
-				double y0 = neonHeight(mc, x, z) + 0.03;
-				double y1 = neonHeight(mc, x + NEON_STEP, z) + 0.03;
-				int color = neonColor(x, z, camera, now, (iz & 1) == 0);
-				if ((color >>> 24) < 5) {
-					continue;
-				}
-				quad(vc, pose, x, y0, z - 0.025, x, y0, z + 0.025,
-						x + NEON_STEP, y1, z + 0.025, x + NEON_STEP, y1, z - 0.025, color, color);
-				drawn++;
-			}
-		}
-		double ox = camera.x;
-		double oy = camera.y;
-		double oz = camera.z;
-		for (int i = 0; i < 42; i++) {
-			double seed = hash(i * 19 + 8);
-			double seed2 = hash(i * 43 + 2);
-			double x = ox + (seed - 0.5) * 20;
-			double y = oy + 0.2 + (now * (0.25 + seed2 * 0.5) + seed * 8) % 8;
-			double z = oz + (seed2 - 0.5) * 20;
-			mote(vc, pose, x, y, z, 0.035 + seed * 0.035, i % 3 == 0 ? 0xFFFF56D8 : 0xFF3FF4E4);
-		}
-		// Neon rain: thin slanted streaks with a faded tail, not square drops.
-		for (int i = 0; i < 34; i++) {
-			double seed = hash(i * 71 + 4);
-			double seed2 = hash(i * 31 + 14);
-			double fall = (now * (8 + seed2 * 6) + seed * 18) % 18;
-			double x = ox + (seed - 0.5) * 24;
-			double y = oy + 14 - fall;
-			double z = oz + (seed2 - 0.5) * 24;
-			quad(vc, pose, x, y, z, x + 0.02, y, z, x + 0.16, y + 1.0, z + 0.06,
-					x + 0.14, y + 1.0, z + 0.06, 0x003FF4E4,
-					i % 2 == 0 ? 0x904FFFE8 : 0x80FF56D8);
-		}
 	}
 
 	/** Void: slow shards and a distant vertical rift. */
@@ -375,158 +165,105 @@ public final class AtmosphereWorldRenderer {
 					x + width * 0.6 + jitter, y1, z, x - width * 0.6 + jitter, y1, z,
 					0x203A1A5A, 0x704E2C8A);
 		}
-		for (int i = 0; i < 38; i++) {
-			double seed = hash(i * 31 + 17);
-			double seed2 = hash(i * 53 + 6);
-			// A slow orbit around the rift, not a static scatter: the dust has
-			// to read as caught in something rather than pinned to the screen.
-			double orbit = now * 0.06 + i * 0.73;
-			double radius = 3.0 + seed * 10.0;
-			double x2 = ox + Math.cos(orbit) * radius;
-			double y2 = oy + (seed2 - 0.3) * 12 + Math.sin(now * 0.7 + i * 1.7) * 1.5;
-			double z2 = oz + Math.sin(orbit) * radius;
-			double r = 0.05 + seed * 0.07;
-			mote(vc, pose, x2, y2, z2, r, i % 5 == 0 ? 0xB0C46AFF : 0x702A1348);
-		}
-	}
-
-	/** Overcast: slanted, close rain that reads even when vanilla weather is clear. */
-	private static void rain(VertexConsumer vc, PoseStack.Pose pose,
-			double ox, double oy, double oz, double now) {
-		for (int i = 0; i < 88; i++) {
-			double seed = hash(i * 23 + 3);
-			double seed2 = hash(i * 11 + 7);
-			double fall = (now * (10 + seed2 * 7) + seed * 20) % 20;
-			double x = ox + (seed - 0.5) * 24;
-			double y = oy + 13 - fall;
-			double z = oz + (seed2 - 0.5) * 24;
-			double drift = 0.35;
-			quad(vc, pose, x, y, z, x + 0.025, y, z, x + 0.025 + drift, y + 1.1, z + drift * 0.4,
-					x + drift, y + 1.1, z + drift * 0.4, 0x406E8CA8, 0x807894A8);
-		}
-	}
-
-	/** Midnight: a dust of cool stars and a few brighter planets. */
-	private static void midnight(VertexConsumer vc, PoseStack.Pose pose,
-			double ox, double oy, double oz, double now) {
-		for (int i = 0; i < 72; i++) {
-			double seed = hash(i * 17 + 12);
-			double seed2 = hash(i * 29 + 4);
-			double x = ox + (seed - 0.5) * 36;
-			double y = oy + 4 + seed2 * 24 + Math.sin(now * 0.25 + i) * 0.4;
-			double z = oz + (seed2 - 0.5) * 36;
-			double size = i % 9 == 0 ? 0.11 : 0.035;
-			mote(vc, pose, x, y, z, size, i % 9 == 0 ? 0xE0C8E8FF : 0x90B8D4FF);
-		}
-	}
-
-	private static void dust(VertexConsumer vc, PoseStack.Pose pose,
-			double ox, double oy, double oz, double now, int warm, int pale, int count) {
-		for (int i = 0; i < count; i++) {
-			double seed = hash(i * 37 + 5);
-			double seed2 = hash(i * 19 + 2);
-			double x = ox + (seed - 0.5) * 22 + Math.sin(now * 0.35 + i) * 1.3;
-			double y = oy + 0.5 + (seed2 + now * 0.04 + i * 0.13) % 11;
-			double z = oz + (seed2 - 0.5) * 22 + Math.cos(now * 0.3 + i) * 1.3;
-			double size = 0.028 + seed * 0.045;
-			mote(vc, pose, x, y, z, size, i % 3 == 0 ? pale : warm);
-		}
-	}
-
-	// ----------------------------------------------------------- geometry
-
-	/**
-	 * One textured petal face, followed by its reverse winding so the leaf is
-	 * visible from above and below. The texture supplies the shape; the tint
-	 * supplies the cool pearl shift between individual leaves.
-	 */
-	private static void texturedPetal(VertexConsumer vc, PoseStack.Pose pose,
-			double x, double y, double z,
-			double ux, double uy, double uz, double vx, double vy, double vz, int tint) {
-		texturedVertex(vc, pose, x - ux - vx, y - uy - vy, z - uz - vz, 0f, 0f, tint);
-		texturedVertex(vc, pose, x + ux - vx, y + uy - vy, z + uz - vz, 1f, 0f, tint);
-		texturedVertex(vc, pose, x + ux + vx, y + uy + vy, z + uz + vz, 1f, 1f, tint);
-		texturedVertex(vc, pose, x - ux + vx, y - uy + vy, z - uz + vz, 0f, 1f, tint);
-	}
-
-	private static void texturedVertex(VertexConsumer vc, PoseStack.Pose pose,
-			double x, double y, double z, float u, float v, int argb) {
-		vc.addVertex(pose, (float) x, (float) y, (float) z)
-				.setColor(argb)
-				.setUv(u, v)
-				.setOverlay(0)
-				.setLight(LightTexture.FULL_BRIGHT)
-				.setNormal(0f, 1f, 0f);
 	}
 
 	/**
-	 * A soft spark: two crossed radial fans instead of two square quads.
-	 *
-	 * <p>The centre keeps the colour and the rim fades to zero, so a mote is a
-	 * round glow from every angle rather than a flat sprite square. The second
-	 * plane stops it disappearing when the first is edge-on to the camera.</p>
+	 * Neon's ground lattice. The stored coordinates are absolute multiples of
+	 * {@value #NEON_SPACING}; the camera is subtracted at each vertex, never
+	 * before the grid is built.
 	 */
-	private static void mote(VertexConsumer vc, PoseStack.Pose pose,
-			double x, double y, double z, double size, int color) {
-		fan(vc, pose, x, y, z, size, color, 1, 0, 0, 0, 1, 0);
-		fan(vc, pose, x, y, z, size, color, 0, 0, 1, 0, 1, 0);
-	}
+	private static void neon(VertexConsumer vc, PoseStack.Pose pose,
+			double ox, double oy, double oz, Vec3 camera, double now) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null) {
+			return;
+		}
+		refreshNeonHeights(mc, camera);
+		int startX = Math.floorDiv((int) Math.floor(camera.x) - NEON_REACH, NEON_STEP) * NEON_STEP;
+		int startZ = Math.floorDiv((int) Math.floor(camera.z) - NEON_REACH, NEON_STEP) * NEON_STEP;
+		int minLineX = (int) Math.floor((camera.x - NEON_REACH) / NEON_SPACING);
+		int maxLineX = (int) Math.floor((camera.x + NEON_REACH) / NEON_SPACING);
+		int minLineZ = (int) Math.floor((camera.z - NEON_REACH) / NEON_SPACING);
+		int maxLineZ = (int) Math.floor((camera.z + NEON_REACH) / NEON_SPACING);
+		int drawn = 0;
 
-	/** A radial fan on the plane spanned by two unit axes, with a soft rim. */
-	private static void fan(VertexConsumer vc, PoseStack.Pose pose, double x, double y, double z,
-			double size, int color, double ax, double ay, double az,
-			double bx, double by, double bz) {
-		int rim = 32;
-		int centre = color;
-		int edge = withAlpha(color, 0);
-		for (int i = 0; i < rim; i++) {
-			double a0 = Math.PI * 2.0 * i / rim;
-			double a1 = Math.PI * 2.0 * (i + 1) / rim;
-			double c0 = Math.cos(a0) * size;
-			double s0 = Math.sin(a0) * size;
-			double c1 = Math.cos(a1) * size;
-			double s1 = Math.sin(a1) * size;
-			// The pipeline is QUADS: the centre is repeated so the second
-			// triangle of each quad is the visible fan wedge and the first is
-			// degenerate. No group of four vertices straddles two wedges.
-			vertex(vc, pose, x, y, z, centre);
-			vertex(vc, pose, x, y, z, centre);
-			vertex(vc, pose, x + ax * c0 + bx * s0, y + ay * c0 + by * s0,
-					z + az * c0 + bz * s0, edge);
-			vertex(vc, pose, x + ax * c1 + bx * s1, y + ay * c1 + by * s1,
-					z + az * c1 + bz * s1, edge);
+		for (int ix = minLineX; ix <= maxLineX && drawn < NEON_MAX_SEGMENTS; ix++) {
+			double x = AtmosphereMath.neonLineCoordinate(ix, NEON_SPACING);
+			for (int z = startZ; z <= camera.z + NEON_REACH && drawn < NEON_MAX_SEGMENTS; z += NEON_STEP) {
+				Integer h0 = neonHeight(mc, x, z);
+				Integer h1 = neonHeight(mc, x, z + NEON_STEP);
+				if (h0 == null || h1 == null) {
+					continue;
+				}
+				int color = neonColor(x, z, camera, now, (ix & 1) == 0);
+				if ((color >>> 24) < 5) {
+					continue;
+				}
+				double sx = AtmosphereMath.cameraRelative(x, camera.x);
+				double sz = AtmosphereMath.cameraRelative(z, camera.z);
+				quad(vc, pose, sx - 0.025, h0 + 0.03, sz, sx + 0.025, h0 + 0.03, sz,
+						sx + 0.025, h1 + 0.03, sz + NEON_STEP, sx - 0.025, h1 + 0.03, sz + NEON_STEP,
+						color, color);
+				drawn++;
+			}
+		}
+		for (int iz = minLineZ; iz <= maxLineZ && drawn < NEON_MAX_SEGMENTS; iz++) {
+			double z = AtmosphereMath.neonLineCoordinate(iz, NEON_SPACING);
+			for (int x = startX; x <= camera.x + NEON_REACH && drawn < NEON_MAX_SEGMENTS; x += NEON_STEP) {
+				Integer h0 = neonHeight(mc, x, z);
+				Integer h1 = neonHeight(mc, x + NEON_STEP, z);
+				if (h0 == null || h1 == null) {
+					continue;
+				}
+				int color = neonColor(x, z, camera, now, (iz & 1) == 0);
+				if ((color >>> 24) < 5) {
+					continue;
+				}
+				double sx = AtmosphereMath.cameraRelative(x, camera.x);
+				double sz = AtmosphereMath.cameraRelative(z, camera.z);
+				quad(vc, pose, sx, h0 + 0.03, sz - 0.025, sx, h0 + 0.03, sz + 0.025,
+						sx + NEON_STEP, h1 + 0.03, sz + 0.025, sx + NEON_STEP, h1 + 0.03, sz - 0.025,
+						color, color);
+				drawn++;
+			}
 		}
 	}
 
 	private static void refreshNeonHeights(Minecraft mc, Vec3 camera) {
 		long tick = mc.level.getGameTime();
-		long chunk = ((long) (camera.x < 0 ? (int) Math.floor(camera.x) >> 4 : (int) camera.x >> 4) << 32)
-				^ (camera.z < 0 ? (int) Math.floor(camera.z) >> 4 : (int) camera.z >> 4);
-		boolean changed = neonLevel != mc.level || neonChunk != chunk;
+		int bx = (int) Math.floor(camera.x);
+		int bz = (int) Math.floor(camera.z);
+		long chunk = (((long) (bx >> 4)) << 32) ^ (bz >> 4);
+		boolean changed = neonLevel != mc.level || neonChunk != chunk
+				|| neonCenter == null || Math.abs(camera.x - neonCenter.x) >= NEON_SPACING
+				|| Math.abs(camera.z - neonCenter.z) >= NEON_SPACING;
 		if (!AtmosphereMath.heightCacheNeedsRefresh(tick, neonRefreshTick, changed)) {
 			return;
 		}
 		neonLevel = mc.level;
 		neonChunk = chunk;
 		neonRefreshTick = tick;
+		neonCenter = camera;
 		NEON_HEIGHTS.clear();
-	}
-
-	private static boolean loaded(Minecraft mc, double x, double z) {
-		return mc.level != null && mc.level.hasChunkAt((int) Math.floor(x), (int) Math.floor(z));
-	}
-
-	private static int neonHeight(Minecraft mc, double x, double z) {
-		int bx = (int) Math.floor(x);
-		int bz = (int) Math.floor(z);
-		long key = ((long) bx << 32) ^ (bz & 0xFFFFFFFFL);
-		Integer cached = NEON_HEIGHTS.get(key);
-		if (cached != null) {
-			return cached;
+		for (int dz = -NEON_HALF; dz <= NEON_HALF; dz++) {
+			for (int dx = -NEON_HALF; dx <= NEON_HALF; dx++) {
+				int x = bx + dx;
+				int z = bz + dz;
+				if (!mc.level.hasChunkAt(new net.minecraft.core.BlockPos(x, mc.level.getMinY(), z))) {
+					continue;
+				}
+				int y = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+				NEON_HEIGHTS.put(key(x, z), y);
+			}
 		}
-		int height = mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bx, bz);
-		NEON_HEIGHTS.put(key, height);
-		return height;
+	}
+
+	private static Integer neonHeight(Minecraft mc, double x, double z) {
+		return NEON_HEIGHTS.get(key((int) Math.floor(x), (int) Math.floor(z)));
+	}
+
+	private static long key(int x, int z) {
+		return ((long) x << 32) ^ (z & 0xFFFFFFFFL);
 	}
 
 	private static int neonColor(double x, double z, Vec3 camera, double now, boolean cyan) {
@@ -540,6 +277,30 @@ public final class AtmosphereWorldRenderer {
 		double pulse = 0.66 + 0.34 * Math.sin(now * 2.2 + x * 0.41 + z * 0.57);
 		int base = cyan ? 0x6A25F4E0 : 0x5AFF3FC8;
 		return withAlpha(base, (int) (((base >>> 24) & 0xFF) * fade * pulse));
+	}
+
+	// ---------------------------------------------------------- primitives
+
+	/** A radial fan with a soft rim, emitted as QUADS. */
+	private static void fan(VertexConsumer vc, PoseStack.Pose pose, double x, double y, double z,
+			double size, int color, double ax, double ay, double az,
+			double bx, double by, double bz) {
+		int rim = 24;
+		int edge = withAlpha(color, 0);
+		for (int i = 0; i < rim; i++) {
+			double a0 = Math.PI * 2.0 * i / rim;
+			double a1 = Math.PI * 2.0 * (i + 1) / rim;
+			double c0 = Math.cos(a0) * size;
+			double s0 = Math.sin(a0) * size;
+			double c1 = Math.cos(a1) * size;
+			double s1 = Math.sin(a1) * size;
+			vertex(vc, pose, x, y, z, color);
+			vertex(vc, pose, x, y, z, color);
+			vertex(vc, pose, x + ax * c0 + bx * s0, y + ay * c0 + by * s0,
+					z + az * c0 + bz * s0, edge);
+			vertex(vc, pose, x + ax * c1 + bx * s1, y + ay * c1 + by * s1,
+					z + az * c1 + bz * s1, edge);
+		}
 	}
 
 	private static void quad(VertexConsumer vc, PoseStack.Pose pose,
@@ -561,15 +322,6 @@ public final class AtmosphereWorldRenderer {
 		return (Math.max(0, Math.min(255, alpha)) << 24) | (color & 0x00FFFFFF);
 	}
 
-	/** Stable [0,1) hash. No Random allocation, no shared state. */
-	private static double hash(int seed) {
-		int x = seed * 0x9E3779B9;
-		x ^= x >>> 16;
-		x *= 0x85EBCA6B;
-		x ^= x >>> 13;
-		return (x & 0x7FFFFFFF) / (double) 0x7FFFFFFF;
-	}
-
 	private static MultiBufferSource.BufferSource batch() {
 		if (batch == null) {
 			buffer = new ByteBufferBuilder(BUFFER_BYTES);
@@ -582,16 +334,16 @@ public final class AtmosphereWorldRenderer {
 		if (batch != null) {
 			try {
 				batch.endBatch();
-			} catch (RuntimeException | LinkageError ignored) {
-				// The source is unusable either way.
+			} catch (RuntimeException | LinkageError failure) {
+				Guard.report("atmosphere world flush", failure);
 			}
 			batch = null;
 		}
 		if (buffer != null) {
 			try {
 				buffer.close();
-			} catch (RuntimeException | LinkageError ignored) {
-				// Nothing left to release.
+			} catch (RuntimeException | LinkageError failure) {
+				Guard.report("atmosphere world release", failure);
 			}
 			buffer = null;
 		}
