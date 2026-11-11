@@ -370,14 +370,22 @@ public final class GuiFrame {
 			// glass rather than as two unrelated materials.
 			Ui.sheen(c, wx, wy, ww, wh, r, sheenPhase());
 		}
-		// A soft light from above: the top of the window catches the light.
-		Ui.glow(c, wx + 2, wy + 2, ww - 4, Math.min(wh, 90), UiTheme.PALE_CHERRY, 0.05f);
+		// The pink sakura wash was a leftover from the old theme and made the
+		// glass look white. The Glass surface uses only the cool accent.
 		Ui.outline(c, wx, wy, ww, wh, r, UiTheme.BORDER);
 		Ui.innerBevel(c, wx, wy, ww, wh, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 		// One accent hairline along the top edge. It is the only place the shell
 		// itself is allowed to glow, which gives the window a lit edge instead
 		// of a uniform frame.
 		Ui.surface(c, wx + r, wy + 1, ww - r * 2, 1, 0, Ui.withAlpha(UiTheme.ACCENT, 0x4D));
+		if (ClientConfig.get().glassDebug()) {
+			// A fixed mid-grey backdrop removes the bright world/snow variable
+			// that can make a translucent panel look washed out.
+			c.fill(0, 0, width, height, 0xFF6B7078);
+			Ui.surface(c, wx, wy, ww, wh, r, UiTheme.SHELL_TOP, UiTheme.SHELL_BOTTOM);
+			Ui.outline(c, wx, wy, ww, wh, r, UiTheme.BORDER);
+		}
+		Ui.frost(c, wx + r / 2, wy + 2, ww - r, wh - 4, 0x08FFFFFF);
 
 		// The accent reveal: a soft pink light sweeps down over the window
 		// while it opens.
@@ -597,7 +605,7 @@ public final class GuiFrame {
 	private void renderGuiSettings(UiCanvas c, UiType type, int mouseX, int mouseY, float delta) {
 		ClientConfig config = ClientConfig.get();
 		int w = Math.min(300, width - 24);
-		int h = 190;
+		int h = 222;
 		settingsPanelX = Math.min(width - w - 8, settingsBtnX + settingsButtonWidth() - w);
 		settingsPanelY = settingsBtnY + UiTheme.SEARCH_H + UiTheme.SP_2;
 		int x = settingsPanelX;
@@ -612,8 +620,8 @@ public final class GuiFrame {
 		int rowX = x + UiTheme.SP_5;
 		int rowW = w - UiTheme.SP_5 * 2;
 		int toggleX = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W;
-		int[] rows = {y + 34, y + 66, y + 98, y + 134};
-		String[] labels = {"Sounds", "Reduce animations", "Blur (optional)", "Volume"};
+		int[] rows = {y + 34, y + 66, y + 98, y + 130};
+		String[] labels = {"Sounds", "Reduce animations", "Blur (optional)", "Glass debug"};
 		for (int i = 0; i < 3; i++) {
 			boolean hovered = mouseX >= rowX && mouseX < rowX + rowW
 					&& mouseY >= rows[i] && mouseY < rows[i] + UiTheme.TOGGLE_H + 4;
@@ -624,14 +632,21 @@ public final class GuiFrame {
 			type.regular().draw(c, labels[i], rowX, Ui.centerTextY(rows[i], UiTheme.TOGGLE_H, type.regular()),
 					hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
 		}
-		type.regular().draw(c, "Volume", rowX, rows[3], UiTheme.TEXT_2);
+		boolean glassHovered = mouseX >= rowX && mouseX < rowX + rowW
+				&& mouseY >= rows[3] && mouseY < rows[3] + UiTheme.TOGGLE_H + 4;
+		blurToggle.update(config.glassDebug(), glassHovered, delta);
+		blurToggle.render(c, toggleX, rows[3], UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
+		type.regular().draw(c, labels[3], rowX, Ui.centerTextY(rows[3], UiTheme.TOGGLE_H, type.regular()),
+				glassHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+		int volumeY = y + 166;
+		type.regular().draw(c, "Volume", rowX, volumeY, UiTheme.TEXT_2);
 		int trackX = rowX + 72;
-		int trackY = rows[3] + type.regular().lineHeight() / 2;
+		int trackY = volumeY + type.regular().lineHeight() / 2;
 		int trackW = x + w - UiTheme.SP_5 - trackX;
 		Ui.surface(c, trackX, trackY - 4, trackW, 8, 4, UiTheme.TRACK_TOP, UiTheme.TRACK_BOTTOM);
 		int fill = Math.round(trackW * config.guiVolume() / 100f);
 		Ui.surface(c, trackX, trackY - 4, fill, 8, 4, UiTheme.ACCENT, UiTheme.ACCENT_DEEP);
-		Ui.circle(c, trackX + fill, trackY, 6, UiTheme.PALE_CHERRY);
+		Ui.circle(c, trackX + fill, trackY, 6, UiTheme.ACCENT_2);
 	}
 	private void renderSidebar(UiCanvas c, UiType type, int wx, int wy, int ww, int wh, int mouseX, int mouseY,
 			float delta, float slide) {
@@ -795,8 +810,6 @@ public final class GuiFrame {
 
 		// A very faint blossom in the corner of the workspace. It gives the
 		// empty area a purpose without adding any content.
-		UiIcons.draw(c, UiIcons.Icon.BLOSSOM, cx + cw - 86, bottom - 94, 86,
-				Ui.withAlpha(UiTheme.ACCENT, 0x0F));
 
 		c.pushClip(cx, listTop, cw, listH);
 		int y = listTop - (int) Math.round(scrollbar.scroll()) + Math.round(pageSlide);
@@ -910,6 +923,7 @@ public final class GuiFrame {
 
 		// Search.
 		if (button == 0 && search.contains(mx, my)) {
+			GuiSounds.click();
 			if (search.isOnClear(mx, my)) {
 				search.clear();
 			} else {
@@ -941,6 +955,9 @@ public final class GuiFrame {
 			int index = (int) ((my - rowY) / rowPitch);
 			int rowTop = rowY + index * rowPitch;
 			if (index >= 0 && index < CATEGORIES.length && my < rowTop + rowH) {
+				if (selected != index) {
+					GuiSounds.tab();
+				}
 				selected = index;
 				lastCategory = index;
 				search.clear();
@@ -1008,19 +1025,21 @@ public final class GuiFrame {
 		int w = Math.min(300, width - 24);
 		int x = settingsPanelX;
 		int y = settingsPanelY;
-		if (mx < x || mx >= x + w || my < y || my >= y + 190) {
+		if (mx < x || mx >= x + w || my < y || my >= y + 222) {
 			return false;
 		}
 		ClientConfig config = ClientConfig.get();
-		int[] rows = {y + 34, y + 66, y + 98};
-		for (int i = 0; i < 3; i++) {
+		int[] rows = {y + 34, y + 66, y + 98, y + 130};
+		for (int i = 0; i < 4; i++) {
 			if (my >= rows[i] && my < rows[i] + UiTheme.TOGGLE_H + 4) {
 				if (i == 0) {
 					config.setGuiSounds(!config.guiSounds());
 				} else if (i == 1) {
 					config.setReduceAnimations(!config.reduceAnimations());
-				} else {
+				} else if (i == 2) {
 					config.setBlur(!config.blur());
+				} else {
+					config.setGlassDebug(!config.glassDebug());
 				}
 				ClientConfig.saveNow();
 				GuiSounds.click();
@@ -1029,7 +1048,7 @@ public final class GuiFrame {
 		}
 		int trackX = x + UiTheme.SP_5 + 72;
 		int trackW = w - UiTheme.SP_5 * 2 - 72;
-		if (my >= y + 126 && my < y + 158 && mx >= trackX - 8 && mx < trackX + trackW + 8) {
+		if (my >= y + 158 && my < y + 190 && mx >= trackX - 8 && mx < trackX + trackW + 8) {
 			volumeDragging = true;
 			setGuiVolume(mx);
 			return true;

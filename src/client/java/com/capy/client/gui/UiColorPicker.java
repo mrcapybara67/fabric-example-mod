@@ -187,6 +187,7 @@ public class UiColorPicker {
 		}
 		if (my >= y && my < y + ROW_H) {
 			open = !open;
+			GuiSounds.picker();
 			return true;
 		}
 		if (!open) {

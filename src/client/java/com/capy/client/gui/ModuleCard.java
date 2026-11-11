@@ -515,7 +515,7 @@ public class ModuleCard {
 			Ui.surfaceEdge(c, bx, by, bw, bh, 6,
 					Ui.withAlpha(hovered ? UiTheme.ACCENT : UiTheme.BORDER, hovered ? 0xD0 : 0x90),
 					Ui.withAlpha(UiTheme.BORDER, 0x50));
-			Ui.drawCentered(c, regular, "Reset", bx + bw / 2, Ui.centerTextY(by, bh, regular),
+			Ui.drawCentered(c, regular, action.buttonLabel(), bx + bw / 2, Ui.centerTextY(by, bh, regular),
 					hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
 			int[] ab = actionBounds.computeIfAbsent(action, key -> new int[4]);
 			ab[0] = bx;
@@ -760,6 +760,7 @@ public class ModuleCard {
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
 				entry.getKey().run();
+				GuiSounds.click();
 				return true;
 			}
 		}
@@ -769,6 +770,7 @@ public class ModuleCard {
 				// The leading arrow steps back, the value and the trailing arrow
 				// step forward.
 				entry.getKey().cycle(mx < b[4] ? -1 : 1);
+				GuiSounds.tab();
 				return true;
 			}
 		}

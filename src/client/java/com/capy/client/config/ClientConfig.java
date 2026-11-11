@@ -49,6 +49,7 @@ public final class ClientConfig {
 	private static final String KEY_GUI_VOLUME = "gui_volume";
 	private static final String KEY_REDUCE_ANIMATIONS = "reduce_animations";
 	private static final String KEY_BLUR = "blur";
+	private static final String KEY_GLASS_DEBUG = "glass_debug";
 	/** Per module: whether it was switched on when the game was last closed. */
 	private static final String KEY_ENABLED = "enabled";
 
@@ -58,6 +59,7 @@ public final class ClientConfig {
 	private int guiVolume = 100;
 	private boolean reduceAnimations = false;
 	private boolean blur = false;
+	private boolean glassDebug = false;
 	private final Map<String, JsonObject> moduleData = new LinkedHashMap<>();
 
 	private ClientConfig() {
@@ -101,6 +103,15 @@ public final class ClientConfig {
 		this.blur = value;
 	}
 
+	/** Shows the ClickGUI over a fixed grey test backdrop. */
+	public boolean glassDebug() {
+		return glassDebug;
+	}
+
+	public void setGlassDebug(boolean value) {
+		this.glassDebug = value;
+	}
+
 	/** The stored JSON of a module (never null). */
 	public JsonObject moduleData(String moduleId) {
 		return moduleData.computeIfAbsent(moduleId, id -> new JsonObject());
@@ -140,6 +151,7 @@ public final class ClientConfig {
 		guiVolume = Math.max(0, Math.min(100, ConfigValues.intValue(root, KEY_GUI_VOLUME, 100)));
 		reduceAnimations = ConfigValues.boolValue(root, KEY_REDUCE_ANIMATIONS, false);
 		blur = ConfigValues.boolValue(root, KEY_BLUR, false);
+		glassDebug = ConfigValues.boolValue(root, KEY_GLASS_DEBUG, false);
 
 		JsonElement modulesElement = root.get(KEY_MODULES);
 		if (modulesElement != null && modulesElement.isJsonObject()) {
@@ -178,6 +190,7 @@ public final class ClientConfig {
 		root.addProperty(KEY_GUI_VOLUME, guiVolume);
 		root.addProperty(KEY_REDUCE_ANIMATIONS, reduceAnimations);
 		root.addProperty(KEY_BLUR, blur);
+		root.addProperty(KEY_GLASS_DEBUG, glassDebug);
 
 		JsonObject modules = new JsonObject();
 		for (Module module : ModuleManager.get().modules()) {

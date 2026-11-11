@@ -663,6 +663,26 @@ public final class Ui {
 		}
 	}
 
+	/**
+	 * A cheap frosted micro-stripe layer. It is ordinary alpha fills, not a
+	 * shader, and breaks the flat tint without adding a texture fetch.
+	 */
+	public static void frost(UiCanvas c, int x, int y, int w, int h, int color) {
+		if (w <= 0 || h <= 0 || (color >>> 24) == 0) {
+			return;
+		}
+		int rgb = color & 0x00FFFFFF;
+		int alpha = color >>> 24;
+		for (int dy = -h; dy < w; dy += 11) {
+			int x0 = Math.max(x, x + dy);
+			int y0 = Math.max(y, y - dy);
+			int steps = Math.min(x + w - x0, y + h - y0);
+			for (int i = 0; i < steps; i += 2) {
+				c.fill(x0 + i, y0 + i, x0 + i + 1, y0 + i + 1, (alpha << 24) | rgb);
+			}
+		}
+	}
+
 	/** One soft vertical reflection, centred on {@code center}. */
 	private static void drawSheenBand(UiCanvas c, int ix, int iy, int iw, int ih,
 			float center, float halfWidth, int peak) {

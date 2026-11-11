@@ -39,6 +39,7 @@ public final class UiTheme {
 	public static final int ACCENT_2 = 0xFFBFE7FF;
 	public static final int ACCENT_DEEP = 0xFF4A9BD1;
 	public static final int ACCENT_GLOW = 0x338FD3FF;
+	/** Retained for source compatibility; no longer used for a pink wash. */
 	public static final int BLOSSOM = 0xFFD9F2FF;
 	public static final int PALE_CHERRY = 0xFFEAF8FF;
 

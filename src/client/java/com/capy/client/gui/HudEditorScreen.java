@@ -206,6 +206,7 @@ public final class HudEditorScreen extends Screen {
 	}
 
 	private void startDrag(Object target, int mx, int my, int x, int y) {
+		GuiSounds.click();
 		dragging = target;
 		grabX = mx - x;
 		grabY = my - y;

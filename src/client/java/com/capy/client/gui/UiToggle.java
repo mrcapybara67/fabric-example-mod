@@ -48,8 +48,8 @@ public class UiToggle {
 		int ky = y + 4;
 		Ui.roundRect(c, kx + 1, ky + 2, d, d, d / 2, 0x4D000000);
 		Ui.surface(c, kx, ky, d, d, d / 2,
-				Ui.lerpColor(0xFFD8C4D0, UiTheme.PALE_CHERRY, t),
-				Ui.lerpColor(0xFFB9A2B1, 0xFFFFC4D8, t));
+				Ui.lerpColor(0xFFD8C4D0, UiTheme.ACCENT_2, t),
+				Ui.lerpColor(0xFFB9A2B1, 0xFFBFE7FF, t));
 		Ui.outline(c, kx, ky, d, d, d / 2, 0x59FFFFFF);
 		// A single highlight along the top of the knob.
 		Ui.surface(c, kx + 3, ky + 1, d - 6, 1, 0, 0x66FFFFFF);

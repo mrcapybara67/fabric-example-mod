@@ -42,8 +42,12 @@ public final class ItemInspectPose {
 	}
 
 	public static void start(ItemInspectModule.Tool kind, float speed, ItemStack stack) {
+		if (kind == null || stack == null || stack.isEmpty()) {
+			cancel();
+			return;
+		}
 		tool = kind;
-		startItem = stack == null ? null : stack.getItem();
+		startItem = stack.getItem();
 		durationNanos = (long) (kind.durationNanos() / Math.max(0.5f, Math.min(2f, speed)));
 		startedAt = System.nanoTime();
 		ending = false;
@@ -152,37 +156,50 @@ public final class ItemInspectPose {
 		pushedByCall[depth++] = pushed;
 	}
 
+	public static void applyForTest(PoseStack pose, ItemInspectModule.Tool kind, float raw, boolean left) {
+		apply(pose, kind, Math.max(0f, Math.min(1f, raw)), left);
+	}
+
 	private static void apply(PoseStack pose, ItemInspectModule.Tool kind, float raw, boolean left) {
 		float t = smooth(raw);
 		float arc = (float) Math.sin(Math.PI * raw);
 		float m = left ? -1f : 1f;
-		// A tiny lift shared by every animation; the per-tool motion adds its
-		// own movement, and the envelope returns both to zero.
 		pose.translate(m * 0.018f * arc, 0.030f * arc, -0.075f * arc);
 		pose.mulPose(Axis.ZP.rotationDegrees(m * -12.0f * arc));
 		switch (kind) {
 			case SWORD -> {
-				pose.translate(m * 0.025f * arc, 0.055f * arc, -0.055f * arc);
-				pose.mulPose(Axis.ZP.rotationDegrees(m * -34.0f * arc));
-				pose.mulPose(Axis.XP.rotationDegrees(16.0f * arc));
-				pose.mulPose(Axis.YP.rotationDegrees(m * 360.0f * t));
-				pose.mulPose(Axis.ZP.rotationDegrees(m * 42.0f * (float) Math.sin(Math.PI * raw)));
+				// Wrist flourish: lift the blade, turn it about its own long axis
+				// (Z), and hold briefly at the top. It never windmills around Y.
+				float lift = smooth(Math.min(1f, raw * 2.1f));
+				float spin = smooth(Math.max(0f, Math.min(1f, (raw - 0.08f) / 0.58f)));
+				float hold = smooth(Math.max(0f, Math.min(1f, (raw - 0.58f) / 0.18f)))
+						* (1f - smooth(Math.max(0f, Math.min(1f, (raw - 0.76f) / 0.24f))));
+				pose.translate(m * 0.030f * lift, 0.070f * lift, -0.045f * lift);
+				pose.mulPose(Axis.XP.rotationDegrees(-52.0f * lift));
+				pose.mulPose(Axis.YP.rotationDegrees(m * 22.0f * arc));
+				pose.mulPose(Axis.ZP.rotationDegrees(m * (360.0f * spin + 18.0f * hold)));
 			}
 			case AXE -> {
+				// Keep the overhead flip, with a longer hang and a settle bounce.
+				float flip = smooth(Math.min(1f, raw * 1.03f));
+				float hang = (float) Math.pow(Math.sin(Math.PI * Math.min(1f, raw * 1.1f)), 4.0);
 				pose.translate(m * 0.010f * arc, 0.095f * arc, -0.020f * arc);
-				pose.mulPose(Axis.XP.rotationDegrees(360.0f * smooth(Math.min(1f, raw * 1.03f))));
+				pose.mulPose(Axis.XP.rotationDegrees(360.0f * flip));
 				pose.mulPose(Axis.ZP.rotationDegrees(m * 18.0f * arc));
-				// A small weight bounce when the head comes around.
-				pose.translate(0.0f, -0.025f * (float) Math.sin(Math.PI * raw) * arc, 0.0f);
+				pose.translate(0.0f, 0.018f * hang, 0.0f);
+				float settle = raw < 0.86f ? 0f : (float) Math.sin(Math.PI * (raw - 0.86f) / 0.14f);
+				pose.translate(0.0f, -0.018f * settle, 0.0f);
 			}
 			case PICKAXE -> {
-				pose.translate(0.0f, 0.020f * arc, -0.125f * arc);
-				pose.translate(0.0f, 0.120f * arc, 0.0f);
-				pose.mulPose(Axis.YP.rotationDegrees(m * 360.0f * t));
-				pose.mulPose(Axis.XP.rotationDegrees(18.0f * arc));
-				// Catch: dip after the toss rather than returning stiffly.
+				// Toss-and-catch: a visible separation from the hand and a full
+				// rotation around the head's Y axis, then a downward catch dip.
+				float toss = (float) Math.pow(Math.sin(Math.PI * raw), 0.8);
+				float spin = smooth(raw);
+				pose.translate(0.0f, 0.175f * toss, -0.050f * arc);
+				pose.mulPose(Axis.YP.rotationDegrees(m * 360.0f * spin));
+				pose.mulPose(Axis.XP.rotationDegrees(24.0f * arc));
 				float catchDip = raw < 0.72f ? 0f : (float) Math.sin(Math.PI * (raw - 0.72f) / 0.28f);
-				pose.translate(0.0f, -0.035f * catchDip, 0.0f);
+				pose.translate(0.0f, -0.045f * catchDip, 0.0f);
 			}
 			case SHOVEL, HOE -> {
 				pose.translate(m * 0.022f * arc, 0.050f * arc, -0.060f * arc);

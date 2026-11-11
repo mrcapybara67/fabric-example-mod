@@ -1,12 +1,18 @@
 package com.capy.client.module.modules;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
+import com.capy.client.module.modules.movement.BoatSink;
+import com.capy.client.module.modules.movement.InertiaRamp;
+import com.capy.client.module.modules.movement.MovementKickGuard;
+import com.capy.client.module.modules.movement.MovementProfile;
+import com.capy.client.module.modules.movement.MovementProfiles;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -59,6 +65,9 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 	 */
 	private final SliderSetting boatFall =
 			setting(new SliderSetting("boat_fall", 100, 10, 1000, 2));
+	private final BooleanSetting serverSafe = setting(new BooleanSetting("server_safe", true));
+	private final BooleanSetting legacyMode = setting(new BooleanSetting("legacy_mode", false));
+	private final InertiaRamp ramp = new InertiaRamp();
 
 	/** True for the noclip variant, which also disables boat collision. */
 	private final boolean noclip;
@@ -122,8 +131,13 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 			controlled = boat;
 		}
 
+		MovementProfile profile = MovementProfiles.get().profile(MovementKickGuardHost.host());
 		double horizontal = horizontalSpeed.real() / TICKS_PER_SECOND;
 		double vertical = verticalSpeed.real() / TICKS_PER_SECOND;
+		if (serverSafe.value()) {
+			horizontal = Math.min(horizontal, profile.horizontal() / TICKS_PER_SECOND);
+			vertical = Math.min(vertical, profile.vertical() / TICKS_PER_SECOND);
+		}
 
 		double forward = 0.0;
 		double strafe = 0.0;
@@ -153,11 +167,18 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 		} else if (lift < 0) {
 			vy = -vertical;
 		} else {
-			// Boat fall: with no vertical key held the hull descends on its
-			// own. The slider is blocks per second, so 0.10 is a slow sink and
-			// 10.00 is a drop.
-			vy = -boatFall.real() / TICKS_PER_SECOND;
+			// The automatic sink belongs to an idle boat only. Forward or
+			// strafe input means the player is flying it, so the vertical
+			// target is level flight. This is the confirmed sink-while-moving
+			// bug: the old branch ignored horizontal input entirely.
+			vy = BoatSink.target(forward, strafe, lift, boatFall.real() / TICKS_PER_SECOND);
 		}
+
+		ramp.step(vx, vy, vz, profile.inertia(), legacyMode.value());
+		vx = ramp.x();
+		vy = ramp.y();
+		vz = ramp.z();
+		MovementKickGuard.noteActive();
 
 		if (noclip) {
 			// Direct stepping. Vanilla's collision solver is bypassed entirely,
@@ -211,6 +232,7 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 	/** Restores the boat's collision and forgets it. */
 	protected void release() {
 		noclipPrimed = false;
+		ramp.reset();
 		if (controlled != null) {
 			if (noclip) {
 				controlled.noPhysics = false;
@@ -226,6 +248,12 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 		horizontalSpeed.set(ConfigValues.intValue(json, "horizontal_speed", 100));
 		verticalSpeed.set(ConfigValues.intValue(json, "vertical_speed", 80));
 		boatFall.set(ConfigValues.intValue(json, "boat_fall", 100));
+		serverSafe.set(ConfigValues.boolValue(json, "server_safe", true));
+		legacyMode.set(ConfigValues.boolValue(json, "legacy_mode", false));
+		if (json != null && json.has("movement_profiles") && json.get("movement_profiles").isJsonObject()) {
+			MovementProfiles.get().load(json.getAsJsonObject("movement_profiles"));
+		}
+		ramp.reset();
 	}
 
 	@Override
@@ -233,5 +261,8 @@ public class BoatFlyModule extends Module implements Tickable, Configurable {
 		json.addProperty("horizontal_speed", horizontalSpeed.get());
 		json.addProperty("vertical_speed", verticalSpeed.get());
 		json.addProperty("boat_fall", boatFall.get());
+		json.addProperty("server_safe", serverSafe.value());
+		json.addProperty("legacy_mode", legacyMode.value());
+		json.add("movement_profiles", MovementProfiles.get().toJson());
 	}
 }

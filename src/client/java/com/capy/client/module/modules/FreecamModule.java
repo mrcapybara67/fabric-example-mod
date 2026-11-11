@@ -140,7 +140,9 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	private boolean inputLatched;
 	private boolean attackAtEnable;
 	private BlockPos latchedTarget;
-	private boolean debugLogged;
+	private long lastDebugNanos;
+	private long cameraChunkMissingSince;
+	private boolean sendRadiusWarned;
 
 	public FreecamModule() {
 		super(Category.DONUT_SMP, "freecam");
@@ -235,14 +237,32 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 	}
 
 	private void logDebug(LocalPlayer player) {
-		if (!debug.value() || debugLogged) {
-			return;
-		}
-		debugLogged = true;
+		long now = System.nanoTime();
 		BlockPos pos = BlockPos.containing(x, y, z);
-		boolean loaded = player.level().hasChunkAt(pos);
-		LOGGER.info("Capy freecam at {}: chunkLoaded={}, block={}, body={}",
-				pos, loaded, loaded ? player.level().getBlockState(pos) : "unloaded", player.blockPosition());
+		Minecraft mc = Minecraft.getInstance();
+		boolean loaded = player.level().getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4);
+		if (debug.value() && now - lastDebugNanos >= 1_000_000_000L) {
+			lastDebugNanos = now;
+			boolean built = loaded && mc != null && mc.levelRenderer != null
+					&& mc.levelRenderer.isSectionCompiledAndVisible(pos);
+			int visible = mc == null || mc.levelRenderer == null ? -1
+					: mc.levelRenderer.getVisibleSections().size();
+			int renderDistance = mc == null || mc.options == null ? -1 : mc.options.renderDistance().get();
+			LOGGER.info("Capy freecam at {}: chunkLoaded={}, sectionBuilt={}, visibleSections={}, renderDistance={}, body={}",
+					pos, loaded, built, visible, renderDistance, player.blockPosition());
+		}
+		if (loaded) {
+			cameraChunkMissingSince = 0L;
+		} else if (player.blockPosition().distSqr(pos) > 32.0 * 32.0) {
+			if (cameraChunkMissingSince == 0L) {
+				cameraChunkMissingSince = now;
+			} else if (!sendRadiusWarned && now - cameraChunkMissingSince > 4_000_000_000L) {
+				sendRadiusWarned = true;
+				player.displayClientMessage(net.minecraft.network.chat.Component.literal(
+						"[Capy] Freecam has flown past the chunks this server sends around your real body. "
+							+ "This is a server send-radius limit, not a client bug; moving the body closer is the only fix."), false);
+			}
+		}
 	}
 
 	@Override
@@ -252,7 +272,9 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		primed = false;
 		lastLevel = null;
 		lastFrameNanos = 0L;
-		debugLogged = false;
+		lastDebugNanos = 0L;
+		cameraChunkMissingSince = 0L;
+		sendRadiusWarned = false;
 		stop();
 	}
 
@@ -329,6 +351,9 @@ public class FreecamModule extends Module implements Tickable, Configurable {
 		yaw = player.getYRot();
 		pitch = player.getXRot();
 		lastFrameNanos = 0L;
+		lastDebugNanos = 0L;
+		cameraChunkMissingSince = 0L;
+		sendRadiusWarned = false;
 		stop();
 		primed = true;
 	}
