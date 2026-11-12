@@ -68,6 +68,11 @@ public final class GuiSounds {
 		play(SoundEvents.NOTE_BLOCK_CHIME.value(), 1.48f, volume(0.10f));
 	}
 
+	/** A rejected action, kept distinct from a successful click. */
+	public static void error() {
+		play(SoundEvents.VILLAGER_NO, 0.92f, volume(0.22f));
+	}
+
 	public static void close() {
 		play(SoundEvents.UI_TOAST_OUT, 0.88f, volume(0.23f));
 		play(SoundEvents.NOTE_BLOCK_BASS.value(), 0.72f, volume(0.08f));

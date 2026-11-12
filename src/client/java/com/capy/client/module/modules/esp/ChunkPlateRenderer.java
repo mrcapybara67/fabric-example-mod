@@ -125,8 +125,8 @@ public final class ChunkPlateRenderer {
 	}
 
 	private static int style(BaseFinderModule finder) {
-		return ((finder.plateY() * 31 + finder.plateThickness()) * 31
-				+ (finder.outlines() ? 1 : 0)) * 31 + finder.plateStyle();
+		return (int) (((finder.plateY() * 31 + finder.plateThickness() * 10) * 31
+				+ (finder.outlines() ? 1 : 0)) * 31 + finder.plateStyle());
 	}
 
 	private static void rebuild(BaseFinderModule finder, Cache cache) {

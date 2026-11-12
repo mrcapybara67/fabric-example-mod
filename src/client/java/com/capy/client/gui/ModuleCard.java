@@ -70,6 +70,8 @@ public class ModuleCard {
 	private final Map<ColorSetting, String> pickerLabels = new IdentityHashMap<>();
 	private final Map<StringSetting, UiTextField> fields = new IdentityHashMap<>();
 	private final Map<StringSetting, String> fieldLabels = new IdentityHashMap<>();
+	private final Map<SliderSetting, String> sliderValues = new IdentityHashMap<>();
+	private final Map<SliderSetting, Double> sliderValueSources = new IdentityHashMap<>();
 
 	private final Anim hover = new Anim(0f, 14f);
 	private final Anim on = new Anim(0f, 18f);
@@ -95,6 +97,8 @@ public class ModuleCard {
 	private int w;
 	private int h;
 	private int animatedHeight;
+	/** 0 hidden .. 1 settled, supplied by the list's stagger. */
+	private float reveal = 1f;
 
 	public ModuleCard(Module module) {
 		this.module = module;
@@ -265,11 +269,18 @@ public class ModuleCard {
 		return UiTheme.CARD_H + settingsFullHeight();
 	}
 
-	/** Advances the expand animation once per frame and caches the height. */
-	public void animate(float delta) {
+	/**
+	 * Advances the expand animation once per frame and caches the height.
+	 *
+	 * @return true when the height changed, so the owner can rebuild its
+	 *         retained layout only on the frames that actually moved
+	 */
+	public boolean animate(float delta) {
 		expand.to(expanded ? 1f : 0f, delta);
 		press.to(pressed ? 1f : 0f, delta);
+		int previous = animatedHeight;
 		animatedHeight = UiTheme.CARD_H + Math.round(settingsFullHeight() * expand.value());
+		return animatedHeight != previous || expand.isMoving();
 	}
 
 	/** Height for the current frame (after {@link #animate}). */
@@ -321,6 +332,11 @@ public class ModuleCard {
 		this.expanded = expanded;
 	}
 
+	/** Opening stagger, 0 hidden .. 1 settled. */
+	void setReveal(float reveal) {
+		this.reveal = Ui.clamp01(reveal);
+	}
+
 	public boolean hasSettings() {
 		return !module.settings().isEmpty();
 	}
@@ -329,18 +345,28 @@ public class ModuleCard {
 
 	public void render(UiCanvas c, UiType type, int x, int y, int w, int mouseX, int mouseY, float delta,
 			boolean showCategory) {
-		this.x = x;
-		this.y = y;
-		this.w = w;
 		int h = animatedHeight;
-		this.h = h;
-
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
 		hover.to(hovered ? 1f : 0f, delta);
 		on.to(module.isEnabled() ? 1f : 0f, delta);
 
+		// Hover lifts by one pixel, a press shrinks by two percent, and the
+		// opening stagger raises each card into place. The hit test uses the
+		// resulting geometry, so a control is never drawn away from its click.
+		int lift = Math.round(hover.value());
+		int inset = Math.round(w * 0.02f * press.value());
+		int revealOffset = Math.round((1f - reveal) * 6f);
+		x += inset;
+		w -= inset * 2;
+		y -= lift + revealOffset;
+		this.x = x;
+		this.y = y;
+		this.w = w;
+		this.h = h;
+
 		float hv = hover.value();
 		float onv = on.value();
+		float revealAlpha = 0.2f + 0.8f * reveal;
 		int r = UiTheme.RADIUS;
 
 		// A soft shadow lifts the card off the workspace.
@@ -350,19 +376,32 @@ public class ModuleCard {
 		// the accent while the module is enabled.
 		int top = Ui.lerpColor(UiTheme.CARD_TOP, UiTheme.CARD_HOVER_TOP, hv);
 		int bottom = Ui.lerpColor(UiTheme.CARD_BOTTOM, UiTheme.CARD_HOVER_BOTTOM, hv);
+		top = Ui.fadeAlpha(top, revealAlpha);
+		bottom = Ui.fadeAlpha(bottom, revealAlpha);
 		float pressT = press.value();
 		if (pressT > 0.01f) {
 			top = Ui.lerpColor(top, 0xFF191220, 0.42f * pressT);
 			bottom = Ui.lerpColor(bottom, 0xFF140E19, 0.42f * pressT);
 		}
-		Ui.surface(c, x, y, w, h, r, top, bottom);
+		// The card body is the generated CARD/CARD_HOVER 9-slice, with the
+		// vertical value change kept as one gradient overlay inside the rim.
+		Ui.surfaceKind(c, hv > 0.5f ? UiSprites.Kind.CARD_HOVER : UiSprites.Kind.CARD,
+				x, y, w, h, r, top);
+		if (h > r * 2) {
+			c.gradient(x + r, y + r, x + w - r, y + h - r, 0x00000000,
+					Ui.fadeAlpha(bottom, 0.35f));
+		}
 		// A single expanding wash from the click point. It is cheap: one disc,
 		// no extra buffer, and it fades out in about 260 ms.
 		ripple.to(0f, delta);
 		if (ripple.value() > 0.01f) {
 			int radius = Math.round((1f - ripple.value()) * 34f);
+			// Clip the ripple to the card; an unclipped disc spilled over the
+			// neighbouring card during a fast double click.
+			c.pushClip(x + 1, y + 1, w - 2, h - 2);
 			Ui.circle(c, rippleX, rippleY, radius,
 					Ui.withAlpha(UiTheme.ACCENT, Math.round(46 * ripple.value())));
+			c.popClip();
 		}
 		if (onv > 0.02f) {
 			Ui.surface(c, x, y, w, h, r,
@@ -390,10 +429,11 @@ public class ModuleCard {
 		int blockH = hasDesc ? medium.lineHeight() + DESC_GAP + regular.lineHeight() : medium.lineHeight();
 		int nameY = y + (UiTheme.CARD_H - blockH) / 2;
 		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.8f));
+		nameColor = Ui.fadeAlpha(nameColor, revealAlpha);
 		Ui.drawEllipsized(c, medium, title, textX, nameY, textRight - textX, nameColor);
 		if (hasDesc) {
 			Ui.drawEllipsized(c, regular, desc, textX, nameY + medium.lineHeight() + DESC_GAP,
-					textRight - textX, UiTheme.TEXT_3);
+					textRight - textX, Ui.fadeAlpha(UiTheme.TEXT_3, revealAlpha));
 		}
 
 		// The settings chevron sits in its own strip between the name and the
@@ -441,13 +481,14 @@ public class ModuleCard {
 			int clipH = Math.round(full * expand.value());
 			c.pushClip(x + 1, y + UiTheme.CARD_H, w - 2, clipH);
 			int wy = y + UiTheme.CARD_H;
-			int inset = UiTheme.SP_3;
-			Ui.surface(c, x + inset, wy, w - inset * 2, full - 2, UiTheme.RADIUS,
+			int wellInset = UiTheme.SP_3;
+			Ui.surface(c, x + wellInset, wy, w - wellInset * 2, full - 2, UiTheme.RADIUS,
 					UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
-			Ui.outline(c, x + inset, wy, w - inset * 2, full - 2, UiTheme.RADIUS, 0x33FFFFFF);
+			Ui.outline(c, x + wellInset, wy, w - wellInset * 2, full - 2, UiTheme.RADIUS, 0x33FFFFFF);
 			// A one pixel shade along the top of the well: the panel is inset, and
 			// without it the well and the card read as the same surface.
-			Ui.surface(c, x + inset + UiTheme.RADIUS, wy + 1, w - (inset + UiTheme.RADIUS) * 2, 1, 0, 0x38000000);
+			Ui.surface(c, x + wellInset + UiTheme.RADIUS, wy + 1,
+					w - (wellInset + UiTheme.RADIUS) * 2, 1, 0, 0x38000000);
 
 			int cy = wy + PAD;
 			for (Setting<?> s : module.settings()) {
@@ -635,9 +676,18 @@ public class ModuleCard {
 	}
 
 	private String sliderValueText(SliderSetting slider) {
+		double current = slider.fraction();
+		Double previous = sliderValueSources.get(slider);
+		String cached = sliderValues.get(slider);
+		if (cached != null && previous != null && Math.abs(previous - current) < 1.0e-9) {
+			return cached;
+		}
 		String value = slider.display();
 		String unit = sliderUnits.get(slider);
-		return unit == null || unit.isEmpty() ? value : value + " " + unit;
+		String text = unit == null || unit.isEmpty() ? value : value + " " + unit;
+		sliderValueSources.put(slider, current);
+		sliderValues.put(slider, text);
+		return text;
 	}
 
 	private String unitFor(SliderSetting slider) {

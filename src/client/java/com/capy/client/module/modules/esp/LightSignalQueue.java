@@ -1,49 +1,76 @@
 package com.capy.client.module.modules.esp;
 
 import java.util.ArrayDeque;
+import java.util.BitSet;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacketData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Classifies light data exactly as it arrived, before vanilla applies it.
  *
- * <p>The queue is bounded and drained under a wall-clock budget. A packet that
- * arrives after the queue is full is dropped rather than growing memory; a
- * missed light update costs a flag, never a frame.</p>
+ * <p>The packet's non-empty mask pairs one-for-one with its update list. The
+ * empty mask is disjoint from that list (verified against the 1.21.11 packet
+ * bytecode), so the update cursor must only advance for non-empty bits.</p>
+ *
+ * <p>Light sections include one section below the world, so bit 0 is
+ * {@code minLightSection}, which is normally {@code minSectionY - 1}.</p>
  */
 public final class LightSignalQueue {
 	public enum Kind { NORMAL, EMPTY_MASK, ZEROED_PRESENT, UNIFORM_MAX, UNKNOWN }
 
-	private record Packet(int x, int z, ClientboundLightUpdatePacketData data) {
+	private record Packet(int x, int z, ClientboundLightUpdatePacketData data, boolean chunkLoad) {
 	}
 
+	private static final Logger LOGGER = LoggerFactory.getLogger("capy-light");
 	private static final int MAX_QUEUE = 4096;
 	private static final int MAX_FINDINGS = 512;
+	private static final int MAX_SNAPSHOTS = 8192;
+	private static final int MAX_SECTIONS = 64;
+	private static final AtomicBoolean CHUNK_HOOK_LOGGED = new AtomicBoolean();
+	private static final AtomicBoolean UPDATE_HOOK_LOGGED = new AtomicBoolean();
 	private static final Deque<Packet> QUEUE = new ArrayDeque<>();
 	private static final Map<Long, Long> FINDINGS = new LinkedHashMap<>();
+	private static final Map<Long, Snapshot> SNAPSHOTS = new LinkedHashMap<>();
 	private static BlockPos lastBreak;
 	private static long lastBreakAt;
+
+	public static final class Snapshot {
+		final byte[] sky = new byte[MAX_SECTIONS];
+		final byte[] block = new byte[MAX_SECTIONS];
+		boolean skyFilled;
+		boolean blockFilled;
+	}
 
 	private LightSignalQueue() {
 	}
 
 	public static void onChunkPacket(int x, int z, ClientboundLightUpdatePacketData data) {
-		enqueue(x, z, data);
+		if (CHUNK_HOOK_LOGGED.compareAndSet(false, true) && ChunkFinderModule.debugLogging()) {
+			LOGGER.info("Capy light hook fired: chunk-with-light at {},{}", x, z);
+		}
+		enqueue(x, z, data, true);
 	}
 
 	public static void onLightPacket(int x, int z, ClientboundLightUpdatePacketData data) {
-		enqueue(x, z, data);
+		if (UPDATE_HOOK_LOGGED.compareAndSet(false, true) && ChunkFinderModule.debugLogging()) {
+			LOGGER.info("Capy light hook fired: light update at {},{}", x, z);
+		}
+		enqueue(x, z, data, false);
 	}
 
-	private static synchronized void enqueue(int x, int z, ClientboundLightUpdatePacketData data) {
+	private static synchronized void enqueue(int x, int z, ClientboundLightUpdatePacketData data, boolean chunkLoad) {
 		if (data == null || QUEUE.size() >= MAX_QUEUE) {
 			return;
 		}
-		QUEUE.addLast(new Packet(x, z, data));
+		QUEUE.addLast(new Packet(x, z, data, chunkLoad));
 	}
 
 	public static void noteLocalBreak(BlockPos pos, long now) {
@@ -60,7 +87,7 @@ public final class LightSignalQueue {
 			QUEUE.clear();
 			return;
 		}
-		long deadline = System.nanoTime() + Math.max(0, budgetNanos);
+		long deadline = System.nanoTime() + Math.max(0L, budgetNanos);
 		int items = 0;
 		while (!QUEUE.isEmpty() && items++ < 4096) {
 			Packet packet = QUEUE.removeFirst();
@@ -75,40 +102,80 @@ public final class LightSignalQueue {
 		if (suppressed(packet.x, packet.z, now)) {
 			return;
 		}
+		int minLight = level.getLightEngine().getMinLightSection();
+		int count = Math.min(MAX_SECTIONS, level.getLightEngine().getLightSectionCount());
+		long key = HeatMap.key(packet.x, packet.z);
+		Snapshot snapshot = SNAPSHOTS.get(key);
+		boolean first = snapshot == null;
+		if (first) {
+			snapshot = new Snapshot();
+			SNAPSHOTS.put(key, snapshot);
+			while (SNAPSHOTS.size() > MAX_SNAPSHOTS) {
+				SNAPSHOTS.remove(SNAPSHOTS.keySet().iterator().next());
+			}
+		}
 		ClientboundLightUpdatePacketData data = packet.data();
-		int minSection = level.getMinSectionY();
-		boolean bad = belowOne(data.getSkyYMask(), data.getSkyUpdates(),
-				data.getEmptySkyYMask(), minSection)
-				|| belowOne(data.getBlockYMask(), data.getBlockUpdates(),
-				data.getEmptyBlockYMask(), minSection);
+		if (ChunkFinderModule.debugLogging()) {
+			LOGGER.info("Capy light masks {},{} sky={} emptySky={} skyUpdates={} block={} emptyBlock={} blockUpdates={}",
+					packet.x, packet.z, data.getSkyYMask().cardinality(),
+					data.getEmptySkyYMask().cardinality(), data.getSkyUpdates().size(),
+					data.getBlockYMask().cardinality(), data.getEmptyBlockYMask().cardinality(),
+					data.getBlockUpdates().size());
+		}
+		boolean flagLoad = first && packet.chunkLoad && ChunkFinderModule.flagOnLoad();
+		boolean bad = apply(snapshot, true, minLight, count, data.getSkyYMask(), data.getSkyUpdates(),
+				data.getEmptySkyYMask(), flagLoad)
+				| apply(snapshot, false, minLight, count, data.getBlockYMask(), data.getBlockUpdates(),
+				data.getEmptyBlockYMask(), flagLoad);
 		if (bad) {
-			FINDINGS.put(HeatMap.key(packet.x, packet.z), now);
+			FINDINGS.put(key, now);
 			while (FINDINGS.size() > MAX_FINDINGS) {
 				FINDINGS.remove(FINDINGS.keySet().iterator().next());
 			}
 		}
 	}
 
-	private static boolean belowOne(java.util.BitSet mask, java.util.List<byte[]> updates,
-			java.util.BitSet emptyMask, int minSection) {
+	/**
+	 * Applies one layer of a packet. Pure enough for tests: it only touches the
+	 * supplied snapshot and returns whether a section below Y 1 changed from a
+	 * non-bad class to {@link Kind#ZEROED_PRESENT} or {@link Kind#UNIFORM_MAX}.
+	 */
+	public static boolean apply(Snapshot snapshot, boolean skyLayer, int minLightSection, int count,
+			BitSet mask, List<byte[]> updates, BitSet empty, boolean flagOnLoad) {
+		boolean found = false;
 		int update = 0;
-		for (int bit = mask.nextSetBit(0); bit >= 0; bit = mask.nextSetBit(bit + 1)) {
-			if (update >= updates.size()) {
-				break;
-			}
-			byte[] bytes = updates.get(update++);
-			if (emptyMask.get(bit)) {
+		byte[] layer = skyLayer ? snapshot.sky : snapshot.block;
+		boolean hadFilled = skyLayer ? snapshot.skyFilled : snapshot.blockFilled;
+		for (int bit = 0; bit < count; bit++) {
+			Kind current;
+			if (empty.get(bit)) {
+				current = Kind.EMPTY_MASK;
+			} else if (mask.get(bit)) {
+				current = update < updates.size() ? classify(updates.get(update)) : Kind.UNKNOWN;
+				update++;
+			} else {
 				continue;
 			}
-			if (minSection + bit >= 1) {
-				continue;
-			}
-			Kind kind = classify(bytes);
-			if (kind == Kind.ZEROED_PRESENT || kind == Kind.UNIFORM_MAX) {
-				return true;
+			byte before = layer[bit];
+			layer[bit] = (byte) current.ordinal();
+			int worldSection = minLightSection + bit;
+			boolean bad = current == Kind.ZEROED_PRESENT || current == Kind.UNIFORM_MAX;
+			boolean changed = !hadFilled || before != (byte) current.ordinal();
+			if (worldSection < 1 && bad && (flagOnLoad || hadFilled && changed)) {
+				found = true;
 			}
 		}
-		return false;
+		if (skyLayer) {
+			snapshot.skyFilled = true;
+		} else {
+			snapshot.blockFilled = true;
+		}
+		return found;
+	}
+
+	/** Tests use the same layer table as the packet path. */
+	public static Snapshot newSnapshot() {
+		return new Snapshot();
 	}
 
 	/** Pure classifier used by the light tests. */
@@ -147,6 +214,7 @@ public final class LightSignalQueue {
 	public static synchronized void clear() {
 		QUEUE.clear();
 		FINDINGS.clear();
+		SNAPSHOTS.clear();
 		lastBreak = null;
 		lastBreakAt = 0L;
 	}

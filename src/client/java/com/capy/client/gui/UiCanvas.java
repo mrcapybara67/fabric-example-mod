@@ -1,46 +1,21 @@
 package com.capy.client.gui;
 
 /**
- * A minimal drawing surface.
- *
- * The GUI only ever needs to fill axis aligned rectangles and to clip them, so
- * that is exactly what this interface exposes. Keeping the surface this small
- * has two benefits:
- *
- *   <ul>
- *     <li>the drawing code is independent of the rendering pipeline, so the
- *         same code can be rasterised offline for visual review;</li>
- *     <li>every component is forced to compose from flat fills, which is what
- *         keeps the interface crisp at any GUI scale.</li>
- *   </ul>
- *
- * Colours are plain ARGB ints. Alpha is composited by the implementation, so a
- * canvas may be asked to draw translucent layers over opaque ones.
+ * A minimal drawing surface. The default methods keep the GUI usable by the
+ * offline preview, while {@link McCanvas} replaces them with one tinted
+ * nine-slice blit per rounded surface.
  */
 public interface UiCanvas {
-	/** Fills the rectangle (x1, y1) to (x2, y2) exclusive with the given colour. */
 	void fill(int x1, int y1, int x2, int y2, int argb);
 
-	/**
-	 * Restricts drawing to the given rectangle until the matching
-	 * {@link #popClip()}. Nested clips intersect.
-	 */
 	void pushClip(int x, int y, int width, int height);
 
-	/** Ends the most recent clip. */
 	void popClip();
 
-	/**
-	 * Fills the rectangle with a vertical gradient from {@code top} at
-	 * {@code y1} to {@code bottom} at {@code y2}.
-	 *
-	 * It is a method of its own because a real canvas can draw it as one quad
-	 * with two vertex colours. Building the same gradient out of one fill per
-	 * row is what made the interface expensive: a five hundred pixel panel
-	 * became five hundred renderer submissions every frame. The default is the
-	 * row by row version, so an implementation that cannot do better still
-	 * renders correctly.
-	 */
+	default int drawCalls() {
+		return 0;
+	}
+
 	default void gradient(int x1, int y1, int x2, int y2, int top, int bottom) {
 		int height = y2 - y1;
 		if (x2 <= x1 || height <= 0) {
@@ -54,5 +29,38 @@ public interface UiCanvas {
 			float t = height == 1 ? 0f : i / (float) (height - 1);
 			fill(x1, y1 + i, x2, y1 + i + 1, Ui.lerpColor(top, bottom, t));
 		}
+	}
+
+	default void rounded(int x, int y, int w, int h, int radius, int color) {
+		Ui.roundRectFallback(this, x, y, w, h, radius, color);
+	}
+
+	/** Rounded surface using the generated sprite for a specific surface kind. */
+	default void roundedKind(UiSprites.Kind kind, int x, int y, int w, int h, int radius, int color) {
+		rounded(x, y, w, h, radius, color);
+	}
+
+	default void roundedRing(int x, int y, int w, int h, int radius, int top, int bottom) {
+		Ui.surfaceEdgeFallback(this, x, y, w, h, radius, top, bottom);
+	}
+
+	default void softShadow(int x, int y, int w, int h, int radius, int color) {
+		Ui.shadowFallback(this, x, y, w, h, radius);
+	}
+
+	default void sheen(int x, int y, int w, int h, int radius, float phase) {
+		Ui.sheenFallback(this, x, y, w, h, radius, phase);
+	}
+
+	default void frost(int x, int y, int w, int h, int color) {
+		Ui.frostFallback(this, x, y, w, h, color);
+	}
+
+	default void vignette(int width, int height, float fade) {
+		Ui.vignetteFallback(this, width, height, fade);
+	}
+
+	default void noise(int x, int y, int w, int h, int color) {
+		Ui.frostFallback(this, x, y, w, h, color);
 	}
 }

@@ -1,5 +1,7 @@
 package com.capy.client.gui;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -15,6 +17,7 @@ import net.minecraft.client.gui.Font;
  */
 public final class McText implements UiText {
 	private final Supplier<Font> supplier;
+	private final Map<String, Integer> widths = new HashMap<>();
 
 	public McText(Supplier<Font> supplier) {
 		this.supplier = supplier;
@@ -35,8 +38,17 @@ public final class McText implements UiText {
 		if (text == null) {
 			return 0;
 		}
+		Integer cached = widths.get(text);
+		if (cached != null) {
+			return cached;
+		}
 		Font font = resolve();
-		return font == null ? 0 : font.width(text);
+		int width = font == null ? 0 : font.width(text);
+		if (widths.size() > 512) {
+			widths.clear();
+		}
+		widths.put(text, width);
+		return width;
 	}
 
 	@Override

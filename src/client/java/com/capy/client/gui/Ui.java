@@ -35,6 +35,14 @@ public final class Ui {
 		if (w <= 0 || h <= 0) {
 			return;
 		}
+		c.rounded(x, y, w, h, radius, color);
+	}
+
+	/** Per-row fallback used only when no generated texture is available. */
+	public static void roundRectFallback(UiCanvas c, int x, int y, int w, int h, int radius, int color) {
+		if (w <= 0 || h <= 0) {
+			return;
+		}
 		int r = clampRadius(radius, w, h);
 		if (r <= 0) {
 			c.fill(x, y, x + w, y + h, color);
@@ -461,6 +469,20 @@ public final class Ui {
 		roundRect(c, x, y, w, h, radius, color);
 	}
 
+	/** Flat rounded rectangle using a specific generated surface kind. */
+	public static void surfaceKind(UiCanvas c, UiSprites.Kind kind, int x, int y, int w, int h,
+			int radius, int color) {
+		if (w <= 0 || h <= 0) {
+			return;
+		}
+		c.roundedKind(kind, x, y, w, h, radius, color);
+	}
+
+	public static void roundedKind(UiCanvas c, UiSprites.Kind kind, int x, int y, int w, int h,
+			int radius, int color) {
+		surfaceKind(c, kind, x, y, w, h, radius, color);
+	}
+
 	/**
 	 * One pixel rim whose colour is interpolated from top to bottom.
 	 *
@@ -470,6 +492,14 @@ public final class Ui {
 	 * the GUI redraws the shell every frame.
 	 */
 	public static void surfaceEdge(UiCanvas c, int x, int y, int w, int h, int radius, int topColor, int bottomColor) {
+		if (w <= 0 || h <= 0) {
+			return;
+		}
+		c.roundedRing(x, y, w, h, radius, topColor, bottomColor);
+	}
+
+	/** Per-row fallback for the generated border sprite. */
+	public static void surfaceEdgeFallback(UiCanvas c, int x, int y, int w, int h, int radius, int topColor, int bottomColor) {
 		if (w <= 0 || h <= 0) {
 			return;
 		}
@@ -584,6 +614,20 @@ public final class Ui {
 	 * be seen through a shadow this faint.
 	 */
 	public static void shadow(UiCanvas c, int x, int y, int w, int h, int radius) {
+		int layers = GuiQuality.current().shadowLayers();
+		if (layers >= 3) {
+			c.softShadow(x + 4, y + 10, w, h, radius + 4, UiTheme.SHADOW_WIDE);
+		}
+		if (layers >= 1) {
+			c.softShadow(x + 2, y + 5, w, h, radius + 2, UiTheme.SHADOW_MID);
+		}
+		if (layers >= 2) {
+			c.softShadow(x + 1, y + 2, w, h, radius + 1, UiTheme.SHADOW_TIGHT);
+		}
+	}
+
+	/** Per-row fallback for the generated shadow sprite. */
+	public static void shadowFallback(UiCanvas c, int x, int y, int w, int h, int radius) {
 		roundRectSharp(c, x + 4, y + 10, w, h, radius + 4, UiTheme.SHADOW_WIDE);
 		roundRectSharp(c, x + 2, y + 5, w, h, radius + 2, UiTheme.SHADOW_MID);
 		roundRectSharp(c, x + 1, y + 2, w, h, radius + 1, UiTheme.SHADOW_TIGHT);
@@ -628,6 +672,14 @@ public final class Ui {
 	 * @param phase 0..1 position of the band along the surface
 	 */
 	public static void sheen(UiCanvas c, int x, int y, int w, int h, int radius, float phase) {
+		if (w <= 16 || h <= 16 || !GuiQuality.current().sheen()) {
+			return;
+		}
+		c.sheen(x, y, w, h, radius, phase);
+	}
+
+	/** Per-column fallback for the generated sheen texture. */
+	public static void sheenFallback(UiCanvas c, int x, int y, int w, int h, int radius, float phase) {
 		if (w <= 16 || h <= 16) {
 			return;
 		}
@@ -668,6 +720,14 @@ public final class Ui {
 	 * shader, and breaks the flat tint without adding a texture fetch.
 	 */
 	public static void frost(UiCanvas c, int x, int y, int w, int h, int color) {
+		if (w <= 0 || h <= 0 || (color >>> 24) == 0 || !GuiQuality.current().noise()) {
+			return;
+		}
+		c.frost(x, y, w, h, color);
+	}
+
+	/** Per-stripe fallback for the generated frosted-noise texture. */
+	public static void frostFallback(UiCanvas c, int x, int y, int w, int h, int color) {
 		if (w <= 0 || h <= 0 || (color >>> 24) == 0) {
 			return;
 		}
@@ -741,6 +801,12 @@ public final class Ui {
 
 	/** A vertical gradient band with a soft horizontal falloff, used for glows. */
 	public static void glow(UiCanvas c, int x, int y, int w, int h, int color, float strength) {
+		if (!GuiQuality.current().glow()) {
+			return;
+		}
+		if (GuiQuality.current() == GuiQuality.BALANCED) {
+			strength *= 0.55f;
+		}
 		int alpha = Math.round(((color >>> 24) & 0xFF) * strength);
 		if (alpha <= 0) {
 			return;
@@ -759,6 +825,32 @@ public final class Ui {
 				continue;
 			}
 			c.fill(x, y + i, x + w, y + i + rows, (a << 24) | rgb);
+		}
+	}
+
+	/** Edge darkening, one generated vignette texture instead of four fills. */
+	public static void vignette(UiCanvas c, int width, int height, float fade) {
+		if (width <= 0 || height <= 0 || fade <= 0f) {
+			return;
+		}
+		c.vignette(width, height, fade);
+	}
+
+	/** Offline fallback for the vignette texture. */
+	public static void vignetteFallback(UiCanvas c, int width, int height, float fade) {
+		int steps = 16;
+		for (int i = 0; i < steps; i++) {
+			float t = i / (float) steps;
+			int a = Math.round(70 * fade * (1f - t));
+			if (a <= 0) {
+				continue;
+			}
+			int shade = (a << 24);
+			int inset = i * 5;
+			c.fill(inset, inset, width - inset, inset + 5, shade);
+			c.fill(inset, height - inset - 5, width - inset, height - inset, shade);
+			c.fill(inset, inset, inset + 5, height - inset, shade);
+			c.fill(width - inset - 5, inset, width - inset, height - inset, shade);
 		}
 	}
 

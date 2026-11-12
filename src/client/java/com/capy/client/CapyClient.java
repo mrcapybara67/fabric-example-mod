@@ -5,6 +5,7 @@ import com.capy.client.gui.ClickGuiScreen;
 import com.capy.client.gui.GuiColors;
 import com.capy.client.gui.HudEditorScreen;
 import com.capy.client.gui.UiFonts;
+import com.capy.client.gui.UiSprites;
 import com.capy.client.gui.UiTheme;
 import com.capy.client.keybind.ClientKeybinds;
 import com.capy.client.mixin.CapyMixinPlugin;
@@ -146,6 +147,9 @@ public class CapyClient implements ClientModInitializer {
 			// Guarded: this is the client tick, where an escaped exception is the
 			// game dying the moment the player joins a world.
 			Guard.run("fonts", UiFonts::warmUp);
+			// Generate the rounded UI sprites outside a frame. Lazy creation
+			// inside the first draw would upload textures during a render pass.
+			Guard.run("ui sprites", UiSprites::ensureBuilt);
 			// The click counter is drained every tick, so a press that happens
 			// while a screen is open is dropped instead of queued.
 			boolean clicked = ClientKeybinds.consumeOpenGuiClick();

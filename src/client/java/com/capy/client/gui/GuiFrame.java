@@ -47,6 +47,10 @@ public final class GuiFrame {
 	private static final int CATEGORY_H_MIN = 15;
 	/** Width of the header's HUD editor chip when it carries its label. */
 	private static final int HUD_BTN_W = 96;
+	/** Height of the GUI settings flyout. */
+	private static final int SETTINGS_PANEL_H = 280;
+	private static final String[] SETTINGS_LABELS = {"Sounds", "Reduce animations", "Blur (optional)",
+			"Glass debug", "GUI debug"};
 
 	/**
 	 * The page the window was last showing.
@@ -74,6 +78,14 @@ public final class GuiFrame {
 	private final UiToggle soundsToggle = new UiToggle();
 	private final UiToggle animationsToggle = new UiToggle();
 	private final UiToggle blurToggle = new UiToggle();
+	private final UiToggle glassDebugToggle = new UiToggle();
+	private final UiToggle debugToggle = new UiToggle();
+	private final Anim tabIndicator = new Anim(0f, 16f);
+	private final String[] categoryCounts = new String[CATEGORIES.length];
+	private int cachedEnabledCount = -1;
+	private String cachedEnabledText = "0 on";
+	private int cachedListSize = -1;
+	private String cachedListLabel = "0 modules";
 	private boolean guiSettingsOpen;
 	private boolean volumeDragging;
 	private int settingsPanelX;
@@ -82,11 +94,22 @@ public final class GuiFrame {
 	private final Anim windowHeight = new Anim(0f, 12f);
 	private final float[] select = new float[CATEGORIES.length];
 	private final List<ModuleCard> cachedMatches = new ArrayList<>();
+	/** Retained card positions; rebuilt only when the list or a card changes. */
+	private int[] layoutTops = new int[0];
+	private int[] layoutHeights = new int[0];
+	private int layoutContentH;
+	private int layoutWidth = -1;
+	private int layoutHeight = -1;
+	private int layoutSelected = -1;
+	private String layoutQuery = "";
+	private boolean layoutDirty = true;
 
 	private int selected;
 	private int lastSelected = -1;
 	private float switchProgress = 1f;
 	private String cachedQuery;
+	private Object hintBinding;
+	private String hintCache = "? / ESC to close";
 	private int settingsBtnX;
 	private int settingsBtnY;
 	/** True while the header's HUD editor chip is under the pointer. */
@@ -123,7 +146,11 @@ public final class GuiFrame {
 				list.add(new ModuleCard(module));
 			}
 			cards.put(category, list);
+			categoryCounts[category.ordinal()] = String.valueOf(list.size());
 		}
+		cachedEnabledCount = -1;
+		cachedListSize = -1;
+		layoutDirty = true;
 		// Keep the current page when the list is rebuilt.
 		selected = Math.max(0, Math.min(CATEGORIES.length - 1, previous));
 		lastCategory = selected;
@@ -136,6 +163,7 @@ public final class GuiFrame {
 	public void resize(int width, int height) {
 		this.width = width;
 		this.height = height;
+		layoutDirty = true;
 		windowHeight.snap(targetWindowHeight());
 	}
 
@@ -144,6 +172,7 @@ public final class GuiFrame {
 		if (index >= 0 && index < CATEGORIES.length) {
 			selected = index;
 			lastCategory = index;
+			layoutDirty = true;
 		}
 	}
 
@@ -158,6 +187,7 @@ public final class GuiFrame {
 	/** Fills the search field (used by the offline preview). */
 	void setSearch(String query) {
 		search.setQuery(query);
+		layoutDirty = true;
 	}
 
 	/** True when the frame asked to be closed. */
@@ -331,20 +361,7 @@ public final class GuiFrame {
 		// The backdrop: a plum veil that is darkest at the edges, so the
 		// window reads as the lit object in the middle.
 		c.fill(0, 0, width, height, Ui.lerpColor(0x00000000, UiTheme.SCRIM, fade));
-		int steps = 16;
-		for (int i = 0; i < steps; i++) {
-			float t = i / (float) steps;
-			int a = Math.round(70 * fade * (1f - t));
-			if (a <= 0) {
-				continue;
-			}
-			int shade = (a << 24) | 0x00000000;
-			int inset = i * 5;
-			c.fill(inset, inset, width - inset, inset + 5, shade);
-			c.fill(inset, height - inset - 5, width - inset, height - inset, shade);
-			c.fill(inset, inset, inset + 5, height - inset, shade);
-			c.fill(width - inset - 5, inset, width - inset, height - inset, shade);
-		}
+		Ui.vignette(c, width, height, fade);
 
 		// The window follows its content: it grows when a module opens its
 		// settings and shrinks back when it closes.
@@ -397,13 +414,23 @@ public final class GuiFrame {
 		}
 
 		for (int i = 0; i < select.length; i++) {
-			select[i] = Motion.approach(select[i], i == selected ? 1f : 0f, 14f, delta / 20f);
+			float target = i == selected ? 1f : 0f;
+			if (Math.abs(select[i] - target) > 0.001f) {
+				select[i] = Motion.approach(select[i], target, 14f, delta / 20f);
+			} else {
+				select[i] = target;
+			}
 		}
+		tabIndicator.to(selected, delta);
 		if (selected != lastSelected) {
 			lastSelected = selected;
 			switchProgress = 0f;
 		}
-		switchProgress = Motion.approach(switchProgress, 1f, 12f, delta / 20f);
+		if (switchProgress < 1f) {
+			switchProgress = Motion.approach(switchProgress, 1f, 12f, delta / 20f);
+		} else {
+			switchProgress = 1f;
+		}
 
 		renderHeader(c, type, wx, wy, ww, mouseX, mouseY, delta);
 		// The sidebar arrives with the shell, the workspace a beat later, so
@@ -411,7 +438,7 @@ public final class GuiFrame {
 		// a whole finished window at once.
 		float contentEase = Motion.easeOutCubic(Motion.clamp01(fade * 1.18f - 0.18f));
 		renderSidebar(c, type, wx, wy, ww, wh, mouseX, mouseY, delta, (1f - ease) * 22f);
-		renderContent(c, type, mouseX, mouseY, delta, (1f - contentEase) * 26f);
+		renderContent(c, type, mouseX, mouseY, delta, (1f - contentEase) * 26f, contentEase);
 
 		tooltip.render(c, type.regular());
 		if (guiSettingsOpen) {
@@ -435,7 +462,7 @@ public final class GuiFrame {
 		// header is for - where you are, and how much is switched on.
 		UiText display = type.display();
 		UiText pageFont = type.medium();
-		String pageTitle = search.query().isEmpty() ? CATEGORIES[selected].title : "Search results";
+		String pageTitle = search.normalisedQuery().isEmpty() ? CATEGORIES[selected].title : "Search results";
 		int titleX = wx + UiTheme.SP_6;
 		int titleY = Ui.centerTextY(wy, UiTheme.HEADER_H, display);
 		int titleMax = Math.max(0, searchX(wx, ww) - titleX - UiTheme.SP_4);
@@ -454,7 +481,7 @@ public final class GuiFrame {
 		// The live count: how many modules are on. It answers "is anything
 		// even enabled" without opening a page, and it re-reads every frame so
 		// it follows a toggle immediately.
-		String count = enabledCount() + " on";
+		String count = enabledText();
 		int pillW = pageFont.width(count) + UiTheme.SP_4;
 		int pillH = 18;
 		int pillX = titleX + titleW + UiTheme.SP_4;
@@ -501,6 +528,23 @@ public final class GuiFrame {
 		// bar rather than as text floating on the shell.
 		Ui.fadeLine(c, wx + UiTheme.SP_5, wy + UiTheme.HEADER_H - 1,
 				ww - UiTheme.SP_5 * 2, Ui.withAlpha(UiTheme.BORDER, 0xA6));
+	}
+
+	private String enabledText() {
+		int count = enabledCount();
+		if (count != cachedEnabledCount) {
+			cachedEnabledCount = count;
+			cachedEnabledText = count + " on";
+		}
+		return cachedEnabledText;
+	}
+
+	private String listLabel(int size) {
+		if (size != cachedListSize) {
+			cachedListSize = size;
+			cachedListLabel = size + (size == 1 ? " module" : " modules");
+		}
+		return cachedListLabel;
 	}
 
 	/** How many modules are enabled right now, for the header's count pill. */
@@ -605,7 +649,7 @@ public final class GuiFrame {
 	private void renderGuiSettings(UiCanvas c, UiType type, int mouseX, int mouseY, float delta) {
 		ClientConfig config = ClientConfig.get();
 		int w = Math.min(300, width - 24);
-		int h = 222;
+		int h = SETTINGS_PANEL_H;
 		settingsPanelX = Math.min(width - w - 8, settingsBtnX + settingsButtonWidth() - w);
 		settingsPanelY = settingsBtnY + UiTheme.SEARCH_H + UiTheme.SP_2;
 		int x = settingsPanelX;
@@ -620,25 +664,34 @@ public final class GuiFrame {
 		int rowX = x + UiTheme.SP_5;
 		int rowW = w - UiTheme.SP_5 * 2;
 		int toggleX = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W;
-		int[] rows = {y + 34, y + 66, y + 98, y + 130};
-		String[] labels = {"Sounds", "Reduce animations", "Blur (optional)", "Glass debug"};
-		for (int i = 0; i < 3; i++) {
+		for (int i = 0; i < SETTINGS_LABELS.length; i++) {
+			int rowY = y + 34 + i * 32;
 			boolean hovered = mouseX >= rowX && mouseX < rowX + rowW
-					&& mouseY >= rows[i] && mouseY < rows[i] + UiTheme.TOGGLE_H + 4;
-			UiToggle toggle = i == 0 ? soundsToggle : i == 1 ? animationsToggle : blurToggle;
-			boolean value = i == 0 ? config.guiSounds() : i == 1 ? config.reduceAnimations() : config.blur();
+					&& mouseY >= rowY && mouseY < rowY + UiTheme.TOGGLE_H + 4;
+			UiToggle toggle = i == 0 ? soundsToggle : i == 1 ? animationsToggle
+					: i == 2 ? blurToggle : i == 3 ? glassDebugToggle : debugToggle;
+			boolean value = i == 0 ? config.guiSounds() : i == 1 ? config.reduceAnimations()
+					: i == 2 ? config.blur() : i == 3 ? config.glassDebug() : config.guiDebug();
 			toggle.update(value, hovered, delta);
-			toggle.render(c, toggleX, rows[i], UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
-			type.regular().draw(c, labels[i], rowX, Ui.centerTextY(rows[i], UiTheme.TOGGLE_H, type.regular()),
+			toggle.render(c, toggleX, rowY, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
+			type.regular().draw(c, SETTINGS_LABELS[i], rowX,
+					Ui.centerTextY(rowY, UiTheme.TOGGLE_H, type.regular()),
 					hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
 		}
-		boolean glassHovered = mouseX >= rowX && mouseX < rowX + rowW
-				&& mouseY >= rows[3] && mouseY < rows[3] + UiTheme.TOGGLE_H + 4;
-		blurToggle.update(config.glassDebug(), glassHovered, delta);
-		blurToggle.render(c, toggleX, rows[3], UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
-		type.regular().draw(c, labels[3], rowX, Ui.centerTextY(rows[3], UiTheme.TOGGLE_H, type.regular()),
-				glassHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
-		int volumeY = y + 166;
+
+		int qualityY = y + 198;
+		type.regular().draw(c, "Quality", rowX, Ui.centerTextY(qualityY, 22, type.regular()), UiTheme.TEXT_2);
+		int qw = 92;
+		int qx = x + w - UiTheme.SP_5 - qw;
+		boolean qualityHovered = mouseX >= qx && mouseX < qx + qw && mouseY >= qualityY && mouseY < qualityY + 22;
+		Ui.surface(c, qx, qualityY, qw, 22, 8,
+				qualityHovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
+				qualityHovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, qx, qualityY, qw, 22, 8, qualityHovered ? UiTheme.ACCENT : UiTheme.BORDER);
+		Ui.drawCentered(c, type.regular(), config.guiQuality().name(), qx + qw / 2,
+				Ui.centerTextY(qualityY, 22, type.regular()), qualityHovered ? UiTheme.TEXT : UiTheme.ACCENT_2);
+
+		int volumeY = y + 238;
 		type.regular().draw(c, "Volume", rowX, volumeY, UiTheme.TEXT_2);
 		int trackX = rowX + 72;
 		int trackY = volumeY + type.regular().lineHeight() / 2;
@@ -680,14 +733,11 @@ public final class GuiFrame {
 			int rr = UiTheme.RADIUS;
 
 			if (sel > 0.02f) {
-				// The active row: a pink wash with a leading accent bar.
+				// The active row: a cool wash. The accent rail is one
+				// indicator that slides between rows below this loop.
 				Ui.surface(c, sx0, y, sw, rowH, rr,
 						Ui.withAlpha(UiTheme.ACCENT, Math.round(30 * sel)),
 						Ui.withAlpha(UiTheme.ACCENT_DEEP, Math.round(14 * sel)));
-				int barH = Math.round((rowH - 16) * sel);
-				Ui.surface(c, sx0 + 2, y + (rowH - barH) / 2, 3, barH, 2,
-						Ui.withAlpha(UiTheme.ACCENT, Math.round(255 * sel)),
-						Ui.withAlpha(UiTheme.ACCENT_DEEP, Math.round(255 * sel)));
 			} else if (hovered) {
 				Ui.surface(c, sx0, y, sw, rowH, rr,
 						Ui.withAlpha(UiTheme.PANEL_ALT, 0xB0),
@@ -706,7 +756,7 @@ public final class GuiFrame {
 			int count = cards.get(category).size();
 			if (count > 0) {
 				UiText regular = type.regular();
-				String label = String.valueOf(count);
+				String label = categoryCounts[i];
 				int bw = regular.width(label) + 10;
 				int bx = sx0 + sw - UiTheme.SP_4 - bw;
 				int by = y + (rowH - 14) / 2;
@@ -720,6 +770,13 @@ public final class GuiFrame {
 			y += rowPitch;
 		}
 
+		// One rail slides between category rows instead of seven different
+		// bars appearing and disappearing. It settles to a fixed position on
+		// a still screen, so it costs no animation work at rest.
+		int railH = Math.max(8, rowH - 16);
+		int railY = categoryListY() + Math.round(tabIndicator.value() * rowPitch) + (rowH - railH) / 2;
+		Ui.surface(c, sx0 + 2, railY, 3, railH, 2, UiTheme.ACCENT, UiTheme.ACCENT_DEEP);
+
 		if (!footerFitted()) {
 			return;
 		}
@@ -728,9 +785,14 @@ public final class GuiFrame {
 		// only the keybind hint.
 		// Keybind hint. Escape always works, so it is named next to the
 		// player's own binding instead of being discoverable only by trying it.
-		String hint = ClientKeybinds.openClickGui() == null
-				? "?"
-				: ClientKeybinds.openClickGui().getTranslatedKeyMessage().getString();
+		Object binding = ClientKeybinds.openClickGui();
+		if (binding != hintBinding) {
+			hintBinding = binding;
+			String key = binding == null ? "?"
+					: ClientKeybinds.openClickGui().getTranslatedKeyMessage().getString();
+			hintCache = key + " / ESC to close";
+		}
+		String hint = hintCache;
 		int hintY = Ui.textYFromBottom(py + ph, UiTheme.SP_5, type.regular());
 		int hintX = sx0 + UiTheme.SP_3;
 		Ui.drawEllipsized(c, type.regular(), hint + " / ESC to close", hintX, hintY,
@@ -747,7 +809,8 @@ public final class GuiFrame {
 		}
 	}
 
-	private void renderContent(UiCanvas c, UiType type, int mouseX, int mouseY, float delta, float slide) {
+	private void renderContent(UiCanvas c, UiType type, int mouseX, int mouseY, float delta, float slide,
+			float reveal) {
 		int cx = contentX();
 		int top = contentTop() + Math.round(slide);
 		int bottom = contentBottom();
@@ -755,7 +818,7 @@ public final class GuiFrame {
 		int viewportH = Math.max(0, bottom - top);
 
 		List<ModuleCard> list = visibleCards();
-		boolean showCategory = !search.query().isEmpty();
+		boolean showCategory = !search.normalisedQuery().isEmpty();
 
 		// The section header: what is shown and how much of it there is.
 		int headerH = SECTION_HEADER_H;
@@ -766,7 +829,7 @@ public final class GuiFrame {
 		// page, and a small surface is what makes that read as metadata. It is
 		// measured before the title is drawn, so the title is trimmed against
 		// the pill instead of against a guessed width.
-		String countLabel = list.size() + (list.size() == 1 ? " module" : " modules");
+		String countLabel = listLabel(list.size());
 		int pillH = Math.max(14, meta.lineHeight() + 6);
 		int pillW = meta.width(countLabel) + 14;
 		int pillX = cx + cw - pillW;
@@ -790,17 +853,13 @@ public final class GuiFrame {
 		// Content that moves between pages slides a little.
 		float pageSlide = showCategory ? 0f : (1f - switchProgress) * 10f;
 
-		int contentH = 0;
+		boolean cardsMoved = false;
 		for (int i = 0; i < list.size(); i++) {
-			ModuleCard card = list.get(i);
-			card.animate(delta);
-			contentH += card.height();
-			if (i < list.size() - 1) {
-				contentH += UiTheme.CARD_GAP;
-			}
+			cardsMoved |= list.get(i).animate(delta);
 		}
+		ensureCardLayout(list, cardsMoved);
 
-		scrollbar.update(listTop, bottom, contentH, delta);
+		scrollbar.update(listTop, bottom, layoutContentH, delta);
 		scrollbar.setRailX(cx + cw + UiTheme.SP_3);
 
 		if (list.isEmpty()) {
@@ -812,17 +871,43 @@ public final class GuiFrame {
 		// empty area a purpose without adding any content.
 
 		c.pushClip(cx, listTop, cw, listH);
-		int y = listTop - (int) Math.round(scrollbar.scroll()) + Math.round(pageSlide);
+		int listY = listTop - (int) Math.round(scrollbar.scroll()) + Math.round(pageSlide);
 		for (int i = 0; i < list.size(); i++) {
 			ModuleCard card = list.get(i);
-			if (y + card.height() >= listTop - 40 && y <= bottom) {
+			int y = listY + layoutTops[i];
+			if (VirtualList.intersects(y, layoutHeights[i], listTop - 40, bottom)) {
+				card.setReveal(Motion.clamp01(reveal * 1.35f - Math.min(i, 10) * 0.035f));
 				card.render(c, type, cx, y, cw, mouseX, mouseY, delta, showCategory);
 			}
-			y += card.height() + UiTheme.CARD_GAP;
 		}
 		c.popClip();
 
 		scrollbar.render(c);
+	}
+
+	private void ensureCardLayout(List<ModuleCard> list, boolean cardsMoved) {
+		boolean sizeChanged = list.size() != layoutTops.length;
+		if (!layoutDirty && !cardsMoved && !sizeChanged
+				&& layoutWidth == width && layoutHeight == height && layoutSelected == selected
+				&& layoutQuery.equals(search.query())) {
+			return;
+		}
+		if (sizeChanged) {
+			layoutTops = new int[list.size()];
+			layoutHeights = new int[list.size()];
+		}
+		int cursor = 0;
+		for (int i = 0; i < list.size(); i++) {
+			layoutTops[i] = cursor;
+			layoutHeights[i] = list.get(i).height();
+			cursor += layoutHeights[i] + (i < list.size() - 1 ? UiTheme.CARD_GAP : 0);
+		}
+		layoutContentH = cursor;
+		layoutWidth = width;
+		layoutHeight = height;
+		layoutSelected = selected;
+		layoutQuery = search.query();
+		layoutDirty = false;
 	}
 
 	/**
@@ -830,7 +915,7 @@ public final class GuiFrame {
 	 * the query actually changes, so a frame never allocates a new list.
 	 */
 	private List<ModuleCard> visibleCards() {
-		String q = search.query().trim().toLowerCase(Locale.ROOT);
+		String q = search.normalisedQuery();
 		if (q.isEmpty()) {
 			cachedQuery = null;
 			return cards.get(CATEGORIES[selected]);
@@ -909,7 +994,11 @@ public final class GuiFrame {
 			int gx = settingsX(windowX(), windowWidth());
 			if (mx >= gx && mx < gx + settingsButtonWidth() && my >= sy && my < sy + UiTheme.SEARCH_H) {
 				guiSettingsOpen = !guiSettingsOpen;
-				GuiSounds.click();
+				if (guiSettingsOpen) {
+					GuiSounds.open();
+				} else {
+					GuiSounds.close();
+				}
 				return true;
 			}
 		}
@@ -1025,30 +1114,41 @@ public final class GuiFrame {
 		int w = Math.min(300, width - 24);
 		int x = settingsPanelX;
 		int y = settingsPanelY;
-		if (mx < x || mx >= x + w || my < y || my >= y + 222) {
+		if (mx < x || mx >= x + w || my < y || my >= y + SETTINGS_PANEL_H) {
 			return false;
 		}
 		ClientConfig config = ClientConfig.get();
-		int[] rows = {y + 34, y + 66, y + 98, y + 130};
-		for (int i = 0; i < 4; i++) {
-			if (my >= rows[i] && my < rows[i] + UiTheme.TOGGLE_H + 4) {
+		for (int i = 0; i < SETTINGS_LABELS.length; i++) {
+			int rowY = y + 34 + i * 32;
+			if (my >= rowY && my < rowY + UiTheme.TOGGLE_H + 4) {
 				if (i == 0) {
 					config.setGuiSounds(!config.guiSounds());
 				} else if (i == 1) {
 					config.setReduceAnimations(!config.reduceAnimations());
 				} else if (i == 2) {
 					config.setBlur(!config.blur());
-				} else {
+				} else if (i == 3) {
 					config.setGlassDebug(!config.glassDebug());
+				} else {
+					config.setGuiDebug(!config.guiDebug());
 				}
 				ClientConfig.saveNow();
 				GuiSounds.click();
 				return true;
 			}
 		}
+		int qualityY = y + 198;
+		int qualityX = x + w - UiTheme.SP_5 - 92;
+		if (my >= qualityY && my < qualityY + 22 && mx >= qualityX && mx < qualityX + 92) {
+			GuiQuality[] all = GuiQuality.values();
+			config.setGuiQuality(all[(config.guiQuality().ordinal() + 1) % all.length]);
+			ClientConfig.saveNow();
+			GuiSounds.tab();
+			return true;
+		}
 		int trackX = x + UiTheme.SP_5 + 72;
 		int trackW = w - UiTheme.SP_5 * 2 - 72;
-		if (my >= y + 158 && my < y + 190 && mx >= trackX - 8 && mx < trackX + trackW + 8) {
+		if (my >= y + 230 && my < y + 262 && mx >= trackX - 8 && mx < trackX + trackW + 8) {
 			volumeDragging = true;
 			setGuiVolume(mx);
 			return true;

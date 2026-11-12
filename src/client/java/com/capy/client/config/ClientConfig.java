@@ -1,5 +1,6 @@
 package com.capy.client.config;
 
+import com.capy.client.gui.GuiQuality;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
@@ -48,6 +49,8 @@ public final class ClientConfig {
 	private static final String KEY_GUI_SOUNDS = "gui_sounds";
 	private static final String KEY_GUI_VOLUME = "gui_volume";
 	private static final String KEY_REDUCE_ANIMATIONS = "reduce_animations";
+	private static final String KEY_GUI_QUALITY = "gui_quality";
+	private static final String KEY_GUI_DEBUG = "gui_debug";
 	private static final String KEY_BLUR = "blur";
 	private static final String KEY_GLASS_DEBUG = "glass_debug";
 	/** Per module: whether it was switched on when the game was last closed. */
@@ -58,6 +61,8 @@ public final class ClientConfig {
 	private boolean guiSounds = true;
 	private int guiVolume = 100;
 	private boolean reduceAnimations = false;
+	private GuiQuality guiQuality = GuiQuality.BALANCED;
+	private boolean guiDebug = false;
 	private boolean blur = false;
 	private boolean glassDebug = false;
 	private final Map<String, JsonObject> moduleData = new LinkedHashMap<>();
@@ -92,6 +97,23 @@ public final class ClientConfig {
 
 	public void setReduceAnimations(boolean value) {
 		this.reduceAnimations = value;
+	}
+
+	public GuiQuality guiQuality() {
+		return guiQuality;
+	}
+
+	public void setGuiQuality(GuiQuality value) {
+		this.guiQuality = value == null ? GuiQuality.BALANCED : value;
+	}
+
+	/** Draws the frame time and draw-call line in the ClickGUI. */
+	public boolean guiDebug() {
+		return guiDebug;
+	}
+
+	public void setGuiDebug(boolean value) {
+		this.guiDebug = value;
 	}
 
 	/** Vanilla menu blur is optional and off by default. */
@@ -150,6 +172,9 @@ public final class ClientConfig {
 		guiSounds = ConfigValues.boolValue(root, KEY_GUI_SOUNDS, true);
 		guiVolume = Math.max(0, Math.min(100, ConfigValues.intValue(root, KEY_GUI_VOLUME, 100)));
 		reduceAnimations = ConfigValues.boolValue(root, KEY_REDUCE_ANIMATIONS, false);
+		guiQuality = GuiQuality.from(ConfigValues.stringValue(root, KEY_GUI_QUALITY, "BALANCED"),
+				GuiQuality.BALANCED);
+		guiDebug = ConfigValues.boolValue(root, KEY_GUI_DEBUG, false);
 		blur = ConfigValues.boolValue(root, KEY_BLUR, false);
 		glassDebug = ConfigValues.boolValue(root, KEY_GLASS_DEBUG, false);
 
@@ -189,6 +214,8 @@ public final class ClientConfig {
 		root.addProperty(KEY_GUI_SOUNDS, guiSounds);
 		root.addProperty(KEY_GUI_VOLUME, guiVolume);
 		root.addProperty(KEY_REDUCE_ANIMATIONS, reduceAnimations);
+		root.addProperty(KEY_GUI_QUALITY, guiQuality.name());
+		root.addProperty(KEY_GUI_DEBUG, guiDebug);
 		root.addProperty(KEY_BLUR, blur);
 		root.addProperty(KEY_GLASS_DEBUG, glassDebug);
 

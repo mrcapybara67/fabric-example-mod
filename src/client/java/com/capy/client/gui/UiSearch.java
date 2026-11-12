@@ -18,6 +18,7 @@ public class UiSearch {
 	private final Anim focus = new Anim(0f, 16f);
 	private final Anim hover = new Anim(0f, 14f);
 	private String query = "";
+	private String normalised = "";
 	private boolean focused;
 
 	// Geometry of the current frame
@@ -32,11 +33,18 @@ public class UiSearch {
 
 	public void clear() {
 		query = "";
+		normalised = "";
 	}
 
 	/** Sets the query directly (used by the offline preview). */
 	void setQuery(String query) {
 		this.query = query == null ? "" : query;
+		normalised = this.query.trim().toLowerCase(java.util.Locale.ROOT);
+	}
+
+	/** Cached lower-case query; filtering must not allocate it every frame. */
+	public String normalisedQuery() {
+		return normalised;
 	}
 
 	public boolean isFocused() {
@@ -66,6 +74,7 @@ public class UiSearch {
 			return true; // swallow at the limit
 		}
 		query += event.codepointAsString();
+		normalised = query.trim().toLowerCase(java.util.Locale.ROOT);
 		return true;
 	}
 
@@ -78,6 +87,7 @@ public class UiSearch {
 		if (key == GLFW.GLFW_KEY_BACKSPACE) {
 			if (!query.isEmpty()) {
 				query = query.substring(0, query.length() - 1);
+				normalised = query.trim().toLowerCase(java.util.Locale.ROOT);
 			}
 			return true;
 		}
@@ -115,7 +125,8 @@ public class UiSearch {
 
 		int top = Ui.lerpColor(UiTheme.TRACK_TOP, UiTheme.PANEL_ALT, Math.max(f, hover.value() * 0.5f));
 		int bottom = Ui.lerpColor(UiTheme.TRACK_BOTTOM, UiTheme.PANEL_TOP, Math.max(f, hover.value() * 0.5f));
-		Ui.surface(c, x, y, w, h, r, top, bottom);
+		Ui.surfaceKind(c, UiSprites.Kind.INPUT, x, y, w, h, r,
+				Ui.lerpColor(top, bottom, 0.5f));
 		Ui.surfaceEdge(c, x, y, w, h, r,
 				Ui.lerpColor(0x30FFFFFF, 0x99FFFFFF, f),
 				Ui.lerpColor(0x10FFFFFF, 0x30FFFFFF, f));
@@ -140,7 +151,8 @@ public class UiSearch {
 			int cs = 14;
 			int cx = x + w - UiTheme.SP_3 - cs;
 			int cy = y + (h - cs) / 2;
-			Ui.surface(c, cx, cy, cs, cs, cs / 2, UiTheme.PANEL_ALT, UiTheme.PANEL_TOP);
+			Ui.surfaceKind(c, UiSprites.Kind.BUTTON, cx, cy, cs, cs, cs / 2,
+					Ui.lerpColor(UiTheme.PANEL_ALT, UiTheme.PANEL_TOP, 0.5f));
 			Ui.outline(c, cx, cy, cs, cs, cs / 2, 0x3DFFFFFF);
 			UiIcons.draw(c, UiIcons.Icon.CLOSE, cx + 4, cy + 4, 6, UiTheme.TEXT_2);
 		}

@@ -78,6 +78,10 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleBlockUpdate", at = @At("HEAD"))
 	private void capy$onBlockUpdate(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin block update", () -> PacketSignals.onBlockUpdate(packet));
+		if (packet != null) {
+			Guard.run("finder block update", () -> com.capy.client.module.modules.esp.BaseFinderModule
+					.blockChanged(packet.getPos().getX(), packet.getPos().getZ()));
+		}
 	}
 
 	@Inject(method = "handleSetPlayerTeamPacket", at = @At("HEAD"))
@@ -96,6 +100,7 @@ public class ClientPacketListenerMixin {
 			if (packet != null) {
 				com.capy.client.module.modules.esp.ChunkFinderModule.onChunkPacket(
 						packet.getX(), packet.getZ(), packet.getLightData());
+				com.capy.client.module.modules.esp.BaseFinderModule.chunkLoaded(packet.getX(), packet.getZ());
 			}
 		});
 	}
@@ -106,6 +111,8 @@ public class ClientPacketListenerMixin {
 			if (packet != null) {
 				com.capy.client.module.modules.esp.ChunkFinderModule.onLightPacket(
 						packet.getX(), packet.getZ(), packet.getLightData());
+				com.capy.client.module.modules.esp.BaseFinderModule.blockChanged(
+						packet.getX() << 4, packet.getZ() << 4);
 			}
 		});
 	}

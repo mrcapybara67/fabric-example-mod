@@ -96,6 +96,7 @@ public class UiWatchlist {
 			case ADDED -> {
 				field.clear();
 				status = "";
+				GuiSounds.click();
 			}
 			case INVALID -> status = copy.invalidText();
 			case DUPLICATE -> status = copy.duplicateText();
@@ -103,6 +104,7 @@ public class UiWatchlist {
 		}
 		if (!status.isEmpty()) {
 			statusUntil = System.currentTimeMillis() + 2200L;
+			GuiSounds.error();
 		}
 	}
 
@@ -204,6 +206,7 @@ public class UiWatchlist {
 			int ry = rowY + (ENTRY_H - 2 - rm) / 2;
 			if (mx >= rx && mx < rx + rm && my >= ry && my < ry + rm) {
 				model.remove(entries.get(i));
+				GuiSounds.click();
 				return true;
 			}
 		}

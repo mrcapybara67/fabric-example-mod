@@ -2,12 +2,13 @@ package com.capy.client.module.modules.esp;
 
 import com.capy.client.config.ConfigValues;
 import com.capy.client.module.BooleanSetting;
-import net.minecraft.client.Minecraft;
+import com.capy.client.module.ModuleManager;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacketData;
 
 /**
@@ -16,6 +17,7 @@ import net.minecraft.network.protocol.game.ClientboundLightUpdatePacketData;
  */
 public final class ChunkFinderModule extends BaseFinderModule {
 	private final BooleanSetting lightDebug = setting(new BooleanSetting("light_debug", false));
+	private final BooleanSetting flagOnLoad = setting(new BooleanSetting("flag_on_load", false));
 
 	public ChunkFinderModule() {
 		super("chunk_finder", 0xFFF2C14E);
@@ -33,6 +35,16 @@ public final class ChunkFinderModule extends BaseFinderModule {
 		LightSignalQueue.noteLocalBreak(pos, System.nanoTime());
 	}
 
+	public static boolean debugLogging() {
+		ChunkFinderModule module = ModuleManager.get().get(ChunkFinderModule.class);
+		return module != null && module.lightDebug.value();
+	}
+
+	public static boolean flagOnLoad() {
+		ChunkFinderModule module = ModuleManager.get().get(ChunkFinderModule.class);
+		return module != null && module.flagOnLoad.value();
+	}
+
 	@Override
 	public void onTick(Minecraft mc) {
 		if (!isEnabled()) {
@@ -45,6 +57,7 @@ public final class ChunkFinderModule extends BaseFinderModule {
 		long now = System.nanoTime();
 		LightSignalQueue.drain(level, now, 3_000_000L);
 		syncFindings(now);
+		status(mc, "light", 0, 1.0);
 	}
 
 	private void syncFindings(long now) {
@@ -62,9 +75,18 @@ public final class ChunkFinderModule extends BaseFinderModule {
 		}
 		for (long key : live) {
 			mark(key);
-			if (lightDebug.value()) {
-				debug("light", key, 1, 1);
-			}
+		}
+	}
+
+	@Override
+	protected void onChunkLoaded(long key) {
+		// The chunk-light packet itself is the light event; nothing else is needed.
+	}
+
+	@Override
+	protected void onChunkChanged(long key) {
+		if (level != null) {
+			// A block/light update is delivered through the packet queue.
 		}
 	}
 
@@ -77,19 +99,16 @@ public final class ChunkFinderModule extends BaseFinderModule {
 	}
 
 	@Override
-	protected void clear() {
-		super.clear();
-	}
-
-	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
 		lightDebug.set(ConfigValues.boolValue(json, "light_debug", false));
+		flagOnLoad.set(ConfigValues.boolValue(json, "flag_on_load", false));
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
 		json.addProperty("light_debug", lightDebug.value());
+		json.addProperty("flag_on_load", flagOnLoad.value());
 	}
 }

@@ -12,6 +12,7 @@ import com.capy.client.config.ClientConfig;
  * speed of 8 settles in roughly a quarter of a second.
  */
 public class Anim {
+	private static long updates;
 	private float value;
 	private float target;
 	private float speed;
@@ -29,11 +30,26 @@ public class Anim {
 	 */
 	public void to(float target, float delta) {
 		this.target = target;
+		if (Math.abs(value - target) <= 0.0001f) {
+			value = target;
+			return;
+		}
 		if (ClientConfig.get().reduceAnimations()) {
 			this.value = target;
+			updates++;
 			return;
 		}
 		this.value = Motion.approach(this.value, target, speed, delta / 20f);
+		updates++;
+	}
+
+	/** Number of values that actually moved; used by the static-screen test. */
+	public static long updateCount() {
+		return updates;
+	}
+
+	public static void resetUpdateCount() {
+		updates = 0L;
 	}
 
 	/** Jumps straight to a value, cancelling the animation. */

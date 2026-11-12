@@ -62,7 +62,14 @@ public class ColorSetting extends Setting<Integer> {
 	 * (0..1), in the order the picker draws its tracks.
 	 */
 	public float[] hsv() {
-		return toHsv(rgb());
+		float[] out = new float[3];
+		hsvInto(out);
+		return out;
+	}
+
+	/** Writes the current HSV into an existing array, avoiding a per-frame allocation. */
+	public void hsvInto(float[] out) {
+		toHsv(rgb(), out);
 	}
 
 	/** Writes a colour from HSV, keeping the current alpha. */
@@ -78,6 +85,13 @@ public class ColorSetting extends Setting<Integer> {
 
 	/** RGB to HSV. Grey colours report a hue of 0 rather than NaN. */
 	public static float[] toHsv(int rgb) {
+		float[] out = new float[3];
+		toHsv(rgb, out);
+		return out;
+	}
+
+	/** Same conversion, writing into a reusable array of length at least three. */
+	public static void toHsv(int rgb, float[] out) {
 		float r = ((rgb >>> 16) & 0xFF) / 255f;
 		float g = ((rgb >>> 8) & 0xFF) / 255f;
 		float b = (rgb & 0xFF) / 255f;
@@ -98,7 +112,9 @@ public class ColorSetting extends Setting<Integer> {
 			hue += 360f;
 		}
 		float saturation = max <= 0f ? 0f : delta / max;
-		return new float[] {hue, saturation, max};
+		out[0] = hue;
+		out[1] = saturation;
+		out[2] = max;
 	}
 
 	/** HSV to packed ARGB. The hue wraps, so a drag past the end stays sane. */

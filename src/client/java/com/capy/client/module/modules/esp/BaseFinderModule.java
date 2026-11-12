@@ -4,6 +4,7 @@ import com.capy.client.config.ConfigValues;
 import com.capy.client.module.ActionSetting;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
+import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.ColorSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
@@ -11,6 +12,7 @@ import com.capy.client.module.ModuleManager;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.antiadmin.ServerProfileMatcher;
+import com.capy.client.util.Guard;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -38,6 +40,7 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 	private static final int MAX_ANNOUNCED = 512;
 	private static final int MAX_CALIBRATIONS = 16;
 	private static final long OLD_FLAG_NANOS = 60_000_000_000L;
+	private static final long STATUS_INTERVAL_NANOS = 1_000_000_000L;
 
 	protected final ColorSetting color;
 	protected final SliderSetting simulationDistance;
@@ -51,6 +54,9 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 	protected final BooleanSetting toast;
 	protected final BooleanSetting disconnectOnFlag;
 	protected final BooleanSetting debug;
+	protected final ChoiceSetting plateMode;
+	protected final BooleanSetting tracer;
+	protected final SliderSetting cornerRadius;
 	protected final ActionSetting markWrong;
 
 	protected final Set<Long> flags = new LinkedHashSet<>();
@@ -62,6 +68,12 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 	protected String host = "generic";
 	protected int plateVersion;
 	protected int debuggedChunks;
+	private long statusSecond;
+	private long statusStarted;
+	private int scannedThisSecond;
+	private long scanNanosThisSecond;
+	private int totalScanned;
+	private double lastThreshold;
 
 	protected BaseFinderModule(String id, int defaultColor) {
 		super(Category.BASE_FINDER, id);
@@ -69,7 +81,10 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 		this.simulationDistance = setting(new SliderSetting("simulation_distance", 8, 2, 16));
 		this.alpha = setting(new SliderSetting("alpha", 120, 20, 255));
 		this.plateY = setting(new SliderSetting("plate_y", 63, -64, 320));
-		this.plateThickness = setting(new SliderSetting("plate_thickness", 1, 1, 8));
+		this.plateThickness = setting(new SliderSetting("plate_thickness", 1, 1, 10));
+		this.plateMode = setting(new ChoiceSetting("plate_mode", 1, "fixed", "surface"));
+		this.tracer = setting(new BooleanSetting("tracer", true));
+		this.cornerRadius = setting(new SliderSetting("corner_radius", 25, 0, 60, 1));
 		this.outline = setting(new BooleanSetting("outline", true));
 		this.renderClusters = setting(new BooleanSetting("render_clusters", true));
 		this.combinedView = setting(new BooleanSetting("combined_view", true));
@@ -136,8 +151,22 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 		return plateY.get();
 	}
 
-	public int plateThickness() {
-		return plateThickness.get();
+	/** Plate thickness in tenths of a block. */
+	public double plateThickness() {
+		return plateThickness.get() / 10.0;
+	}
+
+	public boolean surfacePlate() {
+		return plateMode.is("surface");
+	}
+
+	public boolean tracers() {
+		return tracer.value();
+	}
+
+	/** Corner radius in tenths of a block. */
+	public double cornerRadius() {
+		return cornerRadius.get() / 10.0;
 	}
 
 	public boolean outlines() {
@@ -165,13 +194,72 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 		if (host == null || host.isBlank()) {
 			host = "generic";
 		}
+	}
+
+	/** Adds a completed scan to the debug status counters. */
+	protected void recordScan(long nanos) {
 		long now = System.nanoTime();
-		for (long key : new ArrayList<>(flags)) {
-			Long when = flagTimes.get(key);
-			if (when == null || now - when > OLD_FLAG_NANOS) {
-				unmark(key);
+		if (statusSecond == 0L) {
+			statusSecond = now;
+			statusStarted = now;
+		}
+		if (now - statusStarted >= STATUS_INTERVAL_NANOS) {
+			statusSecond = now;
+			statusStarted = now;
+			scannedThisSecond = 0;
+			scanNanosThisSecond = 0L;
+		}
+		totalScanned++;
+		scannedThisSecond++;
+		scanNanosThisSecond += Math.max(0L, nanos);
+	}
+
+	/** One compact line, at most once a second, only with finder_debug on. */
+	protected void status(Minecraft mc, String name, int queueSize, double threshold) {
+		lastThreshold = threshold;
+		if (!debug.value() || mc == null || mc.player == null) {
+			return;
+		}
+		long now = System.nanoTime();
+		if (statusSecond == 0L) {
+			statusSecond = now;
+		}
+		if (now - statusSecond < STATUS_INTERVAL_NANOS) {
+			return;
+		}
+		statusSecond = now;
+		String line = String.format(java.util.Locale.ROOT,
+				"[Capy] %s scans=%d queue=%d ms/s=%.1f threshold=%.2f flags=%d",
+				name, totalScanned, queueSize, scanNanosThisSecond / 1.0e6, lastThreshold, flags.size());
+		mc.player.displayClientMessage(Component.literal(line), false);
+		scannedThisSecond = 0;
+		scanNanosThisSecond = 0L;
+	}
+
+	/** Dispatches a chunk-load event to every live finder. */
+	public static void chunkLoaded(int chunkX, int chunkZ) {
+		for (Module module : ModuleManager.get().modules()) {
+			if (module instanceof BaseFinderModule finder && finder.isEnabled()) {
+				long key = HeatMap.key(chunkX, chunkZ);
+				Guard.run("finder chunk load", () -> finder.onChunkLoaded(key));
 			}
 		}
+	}
+
+	/** Dispatches a block-change event to every live finder. */
+	public static void blockChanged(int x, int z) {
+		long key = HeatMap.key(x >> 4, z >> 4);
+		for (Module module : ModuleManager.get().modules()) {
+			if (module instanceof BaseFinderModule finder && finder.isEnabled()) {
+				Guard.run("finder block change", () -> finder.onChunkChanged(key));
+			}
+		}
+	}
+
+	protected void onChunkLoaded(long key) {
+	}
+
+	protected void onChunkChanged(long key) {
 	}
 
 	protected FinderCalibration calibration() {
@@ -222,7 +310,7 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 			flags.add(key);
 			plateVersion++;
 		}
-		flagTimes.put(key, System.nanoTime());
+		flagTimes.putIfAbsent(key, System.nanoTime());
 		if (added) {
 			announce(key);
 		}
@@ -307,6 +395,9 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 		alpha.set(ConfigValues.intValue(json, "alpha", 120));
 		plateY.set(ConfigValues.intValue(json, "plate_y", 63));
 		plateThickness.set(ConfigValues.intValue(json, "plate_thickness", 1));
+		plateMode.select(ConfigValues.stringValue(json, "plate_mode", "surface"));
+		tracer.set(ConfigValues.boolValue(json, "tracer", true));
+		cornerRadius.set(ConfigValues.intValue(json, "corner_radius", 25));
 		outline.set(ConfigValues.boolValue(json, "outline", true));
 		renderClusters.set(ConfigValues.boolValue(json, "render_clusters", true));
 		combinedView.set(ConfigValues.boolValue(json, "combined_view", true));
@@ -336,6 +427,9 @@ public abstract class BaseFinderModule extends Module implements Tickable, Confi
 		json.addProperty("alpha", alpha.get());
 		json.addProperty("plate_y", plateY.get());
 		json.addProperty("plate_thickness", plateThickness.get());
+		json.addProperty("plate_mode", plateMode.option());
+		json.addProperty("tracer", tracer.value());
+		json.addProperty("corner_radius", cornerRadius.get());
 		json.addProperty("outline", outline.value());
 		json.addProperty("render_clusters", renderClusters.value());
 		json.addProperty("combined_view", combinedView.value());

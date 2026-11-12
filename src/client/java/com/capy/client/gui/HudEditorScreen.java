@@ -55,8 +55,20 @@ public final class HudEditorScreen extends Screen {
 	private int grabX;
 	private int grabY;
 
+	private boolean soundedOpen;
+	private boolean soundedClose;
+
 	public HudEditorScreen() {
 		super(Component.translatable("capy.hud.editor"));
+	}
+
+	@Override
+	protected void init() {
+		super.init();
+		if (!soundedOpen) {
+			soundedOpen = true;
+			GuiSounds.open();
+		}
 	}
 
 	@Override
@@ -336,6 +348,10 @@ public final class HudEditorScreen extends Screen {
 	@Override
 	public void onClose() {
 		ClientConfig.saveNow();
+		if (!soundedClose) {
+			soundedClose = true;
+			GuiSounds.close();
+		}
 		super.onClose();
 		// Vanilla re-grabs the mouse, but not when the window was unfocused at
 		// that instant; the tick retries until it worked.

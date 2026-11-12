@@ -50,6 +50,9 @@ public class UiColorPicker {
 	private int y;
 	private int w;
 	private final int[] trackY = new int[4];
+	private int cachedArgb;
+	private String cachedHex = "";
+	private final float[] hsv = new float[3];
 
 	public UiColorPicker(ColorSetting setting) {
 		this(setting, true);
@@ -97,10 +100,11 @@ public class UiColorPicker {
 		int swatch = ROW_H - 8;
 		int sx = x + w - swatch;
 		int sy = y + 4;
+		String hex = hexText();
 		Ui.drawEllipsized(c, font, label, x, Ui.centerTextY(y, ROW_H, font),
-				Math.max(0, sx - x - font.width(setting.hex()) - UiTheme.SP_4 - UiTheme.SP_3),
+				Math.max(0, sx - x - font.width(hex) - UiTheme.SP_4 - UiTheme.SP_3),
 				rowHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
-		Ui.drawRightAligned(c, font, setting.hex(), sx - UiTheme.SP_4,
+		Ui.drawRightAligned(c, font, hex, sx - UiTheme.SP_4,
 				Ui.centerTextY(y, ROW_H, font), rowHovered ? UiTheme.TEXT : UiTheme.TEXT_3);
 
 		// The swatch sits on a checkerboard so a translucent colour still reads
@@ -114,7 +118,7 @@ public class UiColorPicker {
 			return;
 		}
 
-		float[] hsv = setting.hsv();
+		setting.hsvInto(hsv);
 		int trackX = x + LABEL_W;
 		int trackW = w - LABEL_W;
 		int ty = y + ROW_H + 2;
@@ -123,6 +127,15 @@ public class UiColorPicker {
 			renderTrack(c, font, track, hsv, trackX, ty, trackW);
 			ty += TRACK_H + TRACK_GAP;
 		}
+	}
+
+	private String hexText() {
+		int argb = setting.argb();
+		if (argb != cachedArgb || cachedHex.isEmpty()) {
+			cachedArgb = argb;
+			cachedHex = setting.hex();
+		}
+		return cachedHex;
 	}
 
 	private void renderTrack(UiCanvas c, UiText font, int track, float[] hsv, int trackX, int trackY, int trackW) {

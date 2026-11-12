@@ -78,8 +78,9 @@ public class UiSlider {
 		int knobX = trackX0 + Math.round(fill.value() * (trackX1 - trackX0));
 
 		// Plum track with a hairline rim.
-		Ui.surface(c, trackX0, trackY - half, trackX1 - trackX0, trackH, UiTheme.RADIUS_PILL,
-				UiTheme.TRACK_TOP, UiTheme.TRACK_BOTTOM);
+		Ui.surfaceKind(c, UiSprites.Kind.SLIDER_TRACK, trackX0, trackY - half,
+				trackX1 - trackX0, trackH, UiTheme.RADIUS_PILL,
+				Ui.lerpColor(UiTheme.TRACK_TOP, UiTheme.TRACK_BOTTOM, 0.5f));
 		Ui.surfaceEdge(c, trackX0, trackY - half, trackX1 - trackX0, trackH, UiTheme.RADIUS_PILL,
 				0x2EFFFFFF, 0x12FFFFFF);
 
@@ -88,8 +89,8 @@ public class UiSlider {
 			int fw = knobX - trackX0;
 			Ui.roundRect(c, trackX0, trackY - half - 1, fw, trackH + 2, UiTheme.RADIUS_PILL,
 					Ui.withAlpha(UiTheme.ACCENT, 0x40));
-			Ui.surface(c, trackX0, trackY - half, fw, trackH, UiTheme.RADIUS_PILL,
-					UiTheme.ACCENT, UiTheme.ACCENT_DEEP);
+			Ui.surfaceKind(c, UiSprites.Kind.SLIDER_FILL, trackX0, trackY - half, fw, trackH,
+					UiTheme.RADIUS_PILL, Ui.lerpColor(UiTheme.ACCENT, UiTheme.ACCENT_DEEP, 0.5f));
 			Ui.surfaceEdge(c, trackX0, trackY - half, fw, trackH, UiTheme.RADIUS_PILL,
 					0x73FFFFFF, 0x2EFFFFFF);
 		}
@@ -99,7 +100,7 @@ public class UiSlider {
 		int kx = knobX - d / 2;
 		int ky = trackY - d / 2;
 		Ui.roundRect(c, kx + 1, ky + 2, d, d, UiTheme.RADIUS_PILL, 0x59000000);
-		Ui.surface(c, kx, ky, d, d, UiTheme.RADIUS_PILL, 0xFFFFF6FA, 0xFFE3C9D6);
+		Ui.surfaceKind(c, UiSprites.Kind.TOGGLE_KNOB, kx, ky, d, d, UiTheme.RADIUS_PILL, 0xFFDFF1FC);
 		Ui.outline(c, kx, ky, d, d, UiTheme.RADIUS_PILL, 0xA6FFFFFF);
 		Ui.innerBevel(c, kx, ky, d, d, UiTheme.RADIUS_PILL, 0x59FFFFFF, 0x33000000);
 	}

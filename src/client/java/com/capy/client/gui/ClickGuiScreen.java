@@ -54,6 +54,8 @@ public class ClickGuiScreen extends Screen {
 	private static final float NANOS_PER_SECOND = 1.0e9f;
 
 	private final GuiFrame frame = new GuiFrame();
+	/** Reused between frames; the render path must not allocate a canvas. */
+	private final McCanvas canvas = new McCanvas();
 
 	/** When the intro started, in {@link System#nanoTime()} units. */
 	private long shownAt;
@@ -149,7 +151,16 @@ public class ClickGuiScreen extends Screen {
 		// run at a different speed on every refresh rate. The wall clock is the
 		// only value that makes the easing frame rate independent, which is what
 		// {@link Anim} and {@link Motion} already assume.
-		frame.render(McCanvas.of(g), UI_TYPE, mouseX, mouseY, frameDeltaTicks(), progress);
+		GuiPerf.begin();
+		canvas.bind(g);
+		frame.render(canvas, UI_TYPE, mouseX, mouseY, frameDeltaTicks(), progress);
+		GuiPerf.end(canvas.drawCalls());
+		if (ClientConfig.get().guiDebug()) {
+			String line = GuiPerf.line();
+			int w = this.font.width(line);
+			g.fill(4, 4, 12 + w, 10 + this.font.lineHeight, 0xB0000000);
+			g.drawString(this.font, line, 8, 7, 0xFFFFFFFF, true);
+		}
 	}
 
 	/**
