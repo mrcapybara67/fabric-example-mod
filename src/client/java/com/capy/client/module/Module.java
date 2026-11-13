@@ -34,6 +34,14 @@ public abstract class Module {
 		return "capy.module." + id + ".desc";
 	}
 
+	/**
+	 * A short live value shown next to the module name, or an empty string.
+	 * Finders use it for their current flag count.
+	 */
+	public String info() {
+		return "";
+	}
+
 	public List<Setting<?>> settings() {
 		return settings;
 	}

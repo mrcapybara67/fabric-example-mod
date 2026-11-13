@@ -13,7 +13,8 @@ class ConfigMigrationTest {
 	void oldGuiStyleAndRadialAccentAreIgnored() {
 		JsonObject root = JsonParser.parseString("""
 				{"theme":"sakura","gui_style":"radial","radial_accent":-1,"custom_knife":{"style":"karambit"},
-				 "gui_accent":-16740568,"modules":{}}
+				 "gui_accent":-16740568,"modules":{"sus_chunk_finder":{"finder_debug":true},
+				 "chunk_finder":{"light_debug":true},"chunk_finder_better":{"shaft_debug":true}}}
 				""").getAsJsonObject();
 
 		assertDoesNotThrow(() -> ConfigMigration.removeLegacyGuiKeys(root));
@@ -22,6 +23,8 @@ class ConfigMigrationTest {
 		assertFalse(root.has("gui_style"));
 		assertFalse(root.has("radial_accent"));
 		assertFalse(root.has("custom_knife"));
-		assertEquals(0, root.get("modules").getAsJsonObject().size());
+		JsonObject modules = root.get("modules").getAsJsonObject();
+		ConfigMigration.removeLegacyFinderKeys(modules);
+		assertEquals(0, modules.size());
 	}
 }

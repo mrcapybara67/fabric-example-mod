@@ -7,9 +7,7 @@ import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundCommandSuggestionsPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
-import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
-import net.minecraft.network.protocol.game.ClientboundLightUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundOpenBookPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenSignEditorPacket;
@@ -78,10 +76,6 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleBlockUpdate", at = @At("HEAD"))
 	private void capy$onBlockUpdate(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin block update", () -> PacketSignals.onBlockUpdate(packet));
-		if (packet != null) {
-			Guard.run("finder block update", () -> com.capy.client.module.modules.esp.BaseFinderModule
-					.blockChanged(packet.getPos().getX(), packet.getPos().getZ()));
-		}
 	}
 
 	@Inject(method = "handleSetPlayerTeamPacket", at = @At("HEAD"))
@@ -92,29 +86,6 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handlePlayerChat", at = @At("HEAD"))
 	private void capy$onPlayerChat(ClientboundPlayerChatPacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin chat", () -> PacketSignals.onPlayerChat(packet));
-	}
-
-	@Inject(method = "handleLevelChunkWithLight", at = @At("HEAD"))
-	private void capy$onLevelChunk(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
-		Guard.run("light chunk", () -> {
-			if (packet != null) {
-				com.capy.client.module.modules.esp.ChunkFinderModule.onChunkPacket(
-						packet.getX(), packet.getZ(), packet.getLightData());
-				com.capy.client.module.modules.esp.BaseFinderModule.chunkLoaded(packet.getX(), packet.getZ());
-			}
-		});
-	}
-
-	@Inject(method = "handleLightUpdatePacket", at = @At("HEAD"))
-	private void capy$onLightPacket(ClientboundLightUpdatePacket packet, CallbackInfo ci) {
-		Guard.run("light update", () -> {
-			if (packet != null) {
-				com.capy.client.module.modules.esp.ChunkFinderModule.onLightPacket(
-						packet.getX(), packet.getZ(), packet.getLightData());
-				com.capy.client.module.modules.esp.BaseFinderModule.blockChanged(
-						packet.getX() << 4, packet.getZ() << 4);
-			}
-		});
 	}
 
 	@Inject(method = "handleSystemChat", at = @At("HEAD"))

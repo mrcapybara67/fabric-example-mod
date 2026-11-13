@@ -7,7 +7,6 @@
 		"LivingEntityMixin",
 		"ClientPacketListenerMixin",
 		"ClientDisconnectMixin",
-		"MultiPlayerGameModeMixin",
 		"ItemInHandRendererMixin",
 		"RenderTypeAccessor",
 		"LightTextureMixin",

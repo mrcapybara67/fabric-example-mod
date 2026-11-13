@@ -46,7 +46,7 @@ import net.minecraft.world.phys.AABB;
  * The renderer never asks a module to scan; it only reads the list, which keeps
  * the cost of a frame independent of the cost of a scan.
  */
-public abstract class EspModule extends Module implements Configurable, Tickable {
+public abstract class EspModule extends Module implements Configurable, Tickable, EspBoxSource {
 	public static final int MIN_RANGE = 8;
 	/**
 	 * The longest range the slider allows, and the range every overlay starts

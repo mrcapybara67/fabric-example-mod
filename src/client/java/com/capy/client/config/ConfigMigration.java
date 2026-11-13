@@ -25,5 +25,20 @@ public final class ConfigMigration {
 		// The old knife module had no replacement: its keys are retired, but
 		// leaving them in an old file must not fail the load.
 		root.remove("custom_knife");
+		// The broken finder stack had three module ids. They are retired as a
+		// unit; an old file keeps its other modules and loads without error.
+		if (root.has("modules") && root.get("modules").isJsonObject()) {
+			removeLegacyFinderKeys(root.getAsJsonObject("modules"));
+		}
+	}
+
+	/** Removes the retired finder module objects from a module map. */
+	public static void removeLegacyFinderKeys(JsonObject modules) {
+		if (modules == null) {
+			return;
+		}
+		modules.remove("sus_chunk_finder");
+		modules.remove("chunk_finder");
+		modules.remove("chunk_finder_better");
 	}
 }

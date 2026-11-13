@@ -19,7 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Draws every enabled {@link EspModule} into the world.
+ * Draws every enabled {@link EspBoxSource} into the world.
  *
  * Three layers per box, all from vanilla render types:
  *
@@ -83,7 +83,7 @@ public final class EspRenderer {
 	/** The builder behind {@link #batch}, kept so a dropped one can be freed. */
 	private static ByteBufferBuilder buffer;
 
-	private static final List<EspModule> ACTIVE = new ArrayList<>();
+	private static final List<EspBoxSource> ACTIVE = new ArrayList<>();
 	/**
 	 * The sorted boxes of every active module for this frame.
 	 *
@@ -92,7 +92,7 @@ public final class EspRenderer {
 	 * built once per frame here and then read twice. A map keyed by identity
 	 * keeps one list per module without allocating a pair for every box.
 	 */
-	private static final Map<EspModule, List<AABB>> SORTED = new IdentityHashMap<>();
+	private static final Map<EspBoxSource, List<AABB>> SORTED = new IdentityHashMap<>();
 	private static double camX;
 	private static double camY;
 	private static double camZ;
@@ -125,7 +125,7 @@ public final class EspRenderer {
 		boolean anyFill = false;
 		boolean anyLine = false;
 		for (Module module : ModuleManager.get().modules()) {
-			if (module instanceof EspModule esp && esp.isEnabled()) {
+			if (module instanceof EspBoxSource esp && module.isEnabled()) {
 				ACTIVE.add(esp);
 				anyFill |= esp.fills();
 				anyLine |= esp.outlines() || esp.tracers();
@@ -217,7 +217,7 @@ public final class EspRenderer {
 	 * fill and an outline is walked and sorted once.
 	 */
 	private static void prepare() {
-		for (EspModule module : ACTIVE) {
+		for (EspBoxSource module : ACTIVE) {
 			List<AABB> boxes = SORTED.get(module);
 			if (boxes == null) {
 				boxes = new ArrayList<>();
@@ -239,7 +239,7 @@ public final class EspRenderer {
 	private static void drawLayers(MultiBufferSource.BufferSource batches, PoseStack.Pose pose,
 			float guiScale, boolean anyFill, boolean anyLine) {
 		if (anyFill) {
-			for (EspModule module : ACTIVE) {
+			for (EspBoxSource module : ACTIVE) {
 				if (!module.fills()) {
 					continue;
 				}
@@ -261,7 +261,7 @@ public final class EspRenderer {
 			}
 		}
 		if (anyLine) {
-			for (EspModule module : ACTIVE) {
+			for (EspBoxSource module : ACTIVE) {
 				if (!module.outlines() && !module.tracers()) {
 					continue;
 				}

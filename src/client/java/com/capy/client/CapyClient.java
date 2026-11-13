@@ -34,11 +34,11 @@ import com.capy.client.module.modules.SwingSpeedModule;
 import com.capy.client.module.modules.WeatherNotifierModule;
 import com.capy.client.module.modules.esp.AmethystFinderModule;
 import com.capy.client.module.modules.esp.BlockEspModule;
-import com.capy.client.module.modules.esp.ChunkFinderBetterModule;
-import com.capy.client.module.modules.esp.ChunkFinderModule;
-import com.capy.client.module.modules.esp.ChunkPlateRenderer;
+import com.capy.client.module.modules.esp.DeepslateFinderModule;
 import com.capy.client.module.modules.esp.EspRenderer;
-import com.capy.client.module.modules.esp.SusChunkFinderModule;
+import com.capy.client.module.modules.esp.HiveFinderModule;
+import com.capy.client.module.modules.esp.ShaftFinderModule;
+import com.capy.client.module.modules.esp.StalledGrowthFinderModule;
 import com.capy.client.module.modules.esp.PlayerEspModule;
 import com.capy.client.module.modules.esp.StorageEspModule;
 import com.capy.client.module.modules.hud.HudElements;
@@ -92,11 +92,13 @@ public class CapyClient implements ClientModInitializer {
 		// The finder is not an overlay: it searches the world for a geode and
 		// marks what it found, which is why it lives in its own category.
 		modules.register(new AmethystFinderModule());
-		// The three read-only finders share the plate renderer, scan queue,
-		// heat map and per-server calibration. They never send a packet.
-		modules.register(new SusChunkFinderModule());
-		modules.register(new ChunkFinderBetterModule());
-		modules.register(new ChunkFinderModule());
+		// The four read-only finders share a tiny base: bounded flags, outline
+		// boxes through the ESP renderer, one toast per new flag, and a
+		// time-sliced scan. They never send a packet.
+		modules.register(new StalledGrowthFinderModule());
+		modules.register(new ShaftFinderModule());
+		modules.register(new HiveFinderModule());
+		modules.register(new DeepslateFinderModule());
 		// The visual set: the atmosphere, the light level, the camera, the field
 		// of view, and the two overlays that frame what the player is looking at.
 		// The atmosphere changes what vanilla renders rather than painting over
@@ -174,7 +176,7 @@ public class CapyClient implements ClientModInitializer {
 			boolean editHud = ClientKeybinds.consumeHudEditorClick();
 			if (editHud && client.screen == null && client.player != null) {
 				client.setScreen(new HudEditorScreen());
-		}
+			}
 			// Freecam's own key. Toggling rather than opening anything: the point
 			// of the module is to look around while flying, and the moment you
 			// want it is the moment you are moving. Rebound in Controls, so the
@@ -227,8 +229,6 @@ public class CapyClient implements ClientModInitializer {
 		// Guarded: this runs inside the world pass, where a thrown exception is a
 		// crash on the first frame in a world rather than a missing box.
 		WorldRenderEvents.AFTER_ENTITIES.register(context -> Guard.run("esp", () -> EspRenderer.render(context)));
-		WorldRenderEvents.AFTER_ENTITIES.register(
-				context -> Guard.run("chunk plates", () -> ChunkPlateRenderer.render(context)));
 		// The skybox is submitted before terrain so every block can cover it.
 		// Its render type owns no depth state, which is what keeps distant
 		// terrain visible while the vanilla panorama is replaced.
@@ -282,11 +282,7 @@ public class CapyClient implements ClientModInitializer {
 		StaffListModule staffList = modules.get(StaffListModule.class);
 		ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register((before, after) -> {
 			Guard.run("atmosphere world reset", AtmosphereWorldRenderer::reset);
-			Guard.run("finder world reset", () -> {
-				ChunkPlateRenderer.reset();
-				com.capy.client.module.modules.esp.LightSignalQueue.clear();
-				resetFinders();
-			});
+			Guard.run("finder world reset", CapyClient::resetFinders);
 			Guard.run("anti-admin reset", antiAdmin::reset);
 			Guard.run("staff-list reset", () -> {
 				if (staffList != null) {
@@ -297,8 +293,6 @@ public class CapyClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			Guard.run("atmosphere world disconnect", AtmosphereWorldRenderer::reset);
 			Guard.run("finder disconnect", () -> {
-				ChunkPlateRenderer.reset();
-				com.capy.client.module.modules.esp.LightSignalQueue.clear();
 				resetFinders();
 				com.capy.client.module.modules.movement.MovementKickGuard.resetSession();
 			});
@@ -315,7 +309,7 @@ public class CapyClient implements ClientModInitializer {
 
 	private static void resetFinders() {
 		for (Module module : ModuleManager.get().modules()) {
-			if (module instanceof com.capy.client.module.modules.esp.BaseFinderModule finder) {
+			if (module instanceof com.capy.client.module.modules.esp.FinderModule finder) {
 				finder.resetSession();
 			}
 		}

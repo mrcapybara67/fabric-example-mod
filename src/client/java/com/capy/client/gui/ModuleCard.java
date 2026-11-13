@@ -430,7 +430,9 @@ public class ModuleCard {
 		int nameY = y + (UiTheme.CARD_H - blockH) / 2;
 		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.8f));
 		nameColor = Ui.fadeAlpha(nameColor, revealAlpha);
-		Ui.drawEllipsized(c, medium, title, textX, nameY, textRight - textX, nameColor);
+		String info = module.info();
+		String shownTitle = info == null || info.isEmpty() ? title : title + "  " + info;
+		Ui.drawEllipsized(c, medium, shownTitle, textX, nameY, textRight - textX, nameColor);
 		if (hasDesc) {
 			Ui.drawEllipsized(c, regular, desc, textX, nameY + medium.lineHeight() + DESC_GAP,
 					textRight - textX, Ui.fadeAlpha(UiTheme.TEXT_3, revealAlpha));
