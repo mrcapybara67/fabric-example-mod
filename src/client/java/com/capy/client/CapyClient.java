@@ -34,8 +34,11 @@ import com.capy.client.module.modules.SwingSpeedModule;
 import com.capy.client.module.modules.WeatherNotifierModule;
 import com.capy.client.module.modules.esp.AmethystFinderModule;
 import com.capy.client.module.modules.esp.BlockEspModule;
+import com.capy.client.module.modules.esp.ChunkRenderPass;
+import com.capy.client.module.modules.esp.ChunkScannerModule;
 import com.capy.client.module.modules.esp.DeepslateFinderModule;
 import com.capy.client.module.modules.esp.EspRenderer;
+import com.capy.client.module.modules.esp.FinderScanner;
 import com.capy.client.module.modules.esp.HiveFinderModule;
 import com.capy.client.module.modules.esp.ShaftFinderModule;
 import com.capy.client.module.modules.esp.StalledGrowthFinderModule;
@@ -66,6 +69,7 @@ public class CapyClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		ModuleManager modules = ModuleManager.get();
 		Guard.run("mixin audit", CapyMixinPlugin::audit);
+		Guard.run("finder scanner install", () -> FinderScanner.get().install());
 		modules.register(new SwingSpeedModule());
 		modules.register(new ItemInspectModule());
 		WeatherNotifierModule weather = new WeatherNotifierModule();
@@ -92,11 +96,12 @@ public class CapyClient implements ClientModInitializer {
 		// The finder is not an overlay: it searches the world for a geode and
 		// marks what it found, which is why it lives in its own category.
 		modules.register(new AmethystFinderModule());
-		// The four read-only finders share a tiny base: bounded flags, outline
+		// The read-only finders share a tiny base: bounded flags, outline
 		// boxes through the ESP renderer, one toast per new flag, and a
 		// time-sliced scan. They never send a packet.
 		modules.register(new StalledGrowthFinderModule());
 		modules.register(new ShaftFinderModule());
+		modules.register(new ChunkScannerModule());
 		modules.register(new HiveFinderModule());
 		modules.register(new DeepslateFinderModule());
 		// The visual set: the atmosphere, the light level, the camera, the field
@@ -210,6 +215,9 @@ public class CapyClient implements ClientModInitializer {
 					Guard.run("tick " + module.id(), () -> tickable.onTick(client));
 				}
 			}
+			// Every finder shares one scanner. It is ticked after the modules
+			// so their evaluation and seed state are ready before a slice runs.
+			Guard.run("finder scan", () -> FinderScanner.get().tick());
 		}));
 
 		// The world overlays are drawn after entities, inside the main world
@@ -229,6 +237,11 @@ public class CapyClient implements ClientModInitializer {
 		// Guarded: this runs inside the world pass, where a thrown exception is a
 		// crash on the first frame in a world rather than a missing box.
 		WorldRenderEvents.AFTER_ENTITIES.register(context -> Guard.run("esp", () -> EspRenderer.render(context)));
+		// The finder chunk styles share the same frame pass and camera-relative
+		// contract as the box renderer, but keep their own quad and line buffers
+		// because a contour interleaves the two types.
+		WorldRenderEvents.AFTER_ENTITIES.register(
+				context -> Guard.run("finder styles", () -> ChunkRenderPass.render(context)));
 		// The skybox is submitted before terrain so every block can cover it.
 		// Its render type owns no depth state, which is what keeps distant
 		// terrain visible while the vanilla panorama is replaced.
@@ -308,10 +321,6 @@ public class CapyClient implements ClientModInitializer {
 	}
 
 	private static void resetFinders() {
-		for (Module module : ModuleManager.get().modules()) {
-			if (module instanceof com.capy.client.module.modules.esp.FinderModule finder) {
-				finder.resetSession();
-			}
-		}
+		FinderScanner.get().onWorldReset();
 	}
 }

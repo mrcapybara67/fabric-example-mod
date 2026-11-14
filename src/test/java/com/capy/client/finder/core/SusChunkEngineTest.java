@@ -42,4 +42,53 @@ class SusChunkEngineTest {
 		engine.prune(0, 0, 8);
 		assertEquals(0, engine.scannedCount());
 	}
+
+	@Test
+	void syntheticWorldLeavesOnlyTheCentreGap() {
+		SusChunkEngine engine = new SusChunkEngine(4);
+		for (int x = -12; x <= 12; x++) {
+			for (int z = -12; z <= 12; z++) {
+				boolean centre = Math.abs(x) <= 4 && Math.abs(z) <= 4;
+				engine.report(Chunks.key(x, z), centre ? 0 : 50);
+			}
+		}
+
+		Set<Long> flagged = engine.flagged(key -> true, SusChunkEngine.thresholdFor(4));
+
+		assertEquals(Set.of(Chunks.key(0, 0)), flagged);
+		assertTrue(engine.supportAt(Chunks.key(0, 0)) >= SusChunkEngine.thresholdFor(4));
+		assertFalse(engine.isCleared(Chunks.key(0, 0)));
+	}
+
+	@Test
+	void noEvidenceFlagsNothing() {
+		SusChunkEngine engine = new SusChunkEngine(4);
+		assertTrue(engine.flagged(key -> true, SusChunkEngine.thresholdFor(4)).isEmpty());
+	}
+
+	@Test
+	void aStalledChunkFarFromEveryoneFlagsNothing() {
+		SusChunkEngine engine = new SusChunkEngine(4);
+		engine.report(Chunks.key(50, 50), 50);
+		assertTrue(engine.flagged(key -> true, SusChunkEngine.thresholdFor(4)).isEmpty());
+	}
+
+	@Test
+	void forgettingEveryReportedChunkLeavesTheEngineEmpty() {
+		SusChunkEngine engine = new SusChunkEngine(4);
+		long first = Chunks.key(0, 0);
+		long second = Chunks.key(5, 0);
+		engine.report(first, 40);
+		engine.report(second, 50);
+		assertTrue(engine.isCleared(Chunks.key(2, 0)));
+
+		engine.forget(first);
+		engine.forget(second);
+
+		assertEquals(0, engine.scannedCount());
+		assertEquals(0, engine.stalledChunks());
+		assertEquals(0, engine.supportAt(first));
+		assertFalse(engine.isCleared(Chunks.key(2, 0)));
+		assertTrue(engine.flagged(key -> true, 1).isEmpty());
+	}
 }

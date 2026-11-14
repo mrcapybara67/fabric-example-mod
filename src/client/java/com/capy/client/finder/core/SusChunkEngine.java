@@ -56,6 +56,34 @@ public final class SusChunkEngine {
 		apply(key, merged, 1);
 	}
 
+	public synchronized int weight(long key) {
+		Record record = records.get(key);
+		return record == null ? 0 : record.weight();
+	}
+
+	public synchronized int supportAt(long key) {
+		return support.getOrDefault(key, 0);
+	}
+
+	public synchronized boolean isCleared(long key) {
+		return coverage.containsKey(key);
+	}
+
+	public synchronized int stalledChunks() {
+		int n = 0;
+		for (Record r : records.values()) {
+			if (r.clears()) {
+				n++;
+			}
+		}
+		return n;
+	}
+
+	/** Chunks inside the elimination radius of at least one stalled record. */
+	public synchronized Set<Long> clearedChunks() {
+		return Set.copyOf(coverage.keySet());
+	}
+
 	public synchronized void forget(long key) {
 		Record old = records.remove(key);
 		scanned.remove(key);

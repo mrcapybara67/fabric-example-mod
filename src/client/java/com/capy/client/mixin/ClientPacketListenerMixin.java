@@ -1,13 +1,16 @@
 package com.capy.client.mixin;
 
 import com.capy.client.module.modules.antiadmin.PacketSignals;
+import com.capy.client.module.modules.esp.FinderScanner;
 import com.capy.client.util.Guard;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundCommandSuggestionsPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
+import net.minecraft.network.protocol.game.ClientboundLightUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundOpenBookPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenSignEditorPacket;
@@ -15,6 +18,7 @@ import net.minecraft.network.protocol.game.ClientboundPlayerChatPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
+import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerTeamPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
@@ -76,6 +80,22 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleBlockUpdate", at = @At("HEAD"))
 	private void capy$onBlockUpdate(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin block update", () -> PacketSignals.onBlockUpdate(packet));
+		Guard.run("finder block update", () -> FinderScanner.get().onBlockUpdate(packet.getPos()));
+	}
+
+	@Inject(method = "handleChunkBlocksUpdate", at = @At("HEAD"))
+	private void capy$onChunkBlocksUpdate(ClientboundSectionBlocksUpdatePacket packet, CallbackInfo ci) {
+		Guard.run("finder section update", () -> FinderScanner.get().onSectionBlocksUpdate(packet));
+	}
+
+	@Inject(method = "handleLevelChunkWithLight", at = @At("HEAD"))
+	private void capy$onLevelChunkWithLight(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
+		Guard.run("finder chunk data", () -> FinderScanner.get().onChunkData(packet.getX(), packet.getZ()));
+	}
+
+	@Inject(method = "handleLightUpdatePacket", at = @At("HEAD"))
+	private void capy$onLightUpdate(ClientboundLightUpdatePacket packet, CallbackInfo ci) {
+		Guard.run("finder light update", () -> FinderScanner.get().onLightUpdate(packet.getX(), packet.getZ()));
 	}
 
 	@Inject(method = "handleSetPlayerTeamPacket", at = @At("HEAD"))

@@ -5,6 +5,7 @@ import com.capy.client.keybind.ClientKeybinds;
 import com.capy.client.module.Category;
 import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
+import com.capy.client.module.modules.esp.FinderModule;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -33,6 +34,10 @@ public final class GuiFrame {
 	private static final Category[] CATEGORIES = Category.values();
 	/** Height of the section header above the card list. */
 	private static final int SECTION_HEADER_H = 26;
+	private static final int FINDER_STATUS_PAD = 8;
+	private static final int FINDER_STATUS_HEADER_H = 24;
+	private static final int FINDER_STATUS_ROW_H = 16;
+	private static final int FINDER_STATUS_BUTTON_H = 18;
 
 	/** Height of the theme picker button at the foot of the sidebar. */
 	private static final int THEME_PICKER_H = 26;
@@ -116,6 +121,10 @@ public final class GuiFrame {
 	private boolean hudHovered;
 	private int hudBtnX;
 	private int hudBtnY;
+	private int finderStatusButtonX;
+	private int finderStatusButtonY;
+	private int finderStatusButtonW;
+	private int finderStatusButtonH;
 	/**
 	 * Opens the drag editor. Supplied by the screen, because the frame is also
 	 * rendered outside Minecraft by the preview tool and must not depend on
@@ -236,7 +245,8 @@ public final class GuiFrame {
 				content += UiTheme.CARD_GAP;
 			}
 		}
-		int needed = UiTheme.HEADER_H + UiTheme.SP_6 + SECTION_HEADER_H + content + UiTheme.SP_6;
+		int needed = UiTheme.HEADER_H + UiTheme.SP_6 + SECTION_HEADER_H + finderStatusHeight()
+				+ content + UiTheme.SP_6;
 		int max = Math.min(520, (int) (height * 0.82f));
 		// The sidebar is allowed to push the window past the content cap, but
 		// never off the screen: on a short window showing every category
@@ -344,6 +354,38 @@ public final class GuiFrame {
 
 	private int contentBottom() {
 		return windowY() + windowHeight() - UiTheme.SP_5;
+	}
+
+	/** The first card pixel, below the section header and the finder status panel. */
+	private int contentListTop() {
+		return contentTop() + SECTION_HEADER_H + finderStatusHeight();
+	}
+
+	private boolean finderStatusVisible() {
+		return search.normalisedQuery().isEmpty() && CATEGORIES[selected] == Category.BASE_FINDER;
+	}
+
+	private List<FinderModule> enabledFinders() {
+		List<FinderModule> out = new ArrayList<>();
+		for (Module module : ModuleManager.get().byCategory(Category.BASE_FINDER)) {
+			if (module instanceof FinderModule finder && module.isEnabled()) {
+				out.add(finder);
+			}
+		}
+		return out;
+	}
+
+	/** Space taken by the status panel, including the gap below it; zero when hidden. */
+	private int finderStatusHeight() {
+		if (!finderStatusVisible()) {
+			return 0;
+		}
+		int count = enabledFinders().size();
+		if (count == 0) {
+			return 0;
+		}
+		return FINDER_STATUS_PAD * 2 + FINDER_STATUS_HEADER_H + count * FINDER_STATUS_ROW_H
+				+ UiTheme.SP_4;
 	}
 
 	// ---------------------------------------------------------------- render
@@ -847,7 +889,12 @@ public final class GuiFrame {
 		// A delicate line under the section header.
 		Ui.fadeLine(c, cx, top + headerH - 6, cw, Ui.withAlpha(UiTheme.BORDER, 0xC0));
 
-		int listTop = top + headerH;
+		int finderSpace = finderStatusHeight();
+		int statusTop = top + headerH;
+		if (finderSpace > 0) {
+			renderFinderStatus(c, type, cx, statusTop, cw, finderSpace - UiTheme.SP_4, mouseX, mouseY);
+		}
+		int listTop = statusTop + finderSpace;
 		int listH = Math.max(0, bottom - listTop);
 
 		// Content that moves between pages slides a little.
@@ -883,6 +930,69 @@ public final class GuiFrame {
 		c.popClip();
 
 		scrollbar.render(c);
+	}
+
+	/**
+	 * The base-finder status strip: one live line per enabled finder, and the
+	 * shared elimination-map switch. It is deliberately in the workspace and
+	 * not in chat; the player opens the page to read a state, not to scroll
+	 * back through messages.
+	 */
+	private void renderFinderStatus(UiCanvas c, UiType type, int x, int y, int w, int h,
+			int mouseX, int mouseY) {
+		List<FinderModule> finders = enabledFinders();
+		if (finders.isEmpty() || w <= 0 || h <= 0) {
+			return;
+		}
+		UiText regular = type.regular();
+		UiText medium = type.medium();
+		boolean mapVisible = FinderModule.eliminationMapVisible();
+		int accent = mapVisible ? UiTheme.ACCENT_2 : UiTheme.ACCENT;
+
+		Ui.roundRect(c, x + 1, y + 2, w, h, UiTheme.RADIUS_LG, 0x33000000);
+		Ui.surface(c, x, y, w, h, UiTheme.RADIUS_LG, UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
+		Ui.surfaceEdge(c, x, y, w, h, UiTheme.RADIUS_LG,
+				Ui.withAlpha(accent, 0xB0), Ui.withAlpha(UiTheme.BORDER, 0x44));
+		Ui.sheen(c, x, y, w, h, UiTheme.RADIUS_LG, sheenPhase());
+
+		int headerY = y + FINDER_STATUS_PAD;
+		int titleX = x + FINDER_STATUS_PAD + 8;
+		Ui.surface(c, x + FINDER_STATUS_PAD, headerY + 3, 2, 10, 1, accent, UiTheme.ACCENT_DEEP);
+		medium.draw(c, "FINDER STATUS", titleX, headerY + Math.max(0, (FINDER_STATUS_HEADER_H - medium.lineHeight()) / 2),
+				UiTheme.TEXT_2);
+
+		String buttonLabel = UiLabels.translate("capy.finder.show_elimination", "show elimination map");
+		int buttonW = Math.min(w / 2, regular.width(buttonLabel) + UiTheme.SP_4 * 2);
+		int buttonX = x + w - FINDER_STATUS_PAD - buttonW;
+		int buttonY = headerY + (FINDER_STATUS_HEADER_H - FINDER_STATUS_BUTTON_H) / 2;
+		boolean hovered = mouseX >= buttonX && mouseX < buttonX + buttonW
+				&& mouseY >= buttonY && mouseY < buttonY + FINDER_STATUS_BUTTON_H;
+		finderStatusButtonX = buttonX;
+		finderStatusButtonY = buttonY;
+		finderStatusButtonW = buttonW;
+		finderStatusButtonH = FINDER_STATUS_BUTTON_H;
+		Ui.surface(c, buttonX, buttonY, buttonW, FINDER_STATUS_BUTTON_H, 6,
+				mapVisible ? Ui.withAlpha(UiTheme.ACCENT, 0x42) : hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
+				mapVisible ? Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x32) : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, buttonX, buttonY, buttonW, FINDER_STATUS_BUTTON_H, 6,
+				mapVisible || hovered ? UiTheme.ACCENT : UiTheme.BORDER);
+		Ui.drawEllipsized(c, regular, buttonLabel, buttonX + UiTheme.SP_3,
+				Ui.centerTextY(buttonY, FINDER_STATUS_BUTTON_H, regular), buttonW - UiTheme.SP_3 * 2,
+				mapVisible ? UiTheme.ACCENT_2 : hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+
+		int rowY = headerY + FINDER_STATUS_HEADER_H;
+		int nameX = x + FINDER_STATUS_PAD + 8;
+		int nameW = Math.min(132, Math.max(80, w / 3));
+		int statusX = nameX + nameW + UiTheme.SP_4;
+		for (FinderModule finder : finders) {
+			int lineY = rowY + Math.max(0, (FINDER_STATUS_ROW_H - medium.lineHeight()) / 2);
+			Ui.drawEllipsized(c, medium, finder.displayName(), nameX, lineY, nameW,
+					finder.colorArgb());
+			int statusY = rowY + Math.max(0, (FINDER_STATUS_ROW_H - regular.lineHeight()) / 2);
+			Ui.drawEllipsized(c, regular, finder.statusLine(), statusX, statusY,
+					Math.max(0, x + w - FINDER_STATUS_PAD - statusX), UiTheme.TEXT_3);
+			rowY += FINDER_STATUS_ROW_H;
+		}
 	}
 
 	private void ensureCardLayout(List<ModuleCard> list, boolean cardsMoved) {
@@ -1054,9 +1164,18 @@ public final class GuiFrame {
 			}
 		}
 
+		// Finder status panel action.
+		if (button == 0 && finderStatusVisible() && finderStatusHeight() > 0 && finderStatusButtonW > 0
+				&& mx >= finderStatusButtonX && mx < finderStatusButtonX + finderStatusButtonW
+				&& my >= finderStatusButtonY && my < finderStatusButtonY + finderStatusButtonH) {
+			FinderModule.toggleEliminationMap();
+			GuiSounds.click();
+			return true;
+		}
+
 		// Scrollbar rail.
 		int railX = contentX() + contentW() + UiTheme.SP_3;
-		if (mx >= railX - 3 && mx < railX + 8 && my >= contentTop() && my < contentBottom()) {
+		if (mx >= railX - 3 && mx < railX + 8 && my >= contentListTop() && my < contentBottom()) {
 			scrollbar.pressed(my);
 			return true;
 		}
@@ -1064,9 +1183,9 @@ public final class GuiFrame {
 		// Cards.
 		int cx = contentX();
 		int cw = contentW();
-		// The same header height the renderer uses, so a click can never land
-		// one row off when the header changes.
-		int listTop = contentTop() + SECTION_HEADER_H;
+		// The same header and status heights the renderer uses, so a click can
+		// never land one row off when either changes.
+		int listTop = contentListTop();
 		if (mx >= cx && mx < cx + cw && my >= listTop && my < contentBottom()) {
 			List<ModuleCard> list = visibleCards();
 			for (int i = list.size() - 1; i >= 0; i--) {

@@ -50,11 +50,16 @@ public final class HudElements {
 		modules.register(new Biome());
 		modules.register(new Speed());
 		modules.register(new Day());
+		FinderListHudModule finderList = new FinderListHudModule();
+		modules.register(finderList);
+		// The list is the one HUD element whose whole job is to exist when there
+		// is a finding. It is on by default and hides itself while empty.
+		finderList.setEnabled(true);
 	}
 
 	// ------------------------------------------------------------- elements
 
-	/** The client name, top left, the one element that is always on. */
+	/** The client name, top left. */
 	private static final class Watermark extends HudElementModule {
 		Watermark() {
 			super("hud_watermark", "", ANCHOR_TOP_LEFT);

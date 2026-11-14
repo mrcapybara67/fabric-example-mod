@@ -1,11 +1,12 @@
 package com.capy.client.module.modules.esp;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
+import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.HiveFinder;
 import com.capy.client.module.SliderSetting;
 import com.google.gson.JsonObject;
-import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.block.BeehiveBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -30,19 +32,17 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  * one middle chunk so one base does not produce a wall of flags.</p>
  */
 public final class HiveFinderModule extends FinderModule {
-	private static final long SCAN_BUDGET_NANOS = 1_500_000L;
-	private static final long RESCAN_INTERVAL_TICKS = 1200L;
 	private static final long EVALUATE_INTERVAL_TICKS = 20L;
 	private static final Predicate<BlockState> HIVE = state ->
 			state != null && (state.is(Blocks.BEEHIVE) || state.is(Blocks.BEE_NEST));
 
 	private final SliderSetting mergeRadius = setting(new SliderSetting("merge_radius", 4, 1, 8));
 	private final HiveFinder hive = new HiveFinder();
-	private final ArrayDeque<Long> queue = new ArrayDeque<>();
-	private final Set<Long> queued = new HashSet<>();
 	private final Map<Long, Long> retry = new HashMap<>();
-	private long lastEnqueueTick = -1L;
 	private long lastEvaluateTick = -1L;
+	private boolean scanning;
+	private long scanKey;
+	private int scanSection;
 
 	public HiveFinderModule() {
 		super("hive_finder", 0xFFF2C14E);
@@ -53,80 +53,41 @@ public final class HiveFinderModule extends FinderModule {
 		if (!beginTick(mc)) {
 			return;
 		}
+		moveReadyRetries();
 		long tick = level.getGameTime();
-		moveReadyRetries(tick);
-		if (lastEnqueueTick < 0L || tick - lastEnqueueTick >= RESCAN_INTERVAL_TICKS) {
-			enqueueLoaded();
-			lastEnqueueTick = tick;
-		}
-		long deadline = System.nanoTime() + SCAN_BUDGET_NANOS;
-		while (!queue.isEmpty() && System.nanoTime() < deadline) {
-			long key = queue.pollFirst();
-			queued.remove(key);
-			LevelChunk chunk = level.getChunkSource().getChunkNow(Chunks.x(key), Chunks.z(key));
-			if (chunk == null) {
-				continue;
-			}
-			int now = (int) tick;
-			if (!hive.settled(key, now)) {
-				retry.put(key, tick + HiveFinder.SETTLE_TICKS);
-				continue;
-			}
-			hive.setHit(key, scanChunk(chunk));
-		}
-		if (queue.isEmpty() && retry.isEmpty() && tick - lastEvaluateTick >= EVALUATE_INTERVAL_TICKS) {
+		if (lastEvaluateTick < 0L || tick - lastEvaluateTick >= EVALUATE_INTERVAL_TICKS) {
 			lastEvaluateTick = tick;
 			evaluate();
 		}
 	}
 
-	private void moveReadyRetries(long tick) {
-		if (retry.isEmpty()) {
-			return;
+	@Override
+	public boolean scan(ClientLevel level, LevelChunk chunk, long deadlineNanos) {
+		this.level = level;
+		long key = Chunks.key(chunk.getPos().x, chunk.getPos().z);
+		long tick = level.getGameTime();
+		if (!hive.settled(key, (int) tick)) {
+			retry.putIfAbsent(key, tick + HiveFinder.SETTLE_TICKS);
+			return true;
 		}
-		var iterator = retry.entrySet().iterator();
-		while (iterator.hasNext()) {
-			Map.Entry<Long, Long> entry = iterator.next();
-			if (entry.getValue() <= tick) {
-				iterator.remove();
-				if (queued.add(entry.getKey())) {
-					queue.addLast(entry.getKey());
-				}
-			}
-		}
-	}
+		retry.remove(key);
 
-	private void enqueueLoaded() {
-		int radius = Math.min(12, simulationDistance() + 4);
-		var player = Minecraft.getInstance().player;
-		if (player == null) {
-			return;
+		if (!scanning || scanKey != key) {
+			scanning = true;
+			scanKey = key;
+			scanSection = 0;
 		}
-		int cx = player.blockPosition().getX() >> 4;
-		int cz = player.blockPosition().getZ() >> 4;
-		for (int dz = -radius; dz <= radius; dz++) {
-			for (int dx = -radius; dx <= radius; dx++) {
-				int x = cx + dx;
-				int z = cz + dz;
-				LevelChunk chunk = level.getChunkSource().getChunkNow(x, z);
-				if (chunk == null) {
-					continue;
-				}
-				long key = Chunks.key(x, z);
-				if (queued.add(key)) {
-					queue.addLast(key);
-				}
-			}
-		}
-	}
-
-	private boolean scanChunk(LevelChunk chunk) {
 		int minY = chunk.getMinY();
 		int baseX = chunk.getPos().getMinBlockX();
 		int baseZ = chunk.getPos().getMinBlockZ();
 		LevelChunkSection[] sections = chunk.getSections();
-		for (int index = 0; index < sections.length; index++) {
+		for (int index = scanSection; index < sections.length; index++) {
+			if (System.nanoTime() >= deadlineNanos) {
+				scanSection = index;
+				return false;
+			}
 			LevelChunkSection section = sections[index];
+			scanSection = index + 1;
 			if (section == null || section.hasOnlyAir() || !section.maybeHas(HIVE)) {
 				continue;
 			}
@@ -137,6 +98,8 @@ public final class HiveFinderModule extends FinderModule {
 						BlockState state = section.getBlockState(x, y, z);
 						if (state.is(Blocks.BEEHIVE) || state.is(Blocks.BEE_NEST)) {
 							if (state.getValue(BeehiveBlock.HONEY_LEVEL) >= BeehiveBlock.MAX_HONEY_LEVELS) {
+								hive.setHit(key, true);
+								clearScan();
 								return true;
 							}
 						}
@@ -144,7 +107,24 @@ public final class HiveFinderModule extends FinderModule {
 				}
 			}
 		}
-		return false;
+		hive.setHit(key, false);
+		clearScan();
+		return true;
+	}
+
+	private void moveReadyRetries() {
+		if (retry.isEmpty() || level == null) {
+			return;
+		}
+		long tick = level.getGameTime();
+		var iterator = retry.entrySet().iterator();
+		while (iterator.hasNext()) {
+			Map.Entry<Long, Long> entry = iterator.next();
+			if (entry.getValue() <= tick) {
+				iterator.remove();
+				FinderScanner.get().requeue(entry.getKey());
+			}
+		}
 	}
 
 	private void evaluate() {
@@ -153,27 +133,55 @@ public final class HiveFinderModule extends FinderModule {
 		}
 		hive.retain(this::loaded);
 		Set<Long> merged = HiveFinder.merge(new HashSet<>(hive.hits()), mergeRadius.get());
-		for (long key : new HashSet<>(flags)) {
+		for (long key : new HashSet<>(flags.keySet())) {
 			if (!merged.contains(key)) {
 				unmarkFlag(key);
 			}
 		}
 		for (long key : merged) {
-			if (!flags.contains(key)) {
-				markFlag(key, List.of(surfaceBox(key)));
+			if (!flags.containsKey(key)) {
+				markFlag(key, "full hive cluster", 1, List.of(surfaceBox(key)));
 			}
 		}
+	}
+
+	@Override
+	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
+		int rgb = colorArgb() & 0xFFFFFF;
+		for (long key : flags.keySet()) {
+			ChunkStyles.marker(sink, Chunks.x(key), Chunks.z(key), surfaceY(key) + 0.04,
+					rgb, 1.0, timeMs, true);
+		}
+	}
+
+	@Override
+	protected String statusHint() {
+		return retry.isEmpty() ? "no full hives yet"
+				: "waiting for " + retry.size() + (retry.size() == 1 ? " chunk" : " chunks") + " to settle";
+	}
+
+	@Override
+	protected void onChunkUnloaded(long key) {
+		retry.remove(key);
+		hive.setHit(key, false);
+		if (scanning && scanKey == key) {
+			clearScan();
+		}
+	}
+
+	private void clearScan() {
+		scanning = false;
+		scanKey = 0L;
+		scanSection = 0;
 	}
 
 	@Override
 	public void resetSession() {
 		super.resetSession();
 		hive.clear();
-		queue.clear();
-		queued.clear();
 		retry.clear();
-		lastEnqueueTick = -1L;
 		lastEvaluateTick = -1L;
+		clearScan();
 	}
 
 	@Override

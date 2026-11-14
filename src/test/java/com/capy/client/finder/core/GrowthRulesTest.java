@@ -29,6 +29,23 @@ class GrowthRulesTest {
 	}
 
 	@Test
+	void newerEvidenceRulesAreConservative() {
+		assertTrue(GrowthRules.buddingAmethyst(true, false));
+		assertTrue(GrowthRules.buddingAmethyst(false, true));
+		assertFalse(GrowthRules.buddingAmethyst(false, false));
+		assertTrue(GrowthRules.amethystBud(true, false));
+		assertFalse(GrowthRules.amethystBud(false, false));
+		assertFalse(GrowthRules.amethystBud(true, true));
+		assertTrue(GrowthRules.grassSmothered(true));
+		assertTrue(GrowthRules.dirtUnspread(false, false, true));
+		assertFalse(GrowthRules.dirtUnspread(true, false, true));
+		assertFalse(GrowthRules.dirtUnspread(false, true, true));
+		assertFalse(GrowthRules.dirtUnspread(false, false, false));
+		assertTrue(GrowthRules.kelpFolia(true, 2));
+		assertFalse(GrowthRules.kelpFolia(true, 3));
+	}
+
+	@Test
 	void eyeblossomWindowsAreExplicit() {
 		assertEquals(Boolean.TRUE, GrowthRules.eyeblossomsShouldBeOpen(16600));
 		assertNull(GrowthRules.eyeblossomsShouldBeOpen(12601));

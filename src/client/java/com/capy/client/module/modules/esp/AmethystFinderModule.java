@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -282,11 +283,14 @@ public final class AmethystFinderModule extends EspModule {
 		if (mc == null || mc.player == null) {
 			return;
 		}
-		String text = String.format("Amethyst geode at %d %d %d",
+		String text = String.format("amethyst geode at %d %d %d",
 				Math.round((geode.minX + geode.maxX) * 0.5),
 				Math.round((geode.minY + geode.maxY) * 0.5),
 				Math.round((geode.minZ + geode.maxZ) * 0.5));
-		mc.player.displayClientMessage(Component.literal("[Capy] " + text), false);
+		if (mc.getToastManager() != null) {
+			SystemToast.add(mc.getToastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+					Component.translatable(translationKey()), Component.literal(text));
+		}
 	}
 
 	/** The box around a whole group of clusters. */

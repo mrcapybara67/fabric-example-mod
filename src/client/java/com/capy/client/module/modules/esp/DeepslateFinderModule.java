@@ -1,16 +1,18 @@
 package com.capy.client.module.modules.esp;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
+import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.SeedDeepslate;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.StringSetting;
 import com.google.gson.JsonObject;
-import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -33,17 +35,16 @@ import org.slf4j.LoggerFactory;
  */
 public final class DeepslateFinderModule extends FinderModule {
 	private static final Logger LOGGER = LoggerFactory.getLogger(DeepslateFinderModule.class);
-	private static final long SCAN_BUDGET_NANOS = 1_500_000L;
-	private static final long RESCAN_INTERVAL_TICKS = 1200L;
 
 	private final StringSetting worldSeed = setting(new StringSetting("world_seed", ""));
 	private final SliderSetting minimum = setting(new SliderSetting("minimum", 4, 1, 32));
-	private final ArrayDeque<Long> queue = new ArrayDeque<>();
-	private final Set<Long> queued = new HashSet<>();
 	private SeedDeepslate seed;
 	private long appliedSeed = Long.MIN_VALUE;
-	private long lastEnqueueTick = -1L;
 	private boolean warnedNoSeed;
+	private boolean scanning;
+	private long scanKey;
+	private int scanSection;
+	private int scanSuspicious;
 
 	public DeepslateFinderModule() {
 		super("deepslate_finder", 0xFF6FA8DC);
@@ -57,34 +58,74 @@ public final class DeepslateFinderModule extends FinderModule {
 		if (level.dimension() != Level.OVERWORLD) {
 			return;
 		}
-		if (!resolveSeed(mc)) {
-			return;
-		}
-		long tick = level.getGameTime();
-		if (lastEnqueueTick < 0L || tick - lastEnqueueTick >= RESCAN_INTERVAL_TICKS) {
-			enqueueLoaded();
-			lastEnqueueTick = tick;
-		}
-		long deadline = System.nanoTime() + SCAN_BUDGET_NANOS;
-		while (!queue.isEmpty() && System.nanoTime() < deadline) {
-			long key = queue.pollFirst();
-			queued.remove(key);
-			LevelChunk chunk = level.getChunkSource().getChunkNow(Chunks.x(key), Chunks.z(key));
-			if (chunk == null) {
-				continue;
-			}
-			int suspicious = scanChunk(chunk);
-			if (suspicious >= minimum.get()) {
-				int baseX = chunk.getPos().getMinBlockX();
-				int baseZ = chunk.getPos().getMinBlockZ();
-				markFlag(key, List.of(new AABB(baseX, 0.05, baseZ, baseX + 16.0, 8.0, baseZ + 16.0)));
-			} else {
-				unmarkFlag(key);
-			}
+		long before = appliedSeed;
+		if (resolveSeed() && appliedSeed != before) {
+			FinderScanner.get().queueAllLoaded();
 		}
 	}
 
-	private boolean resolveSeed(Minecraft mc) {
+	@Override
+	public boolean scan(ClientLevel level, LevelChunk chunk, long deadlineNanos) {
+		this.level = level;
+		if (level.dimension() != Level.OVERWORLD) {
+			return true;
+		}
+		if (!resolveSeed()) {
+			return true;
+		}
+		long key = Chunks.key(chunk.getPos().x, chunk.getPos().z);
+		int minY = chunk.getMinY();
+		int firstSection = (1 - minY) >> 4;
+		if (!scanning || scanKey != key) {
+			scanning = true;
+			scanKey = key;
+			scanSection = firstSection;
+			scanSuspicious = 0;
+		}
+
+		int baseX = chunk.getPos().getMinBlockX();
+		int baseZ = chunk.getPos().getMinBlockZ();
+		int lastSection = (7 - minY) >> 4;
+		LevelChunkSection[] sections = chunk.getSections();
+		for (int index = scanSection; index <= lastSection; index++) {
+			if (System.nanoTime() >= deadlineNanos) {
+				scanSection = index;
+				return false;
+			}
+			scanSection = index + 1;
+			if (index < 0 || index >= sections.length) {
+				continue;
+			}
+			LevelChunkSection section = sections[index];
+			if (section == null) {
+				continue;
+			}
+			int sectionY = minY + (index << 4);
+			int fromY = Math.max(1, sectionY);
+			int toY = Math.min(7, sectionY + 15);
+			for (int worldY = fromY; worldY <= toY; worldY++) {
+				int localY = (worldY - minY) & 15;
+				for (int z = 0; z < 16; z++) {
+					for (int x = 0; x < 16; x++) {
+						BlockState state = section.getBlockState(x, localY, z);
+						if (state.is(Blocks.DEEPSLATE) && seed.suspicious(baseX + x, worldY, baseZ + z)) {
+							scanSuspicious++;
+						}
+					}
+				}
+			}
+		}
+		if (scanSuspicious >= minimum.get()) {
+			markFlag(key, "suspicious deepslate", scanSuspicious, List.of(new AABB(baseX, 0.05, baseZ,
+					baseX + 16.0, 8.0, baseZ + 16.0)));
+		} else {
+			unmarkFlag(key);
+		}
+		clearScan();
+		return true;
+	}
+
+	private boolean resolveSeed() {
 		String text = worldSeed.value();
 		long source = 0L;
 		boolean found = false;
@@ -99,7 +140,8 @@ public final class DeepslateFinderModule extends FinderModule {
 				}
 			}
 		}
-		if (!found && mc.hasSingleplayerServer()) {
+		Minecraft mc = Minecraft.getInstance();
+		if (!found && mc != null && mc.hasSingleplayerServer()) {
 			var server = mc.getSingleplayerServer();
 			if (server != null) {
 				source = server.overworld().getSeed();
@@ -120,65 +162,36 @@ public final class DeepslateFinderModule extends FinderModule {
 		return true;
 	}
 
-	private void enqueueLoaded() {
-		int radius = Math.min(12, simulationDistance() + 4);
-		var player = Minecraft.getInstance().player;
-		if (player == null) {
+	@Override
+	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
+		if (flags.isEmpty()) {
 			return;
 		}
-		int cx = player.blockPosition().getX() >> 4;
-		int cz = player.blockPosition().getZ() >> 4;
-		for (int dz = -radius; dz <= radius; dz++) {
-			for (int dx = -radius; dx <= radius; dx++) {
-				int x = cx + dx;
-				int z = cz + dz;
-				if (level.getChunkSource().getChunkNow(x, z) == null) {
-					continue;
-				}
-				long key = Chunks.key(x, z);
-				if (queued.add(key)) {
-					queue.addLast(key);
-				}
-			}
-		}
+		Set<Long> chunks = new HashSet<>(flags.keySet());
+		int argb = colorArgb();
+		int alpha = argb >>> 24;
+		ChunkStyles.fillContour(sink, chunks, 8.05, argb & 0xFFFFFF,
+				Math.max(28, Math.round(alpha * 0.16f)), Math.min(255, Math.max(180, alpha)), timeSec);
 	}
 
-	private int scanChunk(LevelChunk chunk) {
-		int suspicious = 0;
-		int baseX = chunk.getPos().getMinBlockX();
-		int baseZ = chunk.getPos().getMinBlockZ();
-		int minY = chunk.getMinY();
-		LevelChunkSection[] sections = chunk.getSections();
-		for (int worldY = 1; worldY < 8; worldY++) {
-			int index = (worldY - minY) >> 4;
-			if (index < 0 || index >= sections.length) {
-				continue;
-			}
-			LevelChunkSection section = sections[index];
-			if (section == null) {
-				continue;
-			}
-			int localY = (worldY - minY) & 15;
-			for (int z = 0; z < 16; z++) {
-				for (int x = 0; x < 16; x++) {
-					BlockState state = section.getBlockState(x, localY, z);
-					if (state.is(Blocks.DEEPSLATE) && seed.suspicious(baseX + x, worldY, baseZ + z)) {
-						suspicious++;
-					}
-				}
-			}
-		}
-		return suspicious;
+	@Override
+	protected String statusHint() {
+		return seed == null ? "waiting for a world seed" : "no seeded deepslate cluster";
+	}
+
+	private void clearScan() {
+		scanning = false;
+		scanKey = 0L;
+		scanSection = 0;
+		scanSuspicious = 0;
 	}
 
 	@Override
 	public void resetSession() {
 		super.resetSession();
-		queue.clear();
-		queued.clear();
 		seed = null;
 		appliedSeed = Long.MIN_VALUE;
-		lastEnqueueTick = -1L;
+		clearScan();
 	}
 
 	@Override
