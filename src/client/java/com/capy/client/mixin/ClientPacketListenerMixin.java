@@ -2,15 +2,21 @@ package com.capy.client.mixin;
 
 import com.capy.client.module.modules.antiadmin.PacketSignals;
 import com.capy.client.module.modules.esp.FinderScanner;
+import com.capy.client.module.modules.esp.MotionFeed;
 import com.capy.client.util.Guard;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundCommandSuggestionsPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundMoveMinecartPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenBookPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
 import net.minecraft.network.protocol.game.ClientboundOpenSignEditorPacket;
@@ -22,6 +28,7 @@ import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerTeamPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
+import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -70,6 +77,8 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleSoundEvent", at = @At("HEAD"))
 	private void capy$onSound(ClientboundSoundPacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin sound", () -> PacketSignals.onSound(packet));
+		Guard.run("motion sound", () -> MotionFeed.onSound(packet.getX(), packet.getY(), packet.getZ(),
+				packet.getSource()));
 	}
 
 	@Inject(method = "handleAddEntity", at = @At("HEAD"))
@@ -77,15 +86,62 @@ public class ClientPacketListenerMixin {
 		Guard.run("anti-admin entity spawn", () -> PacketSignals.onEntitySpawn(packet));
 	}
 
+	@Inject(method = "handleMoveEntity", at = @At("TAIL"))
+	private void capy$onMoveEntity(ClientboundMoveEntityPacket packet, CallbackInfo ci) {
+		Guard.run("motion entity move", () -> {
+			Minecraft mc = Minecraft.getInstance();
+			if (packet.hasPosition() && mc != null && mc.level != null) {
+				MotionFeed.onEntityMoved(packet.getEntity(mc.level));
+			}
+		});
+	}
+
+	@Inject(method = "handleTeleportEntity", at = @At("TAIL"))
+	private void capy$onTeleportEntity(ClientboundTeleportEntityPacket packet, CallbackInfo ci) {
+		Guard.run("motion entity teleport", () -> {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null && mc.level != null) {
+				MotionFeed.onEntityMoved(mc.level.getEntity(packet.id()));
+			}
+		});
+	}
+
+	@Inject(method = "handleEntityPositionSync", at = @At("TAIL"))
+	private void capy$onEntityPositionSync(ClientboundEntityPositionSyncPacket packet, CallbackInfo ci) {
+		Guard.run("motion entity sync", () -> {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null && mc.level != null) {
+				MotionFeed.onEntityMoved(mc.level.getEntity(packet.id()));
+			}
+		});
+	}
+
+	@Inject(method = "handleMinecartAlongTrack", at = @At("TAIL"))
+	private void capy$onMinecartAlongTrack(ClientboundMoveMinecartPacket packet, CallbackInfo ci) {
+		Guard.run("motion minecart", () -> {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null && mc.level != null) {
+				MotionFeed.onEntityMoved(packet.getEntity(mc.level));
+			}
+		});
+	}
+
 	@Inject(method = "handleBlockUpdate", at = @At("HEAD"))
 	private void capy$onBlockUpdate(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin block update", () -> PacketSignals.onBlockUpdate(packet));
 		Guard.run("finder block update", () -> FinderScanner.get().onBlockUpdate(packet.getPos()));
+		Guard.run("motion block update", () -> MotionFeed.onBlockUpdate(packet.getPos(), packet.getBlockState()));
+	}
+
+	@Inject(method = "handleBlockEvent", at = @At("HEAD"))
+	private void capy$onBlockEvent(ClientboundBlockEventPacket packet, CallbackInfo ci) {
+		Guard.run("motion block event", () -> MotionFeed.onBlockEvent(packet.getBlock(), packet.getPos()));
 	}
 
 	@Inject(method = "handleChunkBlocksUpdate", at = @At("HEAD"))
 	private void capy$onChunkBlocksUpdate(ClientboundSectionBlocksUpdatePacket packet, CallbackInfo ci) {
 		Guard.run("finder section update", () -> FinderScanner.get().onSectionBlocksUpdate(packet));
+		Guard.run("motion section update", () -> MotionFeed.onSectionUpdate(packet));
 	}
 
 	@Inject(method = "handleLevelChunkWithLight", at = @At("HEAD"))

@@ -40,6 +40,7 @@ public final class DeepslateFinderModule extends FinderModule {
 	private final SliderSetting minimum = setting(new SliderSetting("minimum", 4, 1, 32));
 	private SeedDeepslate seed;
 	private long appliedSeed = Long.MIN_VALUE;
+	private int appliedMinimum = 4;
 	private boolean warnedNoSeed;
 	private boolean scanning;
 	private long scanKey;
@@ -59,7 +60,24 @@ public final class DeepslateFinderModule extends FinderModule {
 			return;
 		}
 		long before = appliedSeed;
-		if (resolveSeed() && appliedSeed != before) {
+		if (!resolveSeed()) {
+			// Removing or invalidating the seed makes every old flag a claim about
+			// a different seed. Drop both the flags and any half-finished scan.
+			if (before != Long.MIN_VALUE || !flags.isEmpty()) {
+				resetSeedView();
+			}
+			return;
+		}
+		if (appliedSeed != before) {
+			resetSeedView();
+			FinderScanner.get().queueAllLoaded();
+		}
+		int minimumValue = minimum.get();
+		if (minimumValue != appliedMinimum) {
+			// The threshold is part of the result, not just of the next scan.
+			// Re-evaluate the loaded chunks immediately when it moves.
+			appliedMinimum = minimumValue;
+			resetSeedView();
 			FinderScanner.get().queueAllLoaded();
 		}
 	}
@@ -70,7 +88,13 @@ public final class DeepslateFinderModule extends FinderModule {
 		if (level.dimension() != Level.OVERWORLD) {
 			return true;
 		}
+		long beforeSeed = appliedSeed;
 		if (!resolveSeed()) {
+			resetSeedView();
+			return true;
+		}
+		if (appliedSeed != beforeSeed) {
+			resetSeedView();
 			return true;
 		}
 		long key = Chunks.key(chunk.getPos().x, chunk.getPos().z);
@@ -138,10 +162,13 @@ public final class DeepslateFinderModule extends FinderModule {
 					warnedNoSeed = true;
 					LOGGER.warn("Capy: deepslate finder seed '{}' is not a signed integer; the finder is idle.", text);
 				}
+				seed = null;
+				appliedSeed = Long.MIN_VALUE;
+				return false;
 			}
 		}
 		Minecraft mc = Minecraft.getInstance();
-		if (!found && mc != null && mc.hasSingleplayerServer()) {
+		if (!found && text.isBlank() && mc != null && mc.hasSingleplayerServer()) {
 			var server = mc.getSingleplayerServer();
 			if (server != null) {
 				source = server.overworld().getSeed();
@@ -153,6 +180,8 @@ public final class DeepslateFinderModule extends FinderModule {
 				warnedNoSeed = true;
 				LOGGER.info("Capy: deepslate finder needs a seed on a multiplayer server; set world_seed to enable it.");
 			}
+			seed = null;
+			appliedSeed = Long.MIN_VALUE;
 			return false;
 		}
 		if (seed == null || appliedSeed != source) {
@@ -179,6 +208,19 @@ public final class DeepslateFinderModule extends FinderModule {
 		return seed == null ? "waiting for a world seed" : "no seeded deepslate cluster";
 	}
 
+	@Override
+	protected void onChunkUnloaded(long key) {
+		if (scanning && scanKey == key) {
+			clearScan();
+		}
+	}
+
+	private void resetSeedView() {
+		clearFlags();
+		announced.clear();
+		clearScan();
+	}
+
 	private void clearScan() {
 		scanning = false;
 		scanKey = 0L;
@@ -191,6 +233,7 @@ public final class DeepslateFinderModule extends FinderModule {
 		super.resetSession();
 		seed = null;
 		appliedSeed = Long.MIN_VALUE;
+		appliedMinimum = minimum.get();
 		clearScan();
 	}
 
@@ -201,6 +244,7 @@ public final class DeepslateFinderModule extends FinderModule {
 		minimum.set(ConfigValues.intValue(json, "minimum", 4));
 		seed = null;
 		appliedSeed = Long.MIN_VALUE;
+		appliedMinimum = minimum.get();
 	}
 
 	@Override

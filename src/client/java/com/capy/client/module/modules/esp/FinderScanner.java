@@ -145,10 +145,16 @@ public final class FinderScanner {
 		int cz = chunk.getPos().z;
 		long key = Chunks.key(cx, cz);
 		queue.offer(key);
-		queue.offer(Chunks.key(cx + 1, cz));
-		queue.offer(Chunks.key(cx - 1, cz));
-		queue.offer(Chunks.key(cx, cz + 1));
-		queue.offer(Chunks.key(cx, cz - 1));
+		// A loaded chunk can change the border cells of all eight neighbours.
+		// The four diagonals matter to the shaft finders, whose 3-cell border
+		// includes diagonal corners, not just the cardinal directions.
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (dx != 0 || dz != 0) {
+					queue.offer(Chunks.key(cx + dx, cz + dz));
+				}
+			}
+		}
 	}
 
 	public void onChunkUnload(ClientLevel level, LevelChunk chunk) {

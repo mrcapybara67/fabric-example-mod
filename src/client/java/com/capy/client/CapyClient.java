@@ -20,6 +20,7 @@ import com.capy.client.module.modules.AtmosphereWorldRenderer;
 import com.capy.client.module.modules.BlockAnimationModule;
 import com.capy.client.module.modules.BlockOverlayModule;
 import com.capy.client.module.modules.BoatFlyModule;
+import com.capy.client.module.modules.ChunkReloadModule;
 import com.capy.client.module.modules.BoatNoclipModule;
 import com.capy.client.module.modules.CustomFOVModule;
 import com.capy.client.module.modules.FlyModule;
@@ -32,15 +33,23 @@ import com.capy.client.module.modules.SmoothCameraModule;
 import com.capy.client.module.modules.StaffListModule;
 import com.capy.client.module.modules.SwingSpeedModule;
 import com.capy.client.module.modules.WeatherNotifierModule;
+import com.capy.client.module.modules.esp.ActivityInspectorModule;
 import com.capy.client.module.modules.esp.AmethystFinderModule;
+import com.capy.client.module.modules.esp.ArtificialLightModule;
+import com.capy.client.module.modules.esp.BedrockVoidModule;
 import com.capy.client.module.modules.esp.BlockEspModule;
+import com.capy.client.module.modules.esp.BlockNotifierModule;
 import com.capy.client.module.modules.esp.ChunkRenderPass;
 import com.capy.client.module.modules.esp.ChunkScannerModule;
 import com.capy.client.module.modules.esp.DeepslateFinderModule;
 import com.capy.client.module.modules.esp.EspRenderer;
 import com.capy.client.module.modules.esp.FinderScanner;
 import com.capy.client.module.modules.esp.HiveFinderModule;
+import com.capy.client.module.modules.esp.LightFinderModule;
+import com.capy.client.module.modules.esp.MotionFeed;
+import com.capy.client.module.modules.esp.MotionScannerModule;
 import com.capy.client.module.modules.esp.ShaftFinderModule;
+import com.capy.client.module.modules.esp.SpawnerBeamModule;
 import com.capy.client.module.modules.esp.StalledGrowthFinderModule;
 import com.capy.client.module.modules.esp.PlayerEspModule;
 import com.capy.client.module.modules.esp.StorageEspModule;
@@ -104,6 +113,23 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(new ChunkScannerModule());
 		modules.register(new HiveFinderModule());
 		modules.register(new DeepslateFinderModule());
+		// Light is the one signal an anti-xray cannot hide, so the artificial
+		// light finder reads the light layer rather than the blocks. The light
+		// finder is its section-level companion; the bedrock finder looks for
+		// holes in the floor and the nether roof.
+		modules.register(new ArtificialLightModule());
+		modules.register(new LightFinderModule());
+		modules.register(new BedrockVoidModule());
+		// The activity pair reads the packets the client already receives: the
+		// scanner colours active chunks and the inspector adds the player list
+		// and low-Y markers. The notifier and the spawner beam are chunk-local;
+		// chunk reload is a movement helper, not a read-only finder.
+		modules.register(new MotionScannerModule());
+		modules.register(new ActivityInspectorModule());
+		modules.register(new BlockNotifierModule());
+		modules.register(new SpawnerBeamModule());
+		ChunkReloadModule chunkReload = new ChunkReloadModule();
+		modules.register(chunkReload);
 		// The visual set: the atmosphere, the light level, the camera, the field
 		// of view, and the two overlays that frame what the player is looking at.
 		// The atmosphere changes what vanilla renders rather than painting over
@@ -296,6 +322,7 @@ public class CapyClient implements ClientModInitializer {
 		ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register((before, after) -> {
 			Guard.run("atmosphere world reset", AtmosphereWorldRenderer::reset);
 			Guard.run("finder world reset", CapyClient::resetFinders);
+			Guard.run("chunk reload world reset", chunkReload::restoreAndReset);
 			Guard.run("anti-admin reset", antiAdmin::reset);
 			Guard.run("staff-list reset", () -> {
 				if (staffList != null) {
@@ -305,6 +332,7 @@ public class CapyClient implements ClientModInitializer {
 		});
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			Guard.run("atmosphere world disconnect", AtmosphereWorldRenderer::reset);
+			Guard.run("chunk reload disconnect", chunkReload::restoreAndReset);
 			Guard.run("finder disconnect", () -> {
 				resetFinders();
 				com.capy.client.module.modules.movement.MovementKickGuard.resetSession();
@@ -322,5 +350,6 @@ public class CapyClient implements ClientModInitializer {
 
 	private static void resetFinders() {
 		FinderScanner.get().onWorldReset();
+		MotionFeed.reset();
 	}
 }

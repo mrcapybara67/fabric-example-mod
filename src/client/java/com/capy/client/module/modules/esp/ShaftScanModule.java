@@ -10,9 +10,10 @@ import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.AbstractChestBlock;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.CrossCollisionBlock;
+import net.minecraft.world.level.block.IronBarsBlock;
 import net.minecraft.world.level.block.WallBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -30,10 +31,11 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  * what the finder considers open.</p>
  *
  * <p>Position-dependent shapes are the exception. Fences ({@link
- * CrossCollisionBlock}), walls ({@link WallBlock}) and chests ({@link
- * ChestBlock}) inspect their neighbours, so their states are never cached or
- * bulk-filled. This is the short list of world-dependent collision blocks;
- * every other collision shape is a function of the block state alone.</p>
+ * CrossCollisionBlock}), walls ({@link WallBlock}), chests ({@link
+ * AbstractChestBlock}) and panes ({@link IronBarsBlock}) inspect their
+ * neighbours, so their states are never cached or bulk-filled. This is the
+ * short list of world-dependent collision blocks; every other collision
+ * shape is a function of the block state alone.</p>
  *
  * <p>Border cells are read from loaded neighbour chunks. A missing neighbour
  * leaves its cells unknown, which {@link ShaftFinder.OpenMap} treats as open,
@@ -184,7 +186,11 @@ public abstract class ShaftScanModule extends FinderModule {
 
 	private static boolean positionDependent(BlockState state) {
 		Block block = state.getBlock();
-		return block instanceof CrossCollisionBlock || block instanceof WallBlock || block instanceof ChestBlock;
+		// These shapes read neighbours as well as the state. A pane is included
+		// conservatively: its connection properties can be stale for a tick
+		// after a neighbouring block changes, so it must be judged in place.
+		return block instanceof CrossCollisionBlock || block instanceof WallBlock
+				|| block instanceof AbstractChestBlock<?> || block instanceof IronBarsBlock;
 	}
 
 	private static void setOpen(ShaftFinder.OpenMap map, int minX, int maxX, int minZ, int maxZ, int sectionY) {
@@ -237,6 +243,16 @@ public abstract class ShaftScanModule extends FinderModule {
 		boolean removed = sourceShafts.remove(key) != null;
 		if (job != null && job.key == key) {
 			job = null;
+		}
+		// Border cells come from the eight neighbours, so an unload can change
+		// which shafts are valid in the chunks around it. Re-scan those loaded
+		// neighbours instead of leaving their old border boxes on screen.
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (dx != 0 || dz != 0) {
+					FinderScanner.get().requeue(Chunks.key(Chunks.x(key) + dx, Chunks.z(key) + dz));
+				}
+			}
 		}
 		if (removed) {
 			shaftsChanged();

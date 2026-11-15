@@ -240,6 +240,10 @@ public final class AmethystFinderModule extends EspModule {
 				}
 			}
 		}
+		// A new cluster can bridge two groups that were not close enough to
+		// merge when they were created. Merge the resulting overlap before
+		// applying the threshold, or one geode can be counted as two halves.
+		mergeOverlappingGroups(groups, groupBounds);
 		for (List<BlockPos> clusters : groups) {
 			if (showCluster.value()) {
 				for (BlockPos pos : clusters) {
@@ -290,6 +294,25 @@ public final class AmethystFinderModule extends EspModule {
 		if (mc.getToastManager() != null) {
 			SystemToast.add(mc.getToastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
 					Component.translatable(translationKey()), Component.literal(text));
+		}
+	}
+
+	private static void mergeOverlappingGroups(List<List<BlockPos>> groups, List<AABB> bounds) {
+		boolean merged = true;
+		while (merged) {
+			merged = false;
+			for (int i = 0; i < bounds.size() && !merged; i++) {
+				for (int j = i + 1; j < bounds.size(); j++) {
+					if (!bounds.get(i).inflate(MERGE_GAP).intersects(bounds.get(j))) {
+						continue;
+					}
+					AABB other = bounds.remove(j);
+					groups.get(i).addAll(groups.remove(j));
+					bounds.set(i, bounds.get(i).minmax(other));
+					merged = true;
+					break;
+				}
+			}
 		}
 	}
 
