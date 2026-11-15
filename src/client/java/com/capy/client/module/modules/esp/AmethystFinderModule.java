@@ -10,17 +10,14 @@ import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -52,8 +49,8 @@ import net.minecraft.world.phys.AABB;
  * the threshold gets one larger box in the geode colour, so a cluster that is
  * part of a find is distinguishable from one that is not. Both go through the
  * shared overlay renderer, which means the fill, the outline, the tracers and
- * the range all behave exactly like the other finders, and a new geode is
- * announced in chat once with its coordinates.
+ * the range all behave exactly like the other finders. It never prints to chat
+ * and never creates a toast.
  */
 public final class AmethystFinderModule extends EspModule {
 	/** Ticks between two scans. */
@@ -72,12 +69,8 @@ public final class AmethystFinderModule extends EspModule {
 	 * reported. Groups are merged by distance instead of by cell.
 	 */
 	private static final double MERGE_GAP = 8.0;
-	/** Most geodes remembered for the chat line before the memory is dropped. */
-	private static final int MAX_ANNOUNCED = 256;
-
 	private final SliderSetting threshold = setting(new SliderSetting("threshold", 3, 3, 5));
 	private final BooleanSetting showCluster = setting(new BooleanSetting("show_cluster", true));
-	private final BooleanSetting announce = setting(new BooleanSetting("announce", true));
 	private final ColorSetting geodeColor = setting(new ColorSetting("geode_color", 0xFFB07CFF));
 
 	private final List<AABB> boxes = new ArrayList<>();
@@ -85,8 +78,6 @@ public final class AmethystFinderModule extends EspModule {
 	/** The geode boxes among {@link #boxes}, by identity, for the colour. */
 	private final Set<AABB> geodes = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final Set<AABB> scratchGeodes = Collections.newSetFromMap(new IdentityHashMap<>());
-	/** Cells whose find has already been announced, so chat says it once. */
-	private final Set<Long> announced = new HashSet<>();
 	private final Predicate<BlockState> isCluster = state -> state.is(Blocks.AMETHYST_CLUSTER);
 	private ClientLevel level;
 	private int cooldown;
@@ -95,11 +86,10 @@ public final class AmethystFinderModule extends EspModule {
 
 	public AmethystFinderModule() {
 		super(Category.BASE_FINDER, "amethyst_finder", 0xFFB07CFF, MAX_RANGE, false);
-		// The threshold, the cluster switch, the announcement and the geode
-		// colour are what this card is opened for; the shared overlay rows come
-		// after them.
+		// The threshold, the cluster switch and the geode colour are what this
+		// card is opened for; the shared overlay rows come after them.
 		List<Setting<?>> all = settings();
-		List<Setting<?>> head = List.of(threshold, showCluster, announce, geodeColor);
+		List<Setting<?>> head = List.of(threshold, showCluster, geodeColor);
 		all.removeAll(head);
 		all.addAll(0, head);
 	}
@@ -112,7 +102,12 @@ public final class AmethystFinderModule extends EspModule {
 	/** Geodes are drawn in their own colour, clusters in the module's. */
 	@Override
 	public int colorFor(AABB box) {
-		return geodes.contains(box) ? geodeColor.argb() : super.colorFor(box);
+		return colorFor(box, System.nanoTime() / 1.0e9);
+	}
+
+	@Override
+	public int colorFor(AABB box, double timeSec) {
+		return geodes.contains(box) ? geodeColor.argbAt(timeSec) : super.colorFor(box, timeSec);
 	}
 
 	@Override
@@ -131,14 +126,12 @@ public final class AmethystFinderModule extends EspModule {
 			return;
 		}
 		if (current != level) {
-			// A new world: every cached position, and every announced find,
-			// belongs to the old one.
+			// A new world: every cached position belongs to the old one.
 			level = current;
 			boxes.clear();
 			scratch.clear();
 			geodes.clear();
 			scratchGeodes.clear();
-			announced.clear();
 			cooldown = 0;
 		}
 		boolean changed = threshold.get() != lastThreshold || range() != lastRange;
@@ -259,9 +252,6 @@ public final class AmethystFinderModule extends EspModule {
 			AABB geode = union(clusters).inflate(GEODE_INFLATE);
 			scratchGeodes.add(geode);
 			scratch.add(geode);
-			if (announce.value()) {
-				announce(cellKeyOf(geode), geode);
-			}
 		}
 		publish();
 	}
@@ -272,29 +262,6 @@ public final class AmethystFinderModule extends EspModule {
 		boxes.addAll(scratch);
 		geodes.clear();
 		geodes.addAll(scratchGeodes);
-	}
-
-	/** Says where a new geode is, once per geode per world. */
-	private void announce(long cell, AABB geode) {
-		if (!announced.add(cell)) {
-			return;
-		}
-		if (announced.size() > MAX_ANNOUNCED) {
-			announced.clear();
-			announced.add(cell);
-		}
-		Minecraft mc = Minecraft.getInstance();
-		if (mc == null || mc.player == null) {
-			return;
-		}
-		String text = String.format("amethyst geode at %d %d %d",
-				Math.round((geode.minX + geode.maxX) * 0.5),
-				Math.round((geode.minY + geode.maxY) * 0.5),
-				Math.round((geode.minZ + geode.maxZ) * 0.5));
-		if (mc.getToastManager() != null) {
-			SystemToast.add(mc.getToastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-					Component.translatable(translationKey()), Component.literal(text));
-		}
 	}
 
 	private static void mergeOverlappingGroups(List<List<BlockPos>> groups, List<AABB> bounds) {
@@ -338,14 +305,6 @@ public final class AmethystFinderModule extends EspModule {
 		return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
 	}
 
-	/** The cell key of a geode box, used only to remember what was announced. */
-	private static long cellKeyOf(AABB geode) {
-		return cellKey(BlockPos.containing(
-				(geode.minX + geode.maxX) * 0.5,
-				(geode.minY + geode.maxY) * 0.5,
-				(geode.minZ + geode.maxZ) * 0.5));
-	}
-
 	/**
 	 * The sixteen block cell a cluster belongs to, packed into a long.
 	 *
@@ -373,7 +332,6 @@ public final class AmethystFinderModule extends EspModule {
 		scratch.clear();
 		geodes.clear();
 		scratchGeodes.clear();
-		announced.clear();
 		level = null;
 		cooldown = 0;
 		lastThreshold = -1;
@@ -387,8 +345,7 @@ public final class AmethystFinderModule extends EspModule {
 		super.loadConfig(json);
 		threshold.set(ConfigValues.intValue(json, "threshold", 3));
 		showCluster.set(ConfigValues.boolValue(json, "show_cluster", true));
-		announce.set(ConfigValues.boolValue(json, "announce", true));
-		geodeColor.set(ConfigValues.intValue(json, "geode_color", 0xFFB07CFF));
+		geodeColor.load(json, "geode_color");
 		cooldown = 0;
 		lastThreshold = -1;
 		lastRange = -1;
@@ -399,7 +356,6 @@ public final class AmethystFinderModule extends EspModule {
 		super.saveConfig(json);
 		json.addProperty("threshold", threshold.get());
 		json.addProperty("show_cluster", showCluster.value());
-		json.addProperty("announce", announce.value());
-		json.addProperty("geode_color", geodeColor.argb());
+		geodeColor.save(json, "geode_color");
 	}
 }

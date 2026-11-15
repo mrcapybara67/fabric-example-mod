@@ -5,6 +5,7 @@ import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.HiveFinder;
+import com.capy.client.finder.core.TerrainPlate;
 import com.capy.client.module.SliderSetting;
 import com.google.gson.JsonObject;
 import java.util.HashMap;
@@ -58,6 +59,7 @@ public final class HiveFinderModule extends FinderModule {
 		if (lastEvaluateTick < 0L || tick - lastEvaluateTick >= EVALUATE_INTERVAL_TICKS) {
 			lastEvaluateTick = tick;
 			evaluate();
+			refreshTerrain(flags.keySet());
 		}
 	}
 
@@ -143,14 +145,21 @@ public final class HiveFinderModule extends FinderModule {
 				markFlag(key, "full hive cluster", 1, List.of(surfaceBox(key)));
 			}
 		}
+		retainTerrain(merged);
+		refreshTerrain(merged);
 	}
 
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		int rgb = colorArgb() & 0xFFFFFF;
+		int base = colorArgb(timeSec);
 		for (long key : flags.keySet()) {
-			ChunkStyles.marker(sink, Chunks.x(key), Chunks.z(key), surfaceY(key) + 0.04,
-					rgb, 1.0, timeMs, true);
+			int[] heights = cachedTerrain(key);
+			if (heights == null) {
+				continue;
+			}
+			int argb = staleColor(key, base);
+			ChunkStyles.marker(sink, Chunks.x(key), Chunks.z(key),
+					TerrainPlate.average(heights) + 0.04, argb & 0xFFFFFF, 1.0, timeMs, true);
 		}
 	}
 
@@ -164,6 +173,7 @@ public final class HiveFinderModule extends FinderModule {
 	protected void onChunkUnloaded(long key) {
 		retry.remove(key);
 		hive.setHit(key, false);
+		dropTerrain(key);
 		if (scanning && scanKey == key) {
 			clearScan();
 		}
@@ -180,6 +190,7 @@ public final class HiveFinderModule extends FinderModule {
 		super.resetSession();
 		hive.clear();
 		retry.clear();
+		terrain.clear();
 		lastEvaluateTick = -1L;
 		clearScan();
 	}

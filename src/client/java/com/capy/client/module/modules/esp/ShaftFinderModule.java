@@ -59,21 +59,26 @@ public final class ShaftFinderModule extends ShaftScanModule {
 
 	@Override
 	public int colorFor(AABB box) {
+		return colorFor(box, System.nanoTime() / 1.0e9);
+	}
+
+	@Override
+	public int colorFor(AABB box, double timeSec) {
 		boolean three = box.maxX - box.minX > 1.5 || box.maxZ - box.minZ > 1.5;
-		return three ? colorThree.argb() : color.argb();
+		return three ? colorThree.argbAt(timeSec) : color.argbAt(timeSec);
 	}
 
 	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
 		minDepth.set(ConfigValues.intValue(json, "min_depth", 4));
-		colorThree.set(ConfigValues.intValue(json, "color_three", DEFAULT_THREE_COLOR));
+		colorThree.load(json, "color_three");
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
 		json.addProperty("min_depth", minDepth.get());
-		json.addProperty("color_three", colorThree.argb());
+		colorThree.save(json, "color_three");
 	}
 }

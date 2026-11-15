@@ -39,8 +39,6 @@ public class UiWatchlist {
 	private static final int HEADER_H = 15;
 	/** Reserved height of the validation message line. */
 	private static final int STATUS_H = 12;
-	/** Entries rendered before the list is truncated. */
-	private static final int MAX_VISIBLE = 8;
 
 	private final UiTextField field = new UiTextField();
 	private final Model model;
@@ -81,11 +79,10 @@ public class UiWatchlist {
 
 	/** Height of the editor for the current number of entries. */
 	public int height() {
-		int entries = Math.min(MAX_VISIBLE, model.entries().size());
-		// The status line is always reserved so the card never jumps when a
-		// message appears or expires.
-		return HEADER_H + INPUT_H + UiTheme.SP_2 + STATUS_H + entries * ENTRY_H
-				+ (model.entries().size() > MAX_VISIBLE ? 12 : 0);
+		// Every watched name is rendered. The settings popup scrolls, so a
+		// long list is never hidden behind a "+N more" line again.
+		return HEADER_H + INPUT_H + UiTheme.SP_2 + STATUS_H
+				+ model.entries().size() * ENTRY_H;
 	}
 
 	/** Attempts to add the typed name. */
@@ -144,7 +141,7 @@ public class UiWatchlist {
 			return;
 		}
 
-		int shown = Math.min(MAX_VISIBLE, entries.size());
+		int shown = entries.size();
 		for (int i = 0; i < shown; i++) {
 			String entry = entries.get(i);
 			int rowY = cy + i * ENTRY_H;
@@ -170,10 +167,6 @@ public class UiWatchlist {
 					rmHovered ? UiTheme.TEXT : UiTheme.TEXT_3);
 		}
 		cy += shown * ENTRY_H;
-
-		if (entries.size() > MAX_VISIBLE) {
-			font.draw(c, "+" + (entries.size() - MAX_VISIBLE) + " more", x, cy, UiTheme.TEXT_3);
-		}
 	}
 
 	/** Handles a click inside the editor. Returns true when consumed. */
@@ -198,7 +191,7 @@ public class UiWatchlist {
 		// Remove buttons.
 		int cy = inputY + INPUT_H + UiTheme.SP_2 + STATUS_H;
 		List<String> entries = model.entries();
-		int shown = Math.min(MAX_VISIBLE, entries.size());
+		int shown = entries.size();
 		for (int i = 0; i < shown; i++) {
 			int rowY = cy + i * ENTRY_H;
 			int rm = 12;

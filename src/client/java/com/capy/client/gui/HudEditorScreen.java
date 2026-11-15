@@ -10,6 +10,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
+import com.capy.client.stealth.CapyText;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -59,7 +60,7 @@ public final class HudEditorScreen extends Screen {
 	private boolean soundedClose;
 
 	public HudEditorScreen() {
-		super(Component.translatable("capy.hud.editor"));
+		super(Component.literal(CapyText.get("capy.hud.editor", "HUD Editor")));
 	}
 
 	@Override

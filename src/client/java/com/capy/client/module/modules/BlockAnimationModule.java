@@ -197,7 +197,7 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 		camZ = camera.z;
 		PoseStack stack = context.matrices();
 		PoseStack.Pose pose = stack == null ? new PoseStack().last() : stack.last();
-		int rgb = color.argb();
+		int rgb = color.argbAt(System.nanoTime() / 1.0e9);
 
 		try {
 			if (fill.value()) {
@@ -560,7 +560,7 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 
 	@Override
 	public void loadConfig(JsonObject json) {
-		color.set(ConfigValues.intValue(json, "color", 0xFF88FFCC));
+		color.load(json, "color");
 		duration.set(ConfigValues.intValue(json, "duration", 400));
 		size.set(ConfigValues.intValue(json, "size", 12));
 		opacity.set(ConfigValues.intValue(json, "opacity", 80));
@@ -573,7 +573,7 @@ public class BlockAnimationModule extends Module implements Configurable, Tickab
 
 	@Override
 	public void saveConfig(JsonObject json) {
-		json.addProperty("color", color.argb());
+		color.save(json, "color");
 		json.addProperty("duration", duration.get());
 		json.addProperty("size", size.get());
 		json.addProperty("opacity", opacity.get());

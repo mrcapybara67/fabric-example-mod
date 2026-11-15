@@ -156,7 +156,11 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 	 * still gets a colour that means this overlay.
 	 */
 	public int color() {
-		return color == null ? 0xFFFFFFFF : color.argb();
+		return colorAt(System.nanoTime() / 1.0e9);
+	}
+
+	public int colorAt(double timeSec) {
+		return color == null ? 0xFFFFFFFF : color.argbAt(timeSec);
 	}
 
 	/**
@@ -168,6 +172,11 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 	 */
 	public int colorFor(AABB box) {
 		return color();
+	}
+
+	@Override
+	public int colorFor(AABB box, double timeSec) {
+		return colorAt(timeSec);
 	}
 
 	/**
@@ -264,7 +273,7 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 	@Override
 	public void loadConfig(JsonObject json) {
 		if (color != null) {
-			color.set(ConfigValues.intValue(json, "color", defaultColor));
+			color.load(json, "color");
 		}
 		range.set(migratedRange(ConfigValues.intValue(json, "range", defaultRange)));
 		fill.set(ConfigValues.boolValue(json, "fill", true));
@@ -277,7 +286,7 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 	@Override
 	public void saveConfig(JsonObject json) {
 		if (color != null) {
-			json.addProperty("color", color.argb());
+			color.save(json, "color");
 		}
 		json.addProperty("range", range());
 		json.addProperty("fill", fills());

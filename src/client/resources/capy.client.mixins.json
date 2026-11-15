@@ -5,6 +5,10 @@
 	"compatibilityLevel": "JAVA_21",
 	"client": [
 		"LivingEntityMixin",
+		"ClientBrandRetrieverMixin",
+		"ConnectionChannelMixin",
+		"KeyMappingCategoryMixin",
+		"KeyBindsListMixin",
 		"ClientPacketListenerMixin",
 		"ClientDisconnectMixin",
 		"ClientCommonPacketListenerAccessor",

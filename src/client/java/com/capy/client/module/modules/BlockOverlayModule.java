@@ -116,7 +116,7 @@ public class BlockOverlayModule extends Module implements Configurable {
 		// Pulse: 70% to 100% alpha, one full cycle every two seconds.
 		float pulseAlpha = pulse.value() ? (float) Math.sin(time * Math.PI) * 0.3f + 0.7f : 1f;
 		float alpha = (float) opacity.real() * pulseAlpha;
-		int argb = withAlpha(color.argb(), alpha);
+		int argb = withAlpha(color.argbAt(System.nanoTime() / 1.0e9), alpha);
 		if (((argb >>> 24) & 0xFF) == 0) {
 			return;
 		}
@@ -140,7 +140,7 @@ public class BlockOverlayModule extends Module implements Configurable {
 			// frame. It is what makes the targeted face read as "this one" at a
 			// glance, and it is kept faint enough that the block's own texture
 			// still decides what the block is.
-			int wash = withAlpha(color.argb(), ((argb >>> 24) & 0xFF) / 255f * 0.18f);
+			int wash = withAlpha(color.argbAt(System.nanoTime() / 1.0e9), ((argb >>> 24) & 0xFF) / 255f * 0.18f);
 			if (((wash >>> 24) & 0xFF) > 0) {
 				VertexConsumer quads = batch().getBuffer(EspRenderTypes.quads());
 				faceWash(quads, pose, box, hit.getDirection(), camX, camY, camZ, wash);
@@ -366,7 +366,7 @@ public class BlockOverlayModule extends Module implements Configurable {
 
 	@Override
 	public void loadConfig(JsonObject json) {
-		color.set(ConfigValues.intValue(json, "color", 0xFFFFFFFF));
+		color.load(json, "color");
 		thickness.set(ConfigValues.intValue(json, "thickness", 15));
 		length.set(ConfigValues.intValue(json, "length", 20));
 		opacity.set(ConfigValues.intValue(json, "opacity", 85));
@@ -376,7 +376,7 @@ public class BlockOverlayModule extends Module implements Configurable {
 
 	@Override
 	public void saveConfig(JsonObject json) {
-		json.addProperty("color", color.argb());
+		color.save(json, "color");
 		json.addProperty("thickness", thickness.get());
 		json.addProperty("length", length.get());
 		json.addProperty("opacity", opacity.get());

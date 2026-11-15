@@ -48,9 +48,11 @@ import net.minecraft.world.entity.player.PlayerSkin;
  * <p>Each row is a head and a name, nothing else. A name is online when it is
  * in the tab list, in the world, or proven online by Anti Admin's probe leak or
  * tab-hidden proof. A vanished account therefore stays visible while it is
- * proven online; an offline name never gets a row. Rows are removed only after
- * three seconds without any online source, so a tab-list rebuild cannot make a
- * row flicker.</p>
+ * proven online. Every name the player typed is kept in the list: watched
+ * accounts that are offline are drawn dimmed instead of disappearing, so the
+ * panel always matches the watchlist. Rows are removed only after three
+ * seconds without any online source, so a tab-list rebuild cannot make an
+ * online row flicker.</p>
  */
 public class StaffListModule extends Module implements Configurable, HudPanel, Tickable {
 	private static final UiType TYPE = new McType();
@@ -68,6 +70,7 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 	private static final int MAX_NUDGE = HudElementModule.MAX_NUDGE;
 
 	private final WatchlistSetting watchlist = setting(new WatchlistSetting("watchlist"));
+	private final BooleanSetting showOffline = setting(new BooleanSetting("show_offline", true));
 	private final BooleanSetting showHeader = setting(new BooleanSetting("show_header", false));
 	private final BooleanSetting hideWhenEmpty = setting(new BooleanSetting("hide_when_empty", true));
 	private final SliderSetting background = setting(new SliderSetting("background", 100, 0, 100));
@@ -268,8 +271,10 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 			lastScanMs = now;
 		}
 
+		Set<String> watched = new HashSet<>();
 		Set<String> candidates = new HashSet<>();
 		for (String name : watchlist.entries()) {
+			watched.add(name.toLowerCase(Locale.ROOT));
 			candidates.add(name.toLowerCase(Locale.ROOT));
 		}
 		for (String name : new ArrayList<>(lastOnline.keySet())) {
@@ -289,6 +294,13 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 			ProbeState probe = withProbe && antiAdmin != null ? antiAdmin.probeState(name) : ProbeState.UNKNOWN;
 			boolean leaked = probe == ProbeState.HIDDEN;
 			boolean online = StaffListFilter.isOnline(tabVisible, entity != null, tabHidden, leaked);
+
+			// A watched name that is offline still gets a row, dimmed, so the
+			// Staff List shows every account that was typed into the watchlist.
+			if (!online && showOffline.value() && watched.contains(key)) {
+				rows.add(new Row(name, lastUuid.get(key), lastSkin.get(key), 0.45f));
+				continue;
+			}
 
 			if (online) {
 				lastOnline.put(key, now);
@@ -523,6 +535,7 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 	@Override
 	public void loadConfig(JsonObject json) {
 		watchlist.set(ConfigValues.stringList(json, "watchlist"));
+		showOffline.set(ConfigValues.boolValue(json, "show_offline", true));
 		showHeader.set(ConfigValues.boolValue(json, "show_header", false));
 		hideWhenEmpty.set(ConfigValues.boolValue(json, "hide_when_empty", true));
 		background.set(ConfigValues.intValue(json, "background", 100));
@@ -538,6 +551,7 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 			names.add(entry);
 		}
 		json.add("watchlist", names);
+		json.addProperty("show_offline", showOffline.value());
 		json.addProperty("show_header", showHeader.value());
 		json.addProperty("hide_when_empty", hideWhenEmpty.value());
 		json.addProperty("background", Math.round(background.real()));

@@ -88,6 +88,7 @@ public final class FinderSignals {
 			grouped.computeIfAbsent(find(parent, i), ignored -> new ArrayList<>()).add(i);
 		}
 
+		double seconds = System.nanoTime() / 1.0e9;
 		List<Group> groups = new ArrayList<>(grouped.size());
 		for (List<Integer> members : grouped.values()) {
 			LinkedHashSet<FinderModule> finders = new LinkedHashSet<>();
@@ -109,7 +110,7 @@ public final class FinderSignals {
 			boolean combined = finders.size() > 1;
 			String label = combined ? finders.size() + " signals" : nearest.finder().displayName();
 			String reason = combined ? String.join(" + ", reasons) : nearest.flag().reason();
-			int color = combined ? blend(finders) : nearest.finder().colorArgb();
+			int color = combined ? blend(finders, seconds) : nearest.finder().colorArgb(seconds);
 			groups.add(new Group(label, reason, nearest.key(), nearest.chunkX(), nearest.chunkZ(),
 					nearest.distanceBlocks(), combined, List.copyOf(chunks), color, finders.size()));
 		}
@@ -129,13 +130,13 @@ public final class FinderSignals {
 	}
 
 	/** A brighter average, so agreement reads stronger than either input. */
-	private static int blend(Set<FinderModule> finders) {
+	private static int blend(Set<FinderModule> finders, double seconds) {
 		int r = 0;
 		int g = 0;
 		int b = 0;
 		int n = 0;
 		for (FinderModule finder : finders) {
-			int argb = finder.colorArgb();
+			int argb = finder.colorArgb(seconds);
 			r += (argb >> 16) & 0xFF;
 			g += (argb >> 8) & 0xFF;
 			b += argb & 0xFF;

@@ -59,7 +59,7 @@ public final class SpawnerBeamModule extends FinderModule {
 		if (renderSpawners.isEmpty()) {
 			return;
 		}
-		int argb = colorArgb();
+		int argb = colorArgb(timeSec);
 		for (BlockPos pos : renderSpawners) {
 			double x = pos.getX() + 0.5;
 			double z = pos.getZ() + 0.5;
@@ -73,6 +73,11 @@ public final class SpawnerBeamModule extends FinderModule {
 		for (List<BlockPos> positions : spawnersByChunk.values()) {
 			renderSpawners.addAll(positions);
 		}
+	}
+
+	@Override
+	public String reliability() {
+		return "can be hidden by anti-xray";
 	}
 
 	@Override

@@ -12,6 +12,7 @@ import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.modules.weather.WeatherToast;
+import com.capy.client.stealth.CapyText;
 import com.google.gson.JsonObject;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -210,7 +211,7 @@ public class WeatherNotifierModule extends Module implements Tickable, Configura
 	private static Component line(String key) {
 		return Component.literal("Capy ").withStyle(ChatFormatting.LIGHT_PURPLE)
 				.append(Component.literal("| ").withStyle(ChatFormatting.DARK_GRAY))
-				.append(Component.translatable(key).withStyle(ChatFormatting.GRAY));
+				.append(Component.literal(CapyText.get(key, key)).withStyle(ChatFormatting.GRAY));
 	}
 
 	private static void playChime(Notice notice) {

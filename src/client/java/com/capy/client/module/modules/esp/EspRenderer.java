@@ -183,12 +183,13 @@ public final class EspRenderer {
 			// walk the player list twice and re-sort twice for no difference on
 			// screen.
 			prepare();
+			double seconds = System.nanoTime() / 1.0e9;
 
 			// One layer at a time. A buffer source hands out a shared buffer for
 			// custom render types and flushes the previous one as soon as another
 			// type is requested, so two of them can never be held at once. Doing
 			// the fills first also means the outlines are always drawn over them.
-			drawLayers(batches, pose, guiScale, anyFill, anyLine);
+			drawLayers(batches, pose, guiScale, anyFill, anyLine, seconds);
 		} catch (RuntimeException e) {
 			com.capy.client.util.Guard.report("esp render", e);
 			// The see-through pipelines are copies of vanilla's, built at
@@ -237,7 +238,7 @@ public final class EspRenderer {
 	}
 
 	private static void drawLayers(MultiBufferSource.BufferSource batches, PoseStack.Pose pose,
-			float guiScale, boolean anyFill, boolean anyLine) {
+			float guiScale, boolean anyFill, boolean anyLine, double seconds) {
 		if (anyFill) {
 			for (EspBoxSource module : ACTIVE) {
 				if (!module.fills()) {
@@ -251,7 +252,7 @@ public final class EspRenderer {
 				for (AABB box : boxes) {
 					// The colour belongs to the box, not to the module: storage
 					// draws a chest and a shulker box in different hues.
-					int argb = module.colorFor(box);
+					int argb = module.colorFor(box, seconds);
 					fill(fills, pose, box, EspModule.fillTop(argb), EspModule.fillBottom(argb));
 				}
 				// Flush per module: a module can contribute hundreds of boxes and
@@ -281,16 +282,18 @@ public final class EspRenderer {
 					// Tracers go under the outlines: the box edge is the precise
 					// information, the line is the pointer to it.
 					for (AABB box : boxes) {
-						int glowColor = halo(module.colorFor(box));
+						int colour = module.colorFor(box, seconds);
+						int glowColor = halo(colour);
 						tracer(lines, pose, box, glowColor, tracerGlow);
-						tracer(lines, pose, box, module.colorFor(box), tracerCrisp);
+						tracer(lines, pose, box, colour, tracerCrisp);
 					}
 				}
 				if (module.outlines()) {
 					for (AABB box : boxes) {
-						int glowColor = halo(module.colorFor(box));
+						int colour = module.colorFor(box, seconds);
+						int glowColor = halo(colour);
 						outline(lines, pose, box, glowColor, glow);
-						outline(lines, pose, box, module.colorFor(box), crisp);
+						outline(lines, pose, box, colour, crisp);
 					}
 				}
 				batches.endBatch();

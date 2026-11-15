@@ -63,29 +63,39 @@ public final class MotionScannerModule extends FinderModule {
 				busy.add(key);
 			}
 		}
+		retainTerrain(flags.keySet());
+		refreshTerrain(flags.keySet());
 	}
 
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc == null || mc.player == null || flags.isEmpty()) {
+		if (flags.isEmpty()) {
 			return;
 		}
-		double y = Math.floor(mc.player.getY()) + 0.05;
 		if (!busy.isEmpty()) {
-			draw(sink, busy, y, colorArgb(), timeSec);
+			draw(sink, busy, colorArgb(timeSec), timeSec);
 		}
 		if (!veryBusy.isEmpty()) {
-			draw(sink, veryBusy, y + 0.01, colorVeryBusy.argb(), timeSec);
+			draw(sink, veryBusy, colorVeryBusy.argbAt(timeSec), timeSec);
 		}
 	}
 
-	private static void draw(DrawSink sink, Set<Long> chunks, double y, int argb, double timeSec) {
+	private void draw(DrawSink sink, Set<Long> chunks, int argb, double timeSec) {
 		int rgb = argb & 0xFFFFFF;
 		int alpha = (argb >>> 24) & 0xFF;
 		int fill = Math.max(28, Math.round(alpha * 0.38f));
 		int edge = Math.min(255, Math.max(170, alpha));
-		ChunkStyles.fillContour(sink, chunks, y, rgb, fill, edge, timeSec);
+		Set<Long> one = new java.util.LinkedHashSet<>(1);
+		for (long key : chunks) {
+			int[] heights = cachedTerrain(key);
+			if (heights == null) {
+				continue;
+			}
+			one.clear();
+			one.add(key);
+			ChunkStyles.fillContour(sink, one, com.capy.client.finder.core.TerrainPlate.average(heights) + 0.05,
+					rgb, fill, edge, timeSec);
+		}
 	}
 
 	@Override
@@ -121,12 +131,12 @@ public final class MotionScannerModule extends FinderModule {
 	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
-		colorVeryBusy.set(ConfigValues.intValue(json, "color_very_busy", 0xFFFF4D4D));
+		colorVeryBusy.load(json, "color_very_busy");
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
-		json.addProperty("color_very_busy", colorVeryBusy.argb());
+		colorVeryBusy.save(json, "color_very_busy");
 	}
 }

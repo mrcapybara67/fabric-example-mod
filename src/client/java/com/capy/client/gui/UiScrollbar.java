@@ -58,6 +58,11 @@ public class UiScrollbar {
 		return scroll;
 	}
 
+	/** True when the content is taller than the viewport. */
+	public boolean usable() {
+		return usable;
+	}
+
 	public boolean isDragging() {
 		return dragging;
 	}

@@ -7,6 +7,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import com.capy.client.stealth.CapyText;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -82,7 +83,7 @@ public class ClickGuiScreen extends Screen {
 	private static final float NANOS_PER_TICK = 50_000_000f;
 
 	public ClickGuiScreen() {
-		super(Component.translatable("capy.gui.title"));
+		super(Component.literal(CapyText.get("capy.gui.title", "Capy Client")));
 		frame.setOpenHudEditor(() -> {
 			openEditorOnClose = true;
 			onClose();
@@ -248,6 +249,7 @@ public class ClickGuiScreen extends Screen {
 		}
 		finished = true;
 		ClientConfig.saveNow();
+		frame.close();
 		super.onClose();
 		if (openEditorOnClose) {
 			openEditorOnClose = false;

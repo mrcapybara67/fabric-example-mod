@@ -301,6 +301,7 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 
 	@Override
 	public void renderPanel(GuiGraphics graphics, int x, int y, int w, int h) {
+		double seconds = System.nanoTime() / 1.0e9;
 		ensureRows(Minecraft.getInstance());
 		if (w <= 0 || h <= 0 || rows.isEmpty()) {
 			return;
@@ -332,24 +333,24 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 			int rowY = rowTop + i * ROW_H;
 			int dotX = x + PAD + DOT;
 			int dotY = rowY + ROW_H / 2 - 1;
-			Ui.circle(c, dotX, dotY, DOT, colorArgb());
+			Ui.circle(c, dotX, dotY, DOT, colorArgb(seconds));
 
 			int textX = x + PAD + DOT * 2 + 6;
 			int nameRoom = x + w - PAD - textX;
 			int nameWidth = medium.width(row.name());
 			if (nameWidth > nameRoom) {
 				Ui.drawEllipsized(c, medium, row.name(), textX,
-						rowY + (ROW_H - medium.lineHeight()) / 2, nameRoom, colorArgb());
+						rowY + (ROW_H - medium.lineHeight()) / 2, nameRoom, colorArgb(seconds));
 				continue;
 			}
 			medium.draw(c, row.name(), textX, rowY + (ROW_H - medium.lineHeight()) / 2,
-					colorArgb());
+					colorArgb(seconds));
 			int restX = textX + nameWidth + 7;
 			int restRoom = x + w - PAD - restX;
 			if (restRoom > 0) {
 				Ui.drawEllipsized(c, regular, rest(row), restX,
 						rowY + (ROW_H - regular.lineHeight()) / 2, restRoom,
-						row.active() ? highActivityColor.argb() : UiTheme.TEXT_3);
+						row.active() ? highActivityColor.argbAt(seconds) : UiTheme.TEXT_3);
 			}
 		}
 	}
@@ -366,7 +367,7 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
-		highActivityColor.set(ConfigValues.intValue(json, "high_activity_color", 0xFFFF6B6B));
+		highActivityColor.load(json, "high_activity_color");
 		anchor.set(ConfigValues.intValue(json, "anchor", HudElementModule.ANCHOR_TOP_LEFT));
 		offsetX.set(ConfigValues.intValue(json, "offset_x", 0));
 		offsetY.set(ConfigValues.intValue(json, "offset_y", 0));
@@ -377,7 +378,7 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
-		json.addProperty("high_activity_color", highActivityColor.argb());
+		highActivityColor.save(json, "high_activity_color");
 		json.addProperty("anchor", anchor());
 		json.addProperty("offset_x", offsetX());
 		json.addProperty("offset_y", offsetY());

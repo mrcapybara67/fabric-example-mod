@@ -4,6 +4,7 @@ import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.ShaftFinder;
+import com.capy.client.finder.core.TerrainPlate;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,6 +31,11 @@ public final class ChunkScannerModule extends ShaftScanModule {
 	private static final double DIM_FACTOR = 0.55;
 
 	private final Map<Long, Long> flaggedAt = new HashMap<>();
+	private final Map<Long, Integer> bottomY = new HashMap<>();
+	private final Map<Long, Integer> topY = new HashMap<>();
+	private final Set<Long> fresh = new HashSet<>();
+	private final Set<Long> old = new HashSet<>();
+	private final Set<Long> oneChunk = new HashSet<>(1);
 
 	public ChunkScannerModule() {
 		super("chunk_scanner", 0xFFFFD54A);
@@ -44,7 +50,7 @@ public final class ChunkScannerModule extends ShaftScanModule {
 	protected void shaftsChanged() {
 		int bandMin = bandMin();
 		int bandTop = bandMin + BAND_HEIGHT;
-		Map<Long, Integer> tallest = new HashMap<>();
+		Map<Long, int[]> tallest = new HashMap<>();
 		for (List<ShaftFinder.Shaft> shafts : shaftLists()) {
 			for (ShaftFinder.Shaft shaft : shafts) {
 				int min = Math.max(shaft.minY(), bandMin);
@@ -54,18 +60,36 @@ public final class ChunkScannerModule extends ShaftScanModule {
 					continue;
 				}
 				long key = Chunks.key(shaft.x() >> 4, shaft.z() >> 4);
-				tallest.merge(key, height, Math::max);
+				int[] best = tallest.get(key);
+				if (best == null || height > best[0]) {
+					tallest.put(key, new int[]{height, min, max});
+				}
 			}
 		}
 
-		Map<Long, Integer> winners = keepTallest(tallest);
+		Map<Long, Integer> heights = new HashMap<>(tallest.size());
+		tallest.forEach((key, info) -> heights.put(key, info[0]));
+		Map<Long, Integer> winners = keepTallest(heights);
 		long now = System.currentTimeMillis();
 		flaggedAt.keySet().removeIf(key -> !winners.containsKey(key));
+		bottomY.keySet().removeIf(key -> !winners.containsKey(key));
+		topY.keySet().removeIf(key -> !winners.containsKey(key));
+		beginBulk();
 		clearFlags();
 		for (Map.Entry<Long, Integer> entry : winners.entrySet()) {
-			flaggedAt.putIfAbsent(entry.getKey(), now);
-			markFlag(entry.getKey(), "shaft " + entry.getValue() + " blocks tall", entry.getValue());
+			long key = entry.getKey();
+			int[] info = tallest.get(key);
+			flaggedAt.putIfAbsent(key, now);
+			if (info != null) {
+				bottomY.put(key, info[1]);
+				topY.put(key, info[2]);
+			}
+			markFlag(key, "shaft " + entry.getValue() + " blocks tall, Y "
+					+ (info == null ? 0 : info[1]) + " to " + (info == null ? entry.getValue() : info[2]), entry.getValue());
 		}
+		endBulk();
+		retainTerrain(winners.keySet());
+		refreshTerrain(winners.keySet());
 	}
 
 	private int bandMin() {
@@ -136,33 +160,57 @@ public final class ChunkScannerModule extends ShaftScanModule {
 
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc == null || mc.player == null || flags.isEmpty()) {
+		if (level == null || flags.isEmpty()) {
 			return;
 		}
-		double y = Math.floor(mc.player.getY()) + 0.05;
-		int argb = colorArgb();
+		int argb = colorArgb(timeSec);
 		int rgb = argb & 0xFFFFFF;
 		int alpha = (argb >>> 24) & 0xFF;
 		int fill = Math.round(alpha * 0.40f);
 		int edge = Math.min(255, Math.max(170, alpha));
 		long now = (long) timeMs;
-		Set<Long> fresh = new HashSet<>();
-		Set<Long> old = new HashSet<>();
+		fresh.clear();
+		old.clear();
 		for (long key : flags.keySet()) {
 			long since = flaggedAt.getOrDefault(key, now);
-			if (now - since >= DIM_AFTER_MS) {
-				old.add(key);
-			} else {
-				fresh.add(key);
+			(now - since >= DIM_AFTER_MS ? old : fresh).add(key);
+		}
+		drawGroup(sink, old, dim(rgb), alpha, fill, edge, timeSec);
+		drawGroup(sink, fresh, rgb, alpha, fill, edge, timeSec);
+	}
+
+	private void drawGroup(DrawSink sink, Set<Long> keys, int rgb, int alpha, int fill,
+			int edge, double timeSec) {
+		for (long key : keys) {
+			int[] heights = cachedTerrain(key);
+			if (heights == null) {
+				continue;
+			}
+			int keyRgb = isStale(key) ? dimRgb(rgb) : rgb;
+			int keyAlpha = isStale(key) ? Math.max(24, alpha * 45 / 100) : alpha;
+			int keyFill = Math.max(18, Math.round(keyAlpha * 0.40f));
+			int keyEdge = Math.min(255, Math.max(150, keyAlpha));
+			double average = TerrainPlate.average(heights);
+			oneChunk.clear();
+			oneChunk.add(key);
+			ChunkStyles.fillContour(sink, oneChunk, average + 0.05, keyRgb, 0, keyEdge, timeSec);
+			TerrainPlate.emit(sink, Chunks.x(key), Chunks.z(key), heights,
+					ChunkStyles.argb(keyFill, keyRgb), 0.05);
+			Integer shaftTop = topY.get(key);
+			if (shaftTop != null && shaftTop < average) {
+				ChunkStyles.beam(sink, Chunks.x(key) * 16.0 + 8, Chunks.z(key) * 16.0 + 8,
+						average + 0.05, shaftTop, ChunkStyles.argb(Math.min(180, alpha), rgb));
 			}
 		}
-		if (!old.isEmpty()) {
-			ChunkStyles.fillContour(sink, old, y, dim(rgb), fill, edge, timeSec);
-		}
-		if (!fresh.isEmpty()) {
-			ChunkStyles.fillContour(sink, fresh, y, rgb, fill, edge, timeSec);
-		}
+	}
+
+	@Override
+	protected void onChunkUnloaded(long key) {
+		flaggedAt.remove(key);
+		bottomY.remove(key);
+		topY.remove(key);
+		dropTerrain(key);
+		super.onChunkUnloaded(key);
 	}
 
 	private static int dim(int rgb) {
@@ -176,5 +224,10 @@ public final class ChunkScannerModule extends ShaftScanModule {
 	public void resetSession() {
 		super.resetSession();
 		flaggedAt.clear();
+		bottomY.clear();
+		topY.clear();
+		fresh.clear();
+		old.clear();
+		terrain.clear();
 	}
 }

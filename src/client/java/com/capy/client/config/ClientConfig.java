@@ -1,6 +1,7 @@
 package com.capy.client.config;
 
 import com.capy.client.gui.GuiQuality;
+import com.capy.client.gui.GuiSize;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
@@ -50,9 +51,11 @@ public final class ClientConfig {
 	private static final String KEY_GUI_VOLUME = "gui_volume";
 	private static final String KEY_REDUCE_ANIMATIONS = "reduce_animations";
 	private static final String KEY_GUI_QUALITY = "gui_quality";
+	private static final String KEY_GUI_SIZE = "gui_size";
 	private static final String KEY_GUI_DEBUG = "gui_debug";
 	private static final String KEY_BLUR = "blur";
 	private static final String KEY_GLASS_DEBUG = "glass_debug";
+	private static final String KEY_STEALTH = "stealth";
 	/** Per module: whether it was switched on when the game was last closed. */
 	private static final String KEY_ENABLED = "enabled";
 
@@ -62,9 +65,11 @@ public final class ClientConfig {
 	private int guiVolume = 100;
 	private boolean reduceAnimations = false;
 	private GuiQuality guiQuality = GuiQuality.BALANCED;
+	private GuiSize guiSize = GuiSize.NORMAL;
 	private boolean guiDebug = false;
 	private boolean blur = false;
 	private boolean glassDebug = false;
+	private boolean stealth = true;
 	private final Map<String, JsonObject> moduleData = new LinkedHashMap<>();
 
 	private ClientConfig() {
@@ -107,6 +112,15 @@ public final class ClientConfig {
 		this.guiQuality = value == null ? GuiQuality.BALANCED : value;
 	}
 
+	/** How wide the ClickGUI window opens. */
+	public GuiSize guiSize() {
+		return guiSize;
+	}
+
+	public void setGuiSize(GuiSize value) {
+		this.guiSize = value == null ? GuiSize.NORMAL : value;
+	}
+
 	/** Draws the frame time and draw-call line in the ClickGUI. */
 	public boolean guiDebug() {
 		return guiDebug;
@@ -132,6 +146,15 @@ public final class ClientConfig {
 
 	public void setGlassDebug(boolean value) {
 		this.glassDebug = value;
+	}
+
+	/** One switch for brand, channel announcement and keybind probing. */
+	public boolean stealth() {
+		return stealth;
+	}
+
+	public void setStealth(boolean value) {
+		this.stealth = value;
 	}
 
 	/** The stored JSON of a module (never null). */
@@ -174,9 +197,11 @@ public final class ClientConfig {
 		reduceAnimations = ConfigValues.boolValue(root, KEY_REDUCE_ANIMATIONS, false);
 		guiQuality = GuiQuality.from(ConfigValues.stringValue(root, KEY_GUI_QUALITY, "BALANCED"),
 				GuiQuality.BALANCED);
+		guiSize = GuiSize.from(ConfigValues.stringValue(root, KEY_GUI_SIZE, "NORMAL"), GuiSize.NORMAL);
 		guiDebug = ConfigValues.boolValue(root, KEY_GUI_DEBUG, false);
 		blur = ConfigValues.boolValue(root, KEY_BLUR, false);
 		glassDebug = ConfigValues.boolValue(root, KEY_GLASS_DEBUG, false);
+		stealth = ConfigValues.boolValue(root, KEY_STEALTH, true);
 
 		JsonElement modulesElement = root.get(KEY_MODULES);
 		if (modulesElement != null && modulesElement.isJsonObject()) {
@@ -215,9 +240,11 @@ public final class ClientConfig {
 		root.addProperty(KEY_GUI_VOLUME, guiVolume);
 		root.addProperty(KEY_REDUCE_ANIMATIONS, reduceAnimations);
 		root.addProperty(KEY_GUI_QUALITY, guiQuality.name());
+		root.addProperty(KEY_GUI_SIZE, guiSize.name());
 		root.addProperty(KEY_GUI_DEBUG, guiDebug);
 		root.addProperty(KEY_BLUR, blur);
 		root.addProperty(KEY_GLASS_DEBUG, glassDebug);
+		root.addProperty(KEY_STEALTH, stealth);
 
 		JsonObject modules = new JsonObject();
 		for (Module module : ModuleManager.get().modules()) {

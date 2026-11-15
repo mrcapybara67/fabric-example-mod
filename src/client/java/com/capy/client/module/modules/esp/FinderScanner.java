@@ -1,7 +1,10 @@
 package com.capy.client.module.modules.esp;
 
+import com.capy.client.finder.core.AdaptiveBudget;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.ScanQueue;
+import com.capy.client.gui.ClickGuiScreen;
+import com.capy.client.gui.HudEditorScreen;
 import com.capy.client.util.Guard;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -54,7 +57,6 @@ public final class FinderScanner {
 		boolean scan(Consumer consumer, ClientLevel level, long key, long deadlineNanos);
 	}
 
-	private static final long TICK_BUDGET_NANOS = 2_000_000L;
 	private static final long UPDATE_DEBOUNCE_TICKS = 20L;
 	private static final int SAFETY_RESCAN_TICKS = 6000;
 	private static final int PRUNE_EVERY_TICKS = 200;
@@ -219,9 +221,14 @@ public final class FinderScanner {
 		}
 	}
 
-	/** Runs at most two milliseconds of scanning for this client tick. */
+	/** Runs a frame-rate-scaled slice of scanning for this client tick. */
 	public void tick() {
 		if (consumers.isEmpty()) {
+			return;
+		}
+		Minecraft client = Minecraft.getInstance();
+		if (client != null && (client.screen instanceof ClickGuiScreen
+				|| client.screen instanceof HudEditorScreen)) {
 			return;
 		}
 		if (!view.ready()) {
@@ -237,7 +244,7 @@ public final class FinderScanner {
 			recentUpdates.entrySet().removeIf(entry -> ticks - entry.getValue() >= UPDATE_DEBOUNCE_TICKS);
 		}
 
-		long deadline = System.nanoTime() + TICK_BUDGET_NANOS;
+		long deadline = System.nanoTime() + budgetNanos();
 		// Always make one attempt even if the tiny budget elapsed while the
 		// frame was being scheduled, otherwise a loaded chunk could starve
 		// forever on a busy client.
@@ -311,6 +318,11 @@ public final class FinderScanner {
 
 	public int scannedCount(Consumer consumer) {
 		return scanned.getOrDefault(consumer, 0);
+	}
+
+	private static long budgetNanos() {
+		Minecraft client = Minecraft.getInstance();
+		return AdaptiveBudget.nanosForFps(client == null ? 60 : client.getFps());
 	}
 
 	private void queueUpdate(long key) {

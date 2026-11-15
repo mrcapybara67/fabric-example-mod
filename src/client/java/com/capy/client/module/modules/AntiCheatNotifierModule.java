@@ -370,7 +370,7 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 		// vanilla's size by default: at the game's own font size the wording is
 		// the same size as the chat line beside it and reads as a footnote.
 		float scale = Math.max(1f, Math.min(4f, (float) textSize.real() / 100f));
-		int title = withAlpha(color.argb(), alpha);
+		int title = withAlpha(color.argbAt(System.nanoTime() / 1.0e9), alpha);
 		int sub = withAlpha(0xFFFFFFFF, alpha);
 		int centerX = screenW / 2;
 		int y = Math.round(screenH * 0.30f);
@@ -474,7 +474,7 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 		volume.set(ConfigValues.intValue(json, "volume", 70));
 		banner.set(ConfigValues.boolValue(json, "banner", true));
 		hold.set(ConfigValues.intValue(json, "hold", 5));
-		color.set(ConfigValues.intValue(json, "color", 0xFF7CF0C0));
+		color.load(json, "color");
 		textSize.set(ConfigValues.intValue(json, "text_size", 200));
 	}
 
@@ -487,7 +487,7 @@ public class AntiCheatNotifierModule extends Module implements Configurable, Tic
 		json.addProperty("volume", volume.get());
 		json.addProperty("banner", banner.value());
 		json.addProperty("hold", hold.get());
-		json.addProperty("color", color.argb());
+		color.save(json, "color");
 		json.addProperty("text_size", textSize.get());
 	}
 }

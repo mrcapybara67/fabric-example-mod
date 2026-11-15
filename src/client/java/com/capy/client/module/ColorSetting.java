@@ -1,5 +1,11 @@
 package com.capy.client.module;
 
+import com.capy.client.config.ConfigValues;
+import com.capy.client.finder.core.ColorMath;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+
 /**
  * A colour setting, stored as one packed ARGB int.
  *
@@ -14,8 +20,107 @@ package com.capy.client.module;
  * a second setting.
  */
 public class ColorSetting extends Setting<Integer> {
+	private static final int RECENT_MAX = 8;
+	private ColorMath.Mode mode = ColorMath.Mode.STATIC;
+	private int second = 0xFFFFFFFF;
+	private double speed = 1.0;
+	private final int[] recent = new int[RECENT_MAX];
+	private int recentCount;
+
 	public ColorSetting(String key, int defaultArgb) {
 		super(key, defaultArgb);
+	}
+
+	public ColorMath.Mode mode() {
+		return mode;
+	}
+
+	public void setMode(ColorMath.Mode mode) {
+		this.mode = mode == null ? ColorMath.Mode.STATIC : mode;
+	}
+
+	public int second() {
+		return second;
+	}
+
+	public void setSecond(int second) {
+		this.second = second;
+	}
+
+	public double speed() {
+		return speed;
+	}
+
+	public void setSpeed(double speed) {
+		this.speed = Math.max(0.25, Math.min(4.0, speed));
+	}
+
+	public int recentCount() {
+		return recentCount;
+	}
+
+	public int recentAt(int index) {
+		return index >= 0 && index < recentCount ? recent[index] : 0;
+	}
+
+	/** Adds a colour to the bounded recent list, moving a duplicate to the front. */
+	public void remember(int argb) {
+		for (int i = 0; i < recentCount; i++) {
+			if (recent[i] == argb) {
+				System.arraycopy(recent, 0, recent, 1, i);
+				recent[0] = argb;
+				return;
+			}
+		}
+		int keep = Math.min(recentCount, RECENT_MAX - 1);
+		System.arraycopy(recent, 0, recent, 1, keep);
+		recent[0] = argb;
+		recentCount = Math.min(RECENT_MAX, recentCount + 1);
+	}
+
+	/** The visible colour at a wall-clock time, including the animated modes. */
+	public int argbAt(double timeSec) {
+		return ColorMath.eval(mode, argb(), second, timeSec, speed);
+	}
+
+	/** Loads the base integer plus the optional animation keys. */
+	public void load(JsonObject json, String prefix) {
+		set(ConfigValues.intValue(json, prefix, argb()));
+		String storedMode = ConfigValues.stringValue(json, prefix + "_mode", mode.name());
+		try {
+			setMode(ColorMath.Mode.valueOf(storedMode));
+		} catch (IllegalArgumentException ignored) {
+			setMode(ColorMath.Mode.STATIC);
+		}
+		setSecond(ConfigValues.intValue(json, prefix + "_second", 0xFFFFFFFF));
+		setSpeed(ConfigValues.intValue(json, prefix + "_speed", 100) / 100.0);
+		recentCount = 0;
+		JsonElement recentElement = json == null ? null : json.get(prefix + "_recent");
+		if (recentElement != null && recentElement.isJsonArray()) {
+			for (JsonElement item : recentElement.getAsJsonArray()) {
+				if (recentCount >= RECENT_MAX || item == null || !item.isJsonPrimitive()) {
+					break;
+				}
+				try {
+					recent[recentCount++] = item.getAsInt();
+				} catch (RuntimeException ignored) {
+					break;
+				}
+			}
+		}
+	}
+
+	/** Writes the base integer and every animation key. */
+	public void save(JsonObject json, String prefix) {
+		json.addProperty(prefix, argb());
+		json.addProperty(prefix + "_mode", mode.name());
+		json.addProperty(prefix + "_second", second);
+		json.addProperty(prefix + "_speed", Math.round(speed * 100.0));
+		JsonArray recentJson = new JsonArray();
+		for (int i = 0; i < recentCount; i++) {
+			recentJson.add(recent[i]);
+		}
+		json.add(prefix + "_recent", recentJson);
 	}
 
 	@Override
@@ -52,7 +157,7 @@ public class ColorSetting extends Setting<Integer> {
 
 	/** {@code #RRGGBB}, the form shown next to the swatch. */
 	public String hex() {
-		return String.format("#%06X", rgb());
+		return ColorMath.hex(argb(), false);
 	}
 
 	// ----------------------------------------------------------- conversions
@@ -92,75 +197,15 @@ public class ColorSetting extends Setting<Integer> {
 
 	/** Same conversion, writing into a reusable array of length at least three. */
 	public static void toHsv(int rgb, float[] out) {
-		float r = ((rgb >>> 16) & 0xFF) / 255f;
-		float g = ((rgb >>> 8) & 0xFF) / 255f;
-		float b = (rgb & 0xFF) / 255f;
-		float max = Math.max(r, Math.max(g, b));
-		float min = Math.min(r, Math.min(g, b));
-		float delta = max - min;
-		float hue;
-		if (delta <= 1.0e-6f) {
-			hue = 0f;
-		} else if (max == r) {
-			hue = 60f * (((g - b) / delta) % 6f);
-		} else if (max == g) {
-			hue = 60f * (((b - r) / delta) + 2f);
-		} else {
-			hue = 60f * (((r - g) / delta) + 4f);
-		}
-		if (hue < 0f) {
-			hue += 360f;
-		}
-		float saturation = max <= 0f ? 0f : delta / max;
-		out[0] = hue;
-		out[1] = saturation;
-		out[2] = max;
+		float[] hsv = ColorMath.hsv(rgb);
+		out[0] = hsv[0];
+		out[1] = hsv[1];
+		out[2] = hsv[2];
 	}
 
 	/** HSV to packed ARGB. The hue wraps, so a drag past the end stays sane. */
 	public static int toArgb(float hue, float saturation, float brightness, int alpha) {
-		float h = ((hue % 360f) + 360f) % 360f;
-		float s = clamp01(saturation);
-		float v = clamp01(brightness);
-		float c = v * s;
-		float x = c * (1f - Math.abs((h / 60f) % 2f - 1f));
-		float m = v - c;
-		float r;
-		float g;
-		float b;
-		if (h < 60f) {
-			r = c;
-			g = x;
-			b = 0f;
-		} else if (h < 120f) {
-			r = x;
-			g = c;
-			b = 0f;
-		} else if (h < 180f) {
-			r = 0f;
-			g = c;
-			b = x;
-		} else if (h < 240f) {
-			r = 0f;
-			g = x;
-			b = c;
-		} else if (h < 300f) {
-			r = x;
-			g = 0f;
-			b = c;
-		} else {
-			r = c;
-			g = 0f;
-			b = x;
-		}
-		return (clamp8(alpha) << 24)
-				| (clamp8(Math.round((r + m) * 255f)) << 16)
-				| (clamp8(Math.round((g + m) * 255f)) << 8)
-				| clamp8(Math.round((b + m) * 255f));
-	}
-
-	private static float clamp01(float value) {
-		return Math.max(0f, Math.min(1f, value));
+		return ColorMath.fromHsv(hue, saturation, brightness, alpha);
 	}
 
 	private static int clamp8(int value) {

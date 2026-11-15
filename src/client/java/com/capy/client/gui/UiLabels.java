@@ -1,6 +1,6 @@
 package com.capy.client.gui;
 
-import net.minecraft.network.chat.Component;
+import com.capy.client.stealth.CapyText;
 
 /**
  * Resolves the client's translation keys.
@@ -40,13 +40,13 @@ public final class UiLabels {
 			return override;
 		}
 		try {
-			String text = Component.translatable(key).getString();
+			String text = CapyText.get(key, null);
 			if (text == null || text.isEmpty() || text.equals(key)) {
 				return fallback;
 			}
 			return text;
 		} catch (Throwable t) {
-			// No language loaded, or the component failed to resolve.
+			// No resources loaded, or the text table failed to read.
 			return fallback;
 		}
 	}

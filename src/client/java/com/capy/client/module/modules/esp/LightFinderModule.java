@@ -128,7 +128,12 @@ public final class LightFinderModule extends FinderModule {
 
 	@Override
 	public int colorFor(AABB box) {
-		return bright.contains(box) ? colorBright.argb() : color.argb();
+		return colorFor(box, System.nanoTime() / 1.0e9);
+	}
+
+	@Override
+	public int colorFor(AABB box, double timeSec) {
+		return bright.contains(box) ? colorBright.argbAt(timeSec) : color.argbAt(timeSec);
 	}
 
 	@Override
@@ -196,12 +201,12 @@ public final class LightFinderModule extends FinderModule {
 	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
-		colorBright.set(ConfigValues.intValue(json, "color_bright", 0xFFFFE066));
+		colorBright.load(json, "color_bright");
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
-		json.addProperty("color_bright", colorBright.argb());
+		colorBright.save(json, "color_bright");
 	}
 }

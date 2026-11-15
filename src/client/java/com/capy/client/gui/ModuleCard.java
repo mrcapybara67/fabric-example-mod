@@ -16,9 +16,10 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 
 /**
- * Module card: a plum surface holding the module name, its description, a
- * settings indicator and the switch that enables it. Expands smoothly to
- * reveal its settings inside an inset well.
+ * Module card: a compact surface holding the module name, its description, a
+ * settings indicator and the switch that enables it. Settings are not expanded
+ * inside the card any more - they open in a separate popup, which keeps every
+ * card exactly one row tall and the grid easy to scan.
  *
  * When the module is enabled the card lights up: a soft accent bloom behind
  * it, a faintly warmer body and a thin accent bar down the leading edge —
@@ -26,15 +27,13 @@ import java.util.Map;
  * one system.
  *
  * Interaction contract:
- *   - Click card body / switch -> toggle the module
- *   - Click the chevron         -> expand/collapse the settings well
- *   - Click a setting control   -> drives that setting, never the module
+ *   - Left-click card body / switch -> toggle the module
+ *   - Right-click a card with settings -> open the settings popup
+ *   - Click a setting control -> drives that setting, never the module
  */
 public class ModuleCard {
-	/** Width of the clickable strip that holds the settings chevron. */
-	private static final int CHEVRON_W = 16;
-	/** Size of the chevron glyph itself, centred in that strip. */
-	private static final int CHEVRON_SIZE = 12;
+	/** Width of the settings glyph strip between the name and the switch. */
+	private static final int SETTINGS_ICON_W = 14;
 	/** Gap between the module name and its description. */
 	private static final int DESC_GAP = 3;
 	private static final int PAD = 10;
@@ -75,14 +74,16 @@ public class ModuleCard {
 
 	private final Anim hover = new Anim(0f, 14f);
 	private final Anim on = new Anim(0f, 18f);
-	private final Anim expand = new Anim(0f, 16f);
 	/** Eased press, so a click darkens the card instead of snapping it. */
 	private final Anim press = new Anim(0f, 26f);
 	private final Anim ripple = new Anim(0f, 10f);
 	private int rippleX;
 	private int rippleY;
-	private boolean expanded;
 	private boolean pressed;
+	/** True while this module's settings popup is open. */
+	private boolean settingsOpen;
+	/** Set by a right-click; the frame consumes it and opens the popup. */
+	private boolean settingsRequested;
 
 	// Display strings are static per module — resolved once, not per frame.
 	private final String title;
@@ -96,7 +97,6 @@ public class ModuleCard {
 	private int y;
 	private int w;
 	private int h;
-	private int animatedHeight;
 	/** 0 hidden .. 1 settled, supplied by the list's stagger. */
 	private float reveal = 1f;
 
@@ -264,28 +264,19 @@ public class ModuleCard {
 		return description == null ? "" : description;
 	}
 
-	/** Full height with settings fully expanded. */
+	/** Height of the card at rest; settings live in a popup now. */
 	public int fullHeight() {
-		return UiTheme.CARD_H + settingsFullHeight();
+		return UiTheme.CARD_H;
 	}
 
-	/**
-	 * Advances the expand animation once per frame and caches the height.
-	 *
-	 * @return true when the height changed, so the owner can rebuild its
-	 *         retained layout only on the frames that actually moved
-	 */
-	public boolean animate(float delta) {
-		expand.to(expanded ? 1f : 0f, delta);
-		press.to(pressed ? 1f : 0f, delta);
-		int previous = animatedHeight;
-		animatedHeight = UiTheme.CARD_H + Math.round(settingsFullHeight() * expand.value());
-		return animatedHeight != previous || expand.isMoving();
-	}
-
-	/** Height for the current frame (after {@link #animate}). */
+	/** Height for the current frame. */
 	public int height() {
-		return animatedHeight;
+		return UiTheme.CARD_H;
+	}
+
+	/** Height of every setting row plus the popup's padding. */
+	public int settingsHeight() {
+		return settingsFullHeight();
 	}
 
 	private int settingsFullHeight() {
@@ -327,9 +318,29 @@ public class ModuleCard {
 		return 0;
 	}
 
-	/** Expands the settings well (used by the offline preview). */
-	void setExpanded(boolean expanded) {
-		this.expanded = expanded;
+	/** Marks the card while its settings popup is open. */
+	void setSettingsOpen(boolean open) {
+		this.settingsOpen = open;
+	}
+
+	/** True once, when a right-click asked for this module's settings. */
+	boolean consumeSettingsRequest() {
+		boolean requested = settingsRequested;
+		settingsRequested = false;
+		return requested;
+	}
+
+	/** Card bounds from the last frame, used to anchor the settings popup. */
+	int x() {
+		return x;
+	}
+
+	int y() {
+		return y;
+	}
+
+	int width() {
+		return w;
 	}
 
 	/** Opening stagger, 0 hidden .. 1 settled. */
@@ -345,7 +356,7 @@ public class ModuleCard {
 
 	public void render(UiCanvas c, UiType type, int x, int y, int w, int mouseX, int mouseY, float delta,
 			boolean showCategory) {
-		int h = animatedHeight;
+		int h = UiTheme.CARD_H;
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
 		hover.to(hovered ? 1f : 0f, delta);
 		on.to(module.isEnabled() ? 1f : 0f, delta);
@@ -420,10 +431,10 @@ public class ModuleCard {
 		// of them sitting high.
 		UiText medium = type.medium();
 		UiText regular = type.regular();
-		int textX = x + UiTheme.SP_6;
+		int textX = x + UiTheme.SP_5;
 		int textRight = hasSettings()
-				? chevronLeft(w) - UiTheme.SP_3
-				: x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W - UiTheme.SP_4;
+				? settingsIconX(w) - UiTheme.SP_2
+				: x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3;
 		String desc = showCategory ? taggedDescription : description;
 		boolean hasDesc = desc != null && !desc.isEmpty();
 		int blockH = hasDesc ? medium.lineHeight() + DESC_GAP + regular.lineHeight() : medium.lineHeight();
@@ -432,35 +443,35 @@ public class ModuleCard {
 		nameColor = Ui.fadeAlpha(nameColor, revealAlpha);
 		String info = module.info();
 		String shownTitle = info == null || info.isEmpty() ? title : title + "  " + info;
-		Ui.drawEllipsized(c, medium, shownTitle, textX, nameY, textRight - textX, nameColor);
+		int textW = Math.max(0, textRight - textX);
+		Ui.drawEllipsized(c, medium, shownTitle, textX, nameY, textW, nameColor);
 		if (hasDesc) {
 			Ui.drawEllipsized(c, regular, desc, textX, nameY + medium.lineHeight() + DESC_GAP,
-					textRight - textX, Ui.fadeAlpha(UiTheme.TEXT_3, revealAlpha));
+					textW, Ui.fadeAlpha(UiTheme.TEXT_3, revealAlpha));
 		}
 
-		// The settings chevron sits in its own strip between the name and the
-		// switch. That strip is the hit target, so it is defined once, and it
-		// gets its own surface so the target is visible before it is clicked.
+		// A small sliders glyph marks the modules that have settings. It is
+		// the right-click target and stays lit while its popup is open.
 		if (hasSettings()) {
-			int stripX = chevronLeft(w);
-			boolean chevronHovered = mouseX >= stripX && mouseX < stripX + CHEVRON_W
+			int stripX = settingsIconX(w);
+			boolean iconHovered = mouseX >= stripX && mouseX < stripX + SETTINGS_ICON_W
 					&& mouseY >= y && mouseY < y + UiTheme.CARD_H;
-			float emphasis = Math.max(chevronHovered ? 1f : 0f, expand.value());
+			float emphasis = settingsOpen ? 1f : iconHovered ? 1f : 0f;
 			if (emphasis > 0.02f) {
 				int pillH = 20;
-				Ui.surface(c, stripX, y + (UiTheme.CARD_H - pillH) / 2, CHEVRON_W, pillH, 6,
+				Ui.surface(c, stripX, y + (UiTheme.CARD_H - pillH) / 2, SETTINGS_ICON_W, pillH, 6,
 						Ui.withAlpha(UiTheme.PANEL_ALT, Math.round(0x5C * emphasis)),
 						Ui.withAlpha(UiTheme.PANEL_TOP, Math.round(0x3C * emphasis)));
 			}
-			int cx = stripX + (CHEVRON_W - CHEVRON_SIZE) / 2;
-			int cy = y + (UiTheme.CARD_H - CHEVRON_SIZE) / 2;
-			int chev = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT,
-					Math.max(hv * 0.7f, Math.max(chevronHovered ? 0.85f : 0f, expand.value() * 0.8f)));
-			UiIcons.chevron(c, cx, cy, CHEVRON_SIZE, chev, expand.value());
+			int iconX = stripX + (SETTINGS_ICON_W - 10) / 2;
+			int iconY = y + (UiTheme.CARD_H - 10) / 2;
+			int ink = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT,
+					settingsOpen ? 1f : iconHovered ? 0.9f : hv * 0.5f);
+			UiIcons.draw(c, UiIcons.Icon.SLIDERS, iconX, iconY, 10, ink);
 		}
 
 		// The switch.
-		int tx = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W;
+		int tx = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W;
 		int ty = y + (UiTheme.CARD_H - UiTheme.TOGGLE_H) / 2;
 		// The switch lights up when the pointer is on the switch, not when it is
 		// anywhere on the card - otherwise hovering the name made the control
@@ -470,33 +481,18 @@ public class ModuleCard {
 		toggle.update(module.isEnabled(), switchHovered, delta);
 		toggle.render(c, tx, ty, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
 
-		// A hairline under the header once the well is opening, so the card
-		// reads as a header plus a panel instead of one tall slab.
-		if (expand.value() > 0.02f) {
-			Ui.surface(c, x + UiTheme.SP_4, y + UiTheme.CARD_H - 1, w - UiTheme.SP_4 * 2, 1, 0,
-					Ui.withAlpha(UiTheme.BORDER, Math.round(0xA0 * expand.value())));
-		}
+	}
 
-		// The settings well: an inset surface that holds the setting rows.
-		int full = settingsFullHeight();
-		if (full > 0 && expand.value() > 0.01f) {
-			int clipH = Math.round(full * expand.value());
-			c.pushClip(x + 1, y + UiTheme.CARD_H, w - 2, clipH);
-			int wy = y + UiTheme.CARD_H;
-			int wellInset = UiTheme.SP_3;
-			Ui.surface(c, x + wellInset, wy, w - wellInset * 2, full - 2, UiTheme.RADIUS,
-					UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
-			Ui.outline(c, x + wellInset, wy, w - wellInset * 2, full - 2, UiTheme.RADIUS, 0x33FFFFFF);
-			// A one pixel shade along the top of the well: the panel is inset, and
-			// without it the well and the card read as the same surface.
-			Ui.surface(c, x + wellInset + UiTheme.RADIUS, wy + 1,
-					w - (wellInset + UiTheme.RADIUS) * 2, 1, 0, 0x38000000);
-
-			int cy = wy + PAD;
-			for (Setting<?> s : module.settings()) {
-				cy += renderSetting(c, type, s, x, w, cy, mouseX, mouseY, delta);
-			}
-			c.popClip();
+	/**
+	 * Draws the setting rows into the settings popup. The popup owns the
+	 * surface, the clip and the scroll offset; this only lays out the controls,
+	 * so the editor and its hit targets always agree.
+	 */
+	public void renderSettingsContent(UiCanvas c, UiType type, int x, int y, int w,
+			int scroll, int mouseX, int mouseY, float delta) {
+		int cy = y + PAD - scroll;
+		for (Setting<?> s : module.settings()) {
+			cy += renderSetting(c, type, s, x, w, cy, mouseX, mouseY, delta);
 		}
 	}
 
@@ -706,6 +702,13 @@ public class ModuleCard {
 	}
 
 	/** Removes the keyboard focus from every text field of this card. */
+	/** Releases textures held by any open colour picker when the screen closes. */
+	public void closePickers() {
+		for (UiColorPicker picker : pickers.values()) {
+			picker.close();
+		}
+	}
+
 	public void clearTextInput() {
 		for (UiWatchlist ui : watchlists.values()) {
 			ui.clearFocus();
@@ -718,6 +721,12 @@ public class ModuleCard {
 
 	/** True while a text field inside the card owns the keyboard. */
 	public boolean hasTextInput() {
+		for (UiColorPicker picker : pickers.values()) {
+			if (picker.hasTextInput()) {
+				return true;
+			}
+		}
+
 		for (UiWatchlist ui : watchlists.values()) {
 			if (ui.isFocused()) {
 				return true;
@@ -738,27 +747,21 @@ public class ModuleCard {
 
 	/** Returns true if the press was consumed by this card. */
 	public boolean mouseClicked(double mx, double my, int button) {
-		if (button != 0 || !contains(mx, my)) {
+		if (!contains(mx, my)) {
 			return false;
 		}
 
-		// Setting controls consume first so they can never toggle the module.
-		if (expanded) {
-			if (mouseClickedSetting(mx, my)) {
-				return true;
+		// Right-click asks for the settings popup. A module without settings
+		// still swallows the press so it can never toggle by accident.
+		if (button == 1) {
+			if (hasSettings()) {
+				settingsRequested = true;
+				GuiSounds.click();
 			}
-			// Clicking the padding of the settings well is still a click on the
-			// settings, not on the module switch.
-			if (my >= y + UiTheme.CARD_H) {
-				return true;
-			}
-		}
-
-		// Chevron strip expands/collapses settings.
-		if (overChevron(mx, my)) {
-			expanded = !expanded;
-			GuiSounds.click();
 			return true;
+		}
+		if (button != 0) {
+			return false;
 		}
 
 		// Everything else (switch, name, body) toggles the module.
@@ -851,7 +854,7 @@ public class ModuleCard {
 		}
 		boolean consumed = false;
 		for (UiColorPicker picker : pickers.values()) {
-			consumed |= picker.mouseDragged(mx);
+			consumed |= picker.mouseDragged(mx, my);
 		}
 		return consumed;
 	}
@@ -871,6 +874,11 @@ public class ModuleCard {
 
 	/** Routes typed characters to the card's text fields. */
 	public boolean charTyped(net.minecraft.client.input.CharacterEvent event) {
+		for (UiColorPicker picker : pickers.values()) {
+			if (picker.charTyped(event)) {
+				return true;
+			}
+		}
 		for (UiWatchlist ui : watchlists.values()) {
 			if (ui.charTyped(event)) {
 				return true;
@@ -892,6 +900,11 @@ public class ModuleCard {
 
 	/** Routes key presses to the card's text fields. */
 	public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+		for (UiColorPicker picker : pickers.values()) {
+			if (picker.keyPressed(event)) {
+				return true;
+			}
+		}
 		for (UiWatchlist ui : watchlists.values()) {
 			if (ui.keyPressed(event)) {
 				return true;
@@ -911,20 +924,13 @@ public class ModuleCard {
 		return false;
 	}
 
-	/**
-	 * Left edge of the chevron strip: immediately left of the switch, with a
-	 * small gap. The renderer and the hit test both call this, which is what
-	 * keeps the glyph under the pointer that actually expands the card.
-	 */
-	private int chevronLeft(int cardWidth) {
-		return x + cardWidth - UiTheme.SP_5 - UiTheme.TOGGLE_W - UiTheme.SP_2 - CHEVRON_W;
+	/** Left edge of the settings glyph strip, left of the switch. */
+	private int settingsIconX(int cardWidth) {
+		return x + cardWidth - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3 - SETTINGS_ICON_W;
 	}
 
-	private boolean overChevron(double mx, double my) {
-		if (!hasSettings()) {
-			return false;
-		}
-		int left = chevronLeft(w);
-		return mx >= left && mx < left + CHEVRON_W && my >= y && my < y + UiTheme.CARD_H;
+	/** Routes a click from inside the settings popup body. */
+	public boolean settingsMouseClicked(double mx, double my) {
+		return hasSettings() && mouseClickedSetting(mx, my);
 	}
 }

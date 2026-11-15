@@ -101,19 +101,29 @@ public final class StorageEspModule extends EspModule {
 	/** The representative colour: the card's accent bar uses it. */
 	@Override
 	public int color() {
+		return colorAt(System.nanoTime() / 1.0e9);
+	}
+
+	@Override
+	public int colorAt(double timeSec) {
 		ColorSetting chest = colors.get(StorageKind.CHEST);
-		return chest == null ? super.color() : chest.argb();
+		return chest == null ? super.colorAt(timeSec) : chest.argbAt(timeSec);
 	}
 
 	/** The colour of this kind of storage, falling back to the base colour. */
 	@Override
 	public int colorFor(AABB box) {
+		return colorFor(box, System.nanoTime() / 1.0e9);
+	}
+
+	@Override
+	public int colorFor(AABB box, double timeSec) {
 		StorageKind kind = kinds.get(box);
 		ColorSetting setting = kind == null ? null : colors.get(kind);
 		// Anything without a row of its own - the fallback kind - is drawn in
 		// the overlay's own colour, so it is still highlighted and still one
 		// colour rather than an unset one.
-		return setting == null ? super.colorFor(box) : setting.argb();
+		return setting == null ? super.colorFor(box, timeSec) : setting.argbAt(timeSec);
 	}
 
 	@Override
@@ -294,8 +304,7 @@ public final class StorageEspModule extends EspModule {
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
 		for (Map.Entry<StorageKind, ColorSetting> entry : colors.entrySet()) {
-			entry.getValue().set(ConfigValues.intValue(json, entry.getKey().settingKey(),
-					entry.getKey().defaultColor()));
+			entry.getValue().load(json, entry.getKey().settingKey());
 		}
 		// The range may have changed between sessions; scan on the next tick.
 		lastRange = -1;
@@ -306,7 +315,7 @@ public final class StorageEspModule extends EspModule {
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
 		for (Map.Entry<StorageKind, ColorSetting> entry : colors.entrySet()) {
-			json.addProperty(entry.getKey().settingKey(), entry.getValue().argb());
+			entry.getValue().save(json, entry.getKey().settingKey());
 		}
 	}
 }

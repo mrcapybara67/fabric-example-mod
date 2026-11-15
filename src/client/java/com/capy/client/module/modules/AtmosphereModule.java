@@ -161,12 +161,12 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		AtmosphereState.fbAmbTarget = (float) warmth.real() / 100f;
 		AtmosphereState.fbLiveTarget = (float) brightness.real() / 100f;
 
-		int sky = skyTint.argb();
+		int sky = skyTint.argbAt(System.nanoTime() / 1.0e9);
 		AtmosphereState.skyR = ((sky >> 16) & 0xFF) / 255f;
 		AtmosphereState.skyG = ((sky >> 8) & 0xFF) / 255f;
 		AtmosphereState.skyB = (sky & 0xFF) / 255f;
 
-		int haze = hazeTint.argb();
+		int haze = hazeTint.argbAt(System.nanoTime() / 1.0e9);
 		AtmosphereState.hazeR = ((haze >> 16) & 0xFF) / 255f;
 		AtmosphereState.hazeG = ((haze >> 8) & 0xFF) / 255f;
 		AtmosphereState.hazeB = (haze & 0xFF) / 255f;
@@ -324,8 +324,8 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		bloom.set(ConfigValues.intValue(json, "bloom", 40));
 		warmth.set(ConfigValues.intValue(json, "warmth", 30));
 		brightness.set(ConfigValues.intValue(json, "brightness", 100));
-		skyTint.set(ConfigValues.intValue(json, "sky_tint", 0xFF8FB8FF));
-		hazeTint.set(ConfigValues.intValue(json, "haze_tint", 0xFFFFD980));
+		skyTint.load(json, "sky_tint");
+		hazeTint.load(json, "haze_tint");
 		themeDefaults.set(ConfigValues.boolValue(json, "theme_defaults", true));
 		debugTiming.set(ConfigValues.boolValue(json, "debug_timing", false));
 		particleDensity.set(ConfigValues.intValue(json, "particle_density", 100));
@@ -349,8 +349,8 @@ public final class AtmosphereModule extends Module implements Tickable, Configur
 		json.addProperty("bloom", bloom.get());
 		json.addProperty("warmth", warmth.get());
 		json.addProperty("brightness", brightness.get());
-		json.addProperty("sky_tint", skyTint.argb());
-		json.addProperty("haze_tint", hazeTint.argb());
+		skyTint.save(json, "sky_tint");
+		hazeTint.save(json, "haze_tint");
 		json.addProperty("theme_defaults", themeDefaults.value());
 		json.addProperty("debug_timing", debugTiming.value());
 		json.addProperty("particle_density", particleDensity.get());

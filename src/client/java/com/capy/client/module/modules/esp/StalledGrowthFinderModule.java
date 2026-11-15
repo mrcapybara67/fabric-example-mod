@@ -4,6 +4,7 @@ import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.GrowthRules;
+import com.capy.client.finder.core.TerrainPlate;
 import com.capy.client.finder.core.PocketFilter;
 import com.capy.client.finder.core.SusChunkEngine;
 import com.capy.client.mixin.ClientCommonPacketListenerAccessor;
@@ -76,6 +77,7 @@ public final class StalledGrowthFinderModule extends FinderModule {
 
 	private final BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
 	private final Set<Long> renderChunks = new HashSet<>();
+	private final Set<Long> oneChunk = new HashSet<>(1);
 	private SusChunkEngine engine;
 	private long lastEvaluateTick = -1L;
 	private boolean scanning;
@@ -100,6 +102,7 @@ public final class StalledGrowthFinderModule extends FinderModule {
 		if (lastEvaluateTick < 0L || tick - lastEvaluateTick >= EVALUATE_INTERVAL_TICKS) {
 			lastEvaluateTick = tick;
 			evaluate();
+			refreshTerrain(renderChunks);
 		}
 	}
 
@@ -405,38 +408,60 @@ public final class StalledGrowthFinderModule extends FinderModule {
 		Set<Long> found = engine.flagged(this::loaded, SusChunkEngine.thresholdFor(engine.radius()));
 		List<PocketFilter.Patch> patches = PocketFilter.patches(found, PocketFilter.maxSizeFor(engine.radius()));
 
+		beginBulk();
 		clearFlags();
 		renderChunks.clear();
+		Set<Long> next = new HashSet<>();
 		for (PocketFilter.Patch patch : patches) {
 			long center = patch.center();
 			int support = engine.supportAt(center);
 			String reason = "possible player area, evidence " + support + ", "
 					+ patch.size() + " chunk(s)";
 			markFlag(center, reason, support, List.of(surfaceBox(center)));
-			renderChunks.addAll(patch.members());
+			next.addAll(patch.members());
 		}
+		endBulk();
+		renderChunks.addAll(next);
+		retainTerrain(renderChunks);
+		refreshTerrain(renderChunks);
 	}
 
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc.player == null || level == null) {
+		if (level == null) {
 			return;
 		}
-		double y = Math.floor(mc.player.getY()) + 0.05;
 		if (eliminationMapVisible() && engine != null) {
-			Set<Long> cleared = engine.clearedChunks();
-			if (!cleared.isEmpty()) {
-				ChunkStyles.fillContour(sink, cleared, y - 0.02, 0x4F6F8F, 18, 0, timeSec);
+			for (long key : engine.clearedChunks()) {
+				int[] heights = cachedTerrain(key);
+				if (heights != null) {
+					TerrainPlate.emit(sink, Chunks.x(key), Chunks.z(key), heights,
+							ChunkStyles.argb(22, 0x4F6F8F), 0.02);
+				}
 			}
 		}
 		if (renderChunks.isEmpty()) {
 			return;
 		}
-		int argb = colorArgb();
+		int argb = colorArgb(timeSec);
+		int rgb = argb & 0xFFFFFF;
 		int fill = Math.round((argb >>> 24) * 0.40f);
-		ChunkStyles.fillContour(sink, renderChunks, y, argb & 0xFFFFFF,
-				fill, Math.min(255, Math.max(170, argb >>> 24)), timeSec);
+		int edge = Math.min(255, Math.max(170, argb >>> 24));
+		for (long key : renderChunks) {
+			int[] heights = cachedTerrain(key);
+			if (heights == null) {
+				continue;
+			}
+			int keyRgb = isStale(key) ? dimRgb(rgb) : rgb;
+			int keyEdge = isStale(key) ? Math.max(110, edge * 45 / 100) : edge;
+			int keyFill = isStale(key) ? Math.max(16, fill * 45 / 100) : fill;
+			double average = TerrainPlate.average(heights);
+			oneChunk.clear();
+			oneChunk.add(key);
+			ChunkStyles.fillContour(sink, oneChunk, average + 0.05, keyRgb, 0, keyEdge, timeSec);
+			TerrainPlate.emit(sink, Chunks.x(key), Chunks.z(key), heights,
+					ChunkStyles.argb(keyFill, keyRgb), 0.05);
+		}
 	}
 
 	@Override
@@ -460,6 +485,7 @@ public final class StalledGrowthFinderModule extends FinderModule {
 			engine.forget(key);
 		}
 		renderChunks.remove(key);
+		dropTerrain(key);
 		if (scanning && scanKey == key) {
 			clearScan();
 		}
@@ -479,6 +505,7 @@ public final class StalledGrowthFinderModule extends FinderModule {
 		super.resetSession();
 		engine = null;
 		renderChunks.clear();
+		terrain.clear();
 		lastEvaluateTick = -1L;
 		clearScan();
 	}

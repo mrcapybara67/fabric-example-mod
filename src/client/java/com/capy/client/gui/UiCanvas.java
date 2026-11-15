@@ -1,5 +1,7 @@
 package com.capy.client.gui;
 
+import net.minecraft.resources.Identifier;
+
 /**
  * A minimal drawing surface. The default methods keep the GUI usable by the
  * offline preview, while {@link McCanvas} replaces them with one tinted
@@ -62,5 +64,9 @@ public interface UiCanvas {
 
 	default void noise(int x, int y, int w, int h, int color) {
 		Ui.frostFallback(this, x, y, w, h, color);
+	}
+
+	/** One texture blit. Offline previews may ignore it. */
+	default void texture(Identifier id, int x, int y, int w, int h, int sourceW, int sourceH, int color) {
 	}
 }

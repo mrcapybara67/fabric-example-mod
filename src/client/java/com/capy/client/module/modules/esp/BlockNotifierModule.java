@@ -3,7 +3,6 @@ package com.capy.client.module.modules.esp;
 import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.module.BlockListSetting;
-import com.capy.client.util.Guard;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
@@ -14,7 +13,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -26,13 +24,11 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.AABB;
 
 /**
- * Block Notifier: finds the blocks on the user's list and announces each new
- * one with a toast.
+ * Block Notifier: finds the blocks on the user's list and outlines them.
  *
  * <p>The palette check happens before any cell is read, so a chunk of stone
- * costs one predicate pass per section. A found block gets an outlined box and
- * a toast whose body is exactly {@code found <block name>}. A block already
- * announced in a chunk is not announced again on a rescan.</p>
+ * costs one predicate pass per section. A found block gets an outlined box; no
+ * toast or chat line is produced.</p>
  */
 public final class BlockNotifierModule extends FinderModule {
 	private static final double INFLATE = 0.003;
@@ -41,7 +37,6 @@ public final class BlockNotifierModule extends FinderModule {
 	private final Set<Block> filter = new HashSet<>();
 	private final Predicate<BlockState> matcher = state -> filter.contains(state.getBlock());
 	private final Map<Long, List<AABB>> boxesByChunk = new HashMap<>();
-	private final Map<Long, Set<Long>> announcedByChunk = new HashMap<>();
 	private final List<AABB> renderBoxes = new ArrayList<>();
 	private final List<Found> scratch = new ArrayList<>();
 	private boolean scanning;
@@ -63,7 +58,6 @@ public final class BlockNotifierModule extends FinderModule {
 		if (refreshFilter()) {
 			clearFlags();
 			boxesByChunk.clear();
-			announcedByChunk.clear();
 			scratch.clear();
 			scanning = false;
 			scanKey = Long.MIN_VALUE;
@@ -124,21 +118,10 @@ public final class BlockNotifierModule extends FinderModule {
 		}
 
 		List<AABB> boxes = new ArrayList<>(scratch.size());
-		Set<Long> found = new HashSet<>();
 		for (Found foundBlock : scratch) {
 			boxes.add(foundBlock.box());
-			found.add(foundBlock.key());
 		}
 		replaceChunk(key, boxes, new ArrayList<>(scratch));
-		if (!boxes.isEmpty()) {
-			Set<Long> already = announcedByChunk.computeIfAbsent(key, ignored -> new HashSet<>());
-			already.retainAll(found);
-			for (Found foundBlock : scratch) {
-				if (already.add(foundBlock.key())) {
-					toast(foundBlock.name());
-				}
-			}
-		}
 		rebuildRender();
 		clearScan();
 		return true;
@@ -147,27 +130,12 @@ public final class BlockNotifierModule extends FinderModule {
 	private void replaceChunk(long key, List<AABB> boxes, List<Found> found) {
 		if (boxes.isEmpty()) {
 			boxesByChunk.remove(key);
-			announcedByChunk.remove(key);
 			unmarkFlag(key);
 			rebuildRender();
 			return;
 		}
 		boxesByChunk.put(key, List.copyOf(boxes));
-		// The notifier emits exactly one toast per found block below. Mark the
-		// chunk as already announced first so FinderModule.markFlag does not add
-		// its generic one-toast-per-chunk on top.
-		announced.add(key);
 		markFlag(key, "found " + found.get(0).name(), boxes.size(), boxes);
-	}
-
-	private void toast(String blockName) {
-		Minecraft mc = Minecraft.getInstance();
-		if (mc == null || mc.getToastManager() == null) {
-			return;
-		}
-		Guard.run("block notifier toast", () -> SystemToast.add(mc.getToastManager(),
-				SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-				Component.translatable(translationKey()), Component.literal("found " + blockName)));
 	}
 
 	private boolean refreshFilter() {
@@ -209,6 +177,11 @@ public final class BlockNotifierModule extends FinderModule {
 	}
 
 	@Override
+	public String reliability() {
+		return "can be hidden by anti-xray";
+	}
+
+	@Override
 	public String statusLine() {
 		return "scanned " + FinderScanner.get().scannedCount(this) + ", found " + foundCount;
 	}
@@ -216,7 +189,6 @@ public final class BlockNotifierModule extends FinderModule {
 	@Override
 	protected void onChunkUnloaded(long key) {
 		boxesByChunk.remove(key);
-		announcedByChunk.remove(key);
 		// If the scanner was part-way through this chunk, its section index and
 		// scratch list belong to a chunk that no longer exists. A reloaded chunk
 		// may have a different height or contents, so start from the beginning.
@@ -230,7 +202,6 @@ public final class BlockNotifierModule extends FinderModule {
 	public void resetSession() {
 		super.resetSession();
 		boxesByChunk.clear();
-		announcedByChunk.clear();
 		renderBoxes.clear();
 		scratch.clear();
 		filter.clear();

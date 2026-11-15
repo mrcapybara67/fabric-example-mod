@@ -92,6 +92,7 @@ public abstract class ShaftScanModule extends FinderModule {
 			FinderScanner.get().queueAllLoaded();
 		}
 		pruneUnloadedSources();
+		refreshTerrain(flags.keySet());
 	}
 
 	@Override

@@ -72,9 +72,9 @@ public final class UiTheme {
 	public static final int RADIUS_PILL = 99;
 
 	// ---- Layout -----------------------------------------------------------
-	public static final int HEADER_H = 58;
-	public static final int SIDEBAR_W = 190;
-	public static final int CARD_H = 54;
+	public static final int HEADER_H = 52;
+	public static final int SIDEBAR_W = 170;
+	public static final int CARD_H = 46;
 	public static final int CARD_GAP = 8;
 	public static final int TOGGLE_W = 40;
 	public static final int TOGGLE_H = 22;

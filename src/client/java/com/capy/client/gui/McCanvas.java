@@ -140,6 +140,16 @@ public final class McCanvas implements UiCanvas {
 	}
 
 	@Override
+	public void texture(Identifier id, int x, int y, int w, int h, int sourceW, int sourceH, int color) {
+		if (id == null || w <= 0 || h <= 0 || sourceW <= 0 || sourceH <= 0) {
+			return;
+		}
+		draws++;
+		graphics.blit(RenderPipelines.GUI_TEXTURED, id, x, y, 0f, 0f, w, h,
+				sourceW, sourceH, sourceW, sourceH, color);
+	}
+
+	@Override
 	public void vignette(int width, int height, float fade) {
 		Identifier id = UiSprites.id(UiSprites.Kind.VIGNETTE, 20);
 		if (id == null) {

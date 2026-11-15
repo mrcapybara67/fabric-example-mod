@@ -9,6 +9,11 @@ public interface EspBoxSource {
 
 	int colorFor(AABB box);
 
+	/** Frame-stable colour for an animated setting. */
+	default int colorFor(AABB box, double timeSec) {
+		return colorFor(box);
+	}
+
 	boolean fills();
 
 	boolean outlines();

@@ -10,6 +10,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -29,6 +30,11 @@ import net.minecraft.world.phys.Vec3;
 public final class ChunkRenderPass {
 	private static final int QUAD_BUFFER_BYTES = 8 * 1024 * 1024;
 	private static final int LINE_BUFFER_BYTES = 2 * 1024 * 1024;
+	private static long signalRevision = Long.MIN_VALUE;
+	private static List<FinderSignals.Group> signalGroups = List.of();
+	private static List<Combined> combinedGroups = List.of();
+	private static long finderRevision = Long.MIN_VALUE;
+	private static List<FinderModule> finderCache = List.of();
 	private static ByteBufferBuilder quadBuffer;
 	private static ByteBufferBuilder lineBuffer;
 	private static MultiBufferSource.BufferSource quadBatch;
@@ -66,12 +72,9 @@ public final class ChunkRenderPass {
 			// Agreement is drawn as a second, stronger plate over the whole
 			// merged area. The individual styles still say what each finder saw;
 			// this layer says that two kinds of evidence point at the same spot.
-			for (FinderSignals.Group group : FinderSignals.collect(mc)) {
-				if (!group.combined() || group.chunks().isEmpty()) {
-					continue;
-				}
-				ChunkStyles.fillContour(sink, new LinkedHashSet<>(group.chunks()),
-						surfaceY(mc, group.chunkX(), group.chunkZ()) + 0.06,
+			refreshSignals(mc);
+			for (Combined group : combinedGroups) {
+				ChunkStyles.fillContour(sink, group.chunks(), group.y() + 0.06,
 						group.color() & 0xFFFFFF, 78, 255, seconds);
 			}
 			if (sink.quadVertices() > 0) {
@@ -86,19 +89,46 @@ public final class ChunkRenderPass {
 		}
 	}
 
+	private static void refreshSignals(Minecraft mc) {
+		long revision = FinderModule.flagsRevision();
+		if (revision == signalRevision) {
+			return;
+		}
+		signalRevision = revision;
+		signalGroups = FinderSignals.collect(mc);
+		List<Combined> next = new ArrayList<>();
+		for (FinderSignals.Group group : signalGroups) {
+			if (group.combined() && !group.chunks().isEmpty()) {
+				next.add(new Combined(group.chunkX(), group.chunkZ(),
+						new LinkedHashSet<>(group.chunks()), group.color(),
+						surfaceY(mc, group.chunkX(), group.chunkZ())));
+			}
+		}
+		combinedGroups = List.copyOf(next);
+	}
+
+	private record Combined(int chunkX, int chunkZ, Set<Long> chunks, int color, int y) {
+	}
+
 	private static int surfaceY(Minecraft mc, int cx, int cz) {
 		int surface = mc.level.getHeight(Heightmap.Types.WORLD_SURFACE, cx * 16 + 8, cz * 16 + 8);
 		return Math.max(mc.level.getMinY(), Math.min(mc.level.getMaxY() - 1, surface));
 	}
 
 	private static List<FinderModule> finders() {
+		long revision = FinderModule.flagsRevision();
+		if (revision == finderRevision) {
+			return finderCache;
+		}
+		finderRevision = revision;
 		List<FinderModule> out = new ArrayList<>();
 		for (Module module : ModuleManager.get().modules()) {
 			if (module instanceof FinderModule finder && module.isEnabled()) {
 				out.add(finder);
 			}
 		}
-		return out;
+		finderCache = List.copyOf(out);
+		return finderCache;
 	}
 
 	private static void ensureBatches() {

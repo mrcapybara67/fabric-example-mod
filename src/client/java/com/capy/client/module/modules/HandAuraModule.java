@@ -140,10 +140,12 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 		// inside the hotbar row, and the off hand mirrors it. The frame is
 		// centred on the middle of the item, not on the whole hand arc.
 		if (mainhand.value() && !mc.player.getMainHandItem().isEmpty()) {
-			drawHand(canvas, w * 0.74f, h * 0.81f, halfW, halfH, mainColor.argb(), mainFlash);
+			drawHand(canvas, w * 0.74f, h * 0.81f, halfW, halfH,
+					mainColor.argbAt(System.nanoTime() / 1.0e9), mainFlash);
 		}
 		if (offhand.value() && !mc.player.getOffhandItem().isEmpty()) {
-			drawHand(canvas, w * 0.26f, h * 0.81f, halfW, halfH, offColor.argb(), offFlash);
+			drawHand(canvas, w * 0.26f, h * 0.81f, halfW, halfH,
+					offColor.argbAt(System.nanoTime() / 1.0e9), offFlash);
 		}
 	}
 
@@ -234,8 +236,8 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 
 	@Override
 	public void loadConfig(JsonObject json) {
-		mainColor.set(ConfigValues.intValue(json, "main_color", 0xFFFF6EB4));
-		offColor.set(ConfigValues.intValue(json, "off_color", 0xFF00FFFF));
+		mainColor.load(json, "main_color");
+		offColor.load(json, "off_color");
 		thickness.set(ConfigValues.intValue(json, "thickness", 15));
 		length.set(ConfigValues.intValue(json, "length", 25));
 		size.set(ConfigValues.intValue(json, "size", 10));
@@ -248,8 +250,8 @@ public class HandAuraModule extends Module implements Configurable, Tickable {
 
 	@Override
 	public void saveConfig(JsonObject json) {
-		json.addProperty("main_color", mainColor.argb());
-		json.addProperty("off_color", offColor.argb());
+		mainColor.save(json, "main_color");
+		offColor.save(json, "off_color");
 		json.addProperty("thickness", thickness.get());
 		json.addProperty("length", length.get());
 		json.addProperty("size", size.get());

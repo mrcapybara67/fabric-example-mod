@@ -197,7 +197,7 @@ public final class DeepslateFinderModule extends FinderModule {
 			return;
 		}
 		Set<Long> chunks = new HashSet<>(flags.keySet());
-		int argb = colorArgb();
+		int argb = colorArgb(timeSec);
 		int alpha = argb >>> 24;
 		ChunkStyles.fillContour(sink, chunks, 8.05, argb & 0xFFFFFF,
 				Math.max(28, Math.round(alpha * 0.16f)), Math.min(255, Math.max(180, alpha)), timeSec);
@@ -217,7 +217,6 @@ public final class DeepslateFinderModule extends FinderModule {
 
 	private void resetSeedView() {
 		clearFlags();
-		announced.clear();
 		clearScan();
 	}
 
