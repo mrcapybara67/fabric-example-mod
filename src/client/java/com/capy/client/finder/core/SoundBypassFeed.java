@@ -35,6 +35,8 @@ public final class SoundBypassFeed {
 	private final ChannelStats stats = new ChannelStats();
 	private final Map<Integer, Track> tracked = new HashMap<>();
 	private final Map<Long, Integer> destruction = new HashMap<>();
+	/** One physical event may arrive on more than one channel; only the first is judged. */
+	private final Map<Long, Long> recentEvents = new HashMap<>();
 	private final Map<ChannelStats.Channel, ArrayDeque<Spot>> clusters = new EnumMap<>(ChannelStats.Channel.class);
 
 	private double playerX;
@@ -210,6 +212,7 @@ public final class SoundBypassFeed {
 		stats.reset();
 		tracked.clear();
 		destruction.clear();
+		recentEvents.clear();
 		for (ArrayDeque<Spot> queue : clusters.values()) {
 			queue.clear();
 		}
@@ -225,12 +228,26 @@ public final class SoundBypassFeed {
 		if (kind == SoundKinds.Kind.IGNORE || baseWeight <= 0 || nearAny(x, y, z)) {
 			return;
 		}
+		long eventKey = eventKey(kind, x, y, z);
+		Long previous = recentEvents.get(eventKey);
+		if (previous != null && now - previous < ActivityGrid.DEDUPE_MS) {
+			return;
+		}
+		if (recentEvents.size() > 8192) {
+			recentEvents.keySet().removeIf(k -> now - recentEvents.get(k) > 60_000);
+		}
+		recentEvents.put(eventKey, now);
 		double weight = baseWeight * filter.judge(kind, x, y, z, now);
 		if (weight <= 0) {
 			return;
 		}
 		grid.add(kind, weight, x, y, z, now);
 		stats.count(channel, y, playerY);
+	}
+
+	private static long eventKey(SoundKinds.Kind kind, double x, double y, double z) {
+		int bx = (int) Math.floor(x), by = (int) Math.floor(y), bz = (int) Math.floor(z);
+		return Chunks.block(bx, by, bz) * 8 + kind.ordinal();
 	}
 
 	private void process(Track track, long now) {

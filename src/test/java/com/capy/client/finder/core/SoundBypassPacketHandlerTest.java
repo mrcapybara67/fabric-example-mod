@@ -78,4 +78,18 @@ class SoundBypassPacketHandlerTest {
 		double expected = 1.2 * Math.pow(0.5, 50.0 / ActivityGrid.HALF_LIFE_MS);
 		assertEquals(expected, cells.getFirst().score(), 1e-9);
 	}
+
+	@Test
+	void duplicateAcrossChannelsDoesNotAdvanceStorageRepeatGate() {
+		feed.onSound("block.chest.open", 0.5, 64.5, 0.5, 1_000);
+		// The same block event on a second channel must not count towards the
+		// "three storage events" repeat gate.
+		feed.onBlockEvent(SoundKinds.Kind.STORAGE, 3.0, 0.5, 64.5, 0.5, 1_050);
+		feed.onSound("block.chest.open", 0.5, 64.5, 0.5, 2_000);
+
+		List<ActivityGrid.Cell> cells = feed.top(2_000, 0, 10);
+		assertEquals(1, cells.size());
+		double first = 1.2 * Math.pow(0.5, 1_000.0 / ActivityGrid.HALF_LIFE_MS);
+		assertEquals(first + 1.2, cells.getFirst().score(), 1e-9);
+	}
 }

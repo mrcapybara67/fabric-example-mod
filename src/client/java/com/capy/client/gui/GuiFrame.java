@@ -1273,7 +1273,9 @@ public final class GuiFrame {
 				settingsScrollbar.pressed(my);
 				return true;
 			}
-			if (my >= settingsBodyY && my < settingsBodyY + settingsBodyH) {
+			// Only the left button operates a control. Forwarding every button
+			// let a right-click toggle a switch or move a slider.
+			if (button == 0 && my >= settingsBodyY && my < settingsBodyY + settingsBodyH) {
 				settingsCard.settingsMouseClicked(mx, my);
 			}
 			return true;

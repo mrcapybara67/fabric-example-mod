@@ -143,6 +143,11 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 	}
 
 	@Override
+	public int defaultAnchor() {
+		return HudElementModule.ANCHOR_TOP_LEFT;
+	}
+
+	@Override
 	public void moveTo(int x, int y) {
 		offsetX.set(clamp(x, -MAX_NUDGE, MAX_NUDGE));
 		offsetY.set(clamp(y, -MAX_NUDGE, MAX_NUDGE));

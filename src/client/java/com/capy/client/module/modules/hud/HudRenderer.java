@@ -143,6 +143,7 @@ public final class HudRenderer {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc == null) {
 			scratchSize = 0;
+			scratchPanelsSize = 0;
 			return;
 		}
 		UiText regular = TYPE.regular();

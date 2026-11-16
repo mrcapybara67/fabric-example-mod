@@ -279,6 +279,11 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 	}
 
 	@Override
+	public int defaultAnchor() {
+		return HudElementModule.ANCHOR_TOP_LEFT;
+	}
+
+	@Override
 	public void moveTo(int x, int y) {
 		offsetX.set(clamp(x, -MAX_NUDGE, MAX_NUDGE));
 		offsetY.set(clamp(y, -MAX_NUDGE, MAX_NUDGE));

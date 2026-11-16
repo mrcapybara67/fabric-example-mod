@@ -27,7 +27,7 @@ import net.minecraft.network.chat.Component;
  * <ul>
  *   <li>left-click a chip/panel: select it and start dragging;</li>
  *   <li>left-click an anchor cell: snap the selection to that cell;</li>
- *   <li>right-click a chip/panel: reset its position;</li>
+ *   <li>right-click a chip/panel: reset it to its default cell;</li>
  *   <li>Reset all: put every HUD surface back on its default cell;</li>
  *   <li>Done or Escape: save and close.</li>
  * </ul>
@@ -307,11 +307,11 @@ public final class HudEditorScreen extends Screen {
 		double my = event.y();
 		int button = event.button();
 
-		if (inside(mx, my, doneX, doneY, doneW, BUTTON_H)) {
+		if (button == 0 && inside(mx, my, doneX, doneY, doneW, BUTTON_H)) {
 			onClose();
 			return true;
 		}
-		if (inside(mx, my, resetAllX, resetAllY, resetAllW, BUTTON_H)) {
+		if (button == 0 && inside(mx, my, resetAllX, resetAllY, resetAllW, BUTTON_H)) {
 			resetAll();
 			ClientConfig.saveNow();
 			GuiSounds.click();
@@ -322,14 +322,14 @@ public final class HudEditorScreen extends Screen {
 		}
 		if (inside(mx, my, inspectorX, inspectorY, inspectorW, INSPECTOR_H)) {
 			if (selected != null) {
-				if (inside(mx, my, resetSelectedX, resetSelectedY, resetSelectedW, BUTTON_H)) {
+				if (button == 0 && inside(mx, my, resetSelectedX, resetSelectedY, resetSelectedW, BUTTON_H)) {
 					reset(selected);
 					ClientConfig.saveNow();
 					GuiSounds.click();
 					return true;
 				}
 				for (int i = 0; i < 9; i++) {
-					if (inside(mx, my, anchorX[i], anchorY[i], anchorSize, anchorSize)) {
+					if (button == 0 && inside(mx, my, anchorX[i], anchorY[i], anchorSize, anchorSize)) {
 						setAnchor(selected, i);
 						// Picking a cell means snapping to it, not keeping the old
 						// pixel nudge from the previous arrangement.
@@ -497,8 +497,10 @@ public final class HudEditorScreen extends Screen {
 
 	private static void reset(Object target) {
 		if (target instanceof HudElementModule hud) {
+			hud.setAnchor(hud.defaultAnchor());
 			hud.resetPosition();
 		} else if (target instanceof HudPanel panel) {
+			panel.setAnchor(panel.defaultAnchor());
 			panel.resetPosition();
 		}
 	}
@@ -506,9 +508,9 @@ public final class HudEditorScreen extends Screen {
 	private static void resetAll() {
 		for (Module module : ModuleManager.get().modules()) {
 			if (module instanceof HudElementModule hud) {
-				hud.resetPosition();
+				reset(hud);
 			} else if (module instanceof HudPanel panel) {
-				panel.resetPosition();
+				reset(panel);
 			}
 		}
 	}

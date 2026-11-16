@@ -35,6 +35,11 @@ public interface HudPanel {
 	/** Moves the panel to a nudge, clamped by the implementation. */
 	void moveTo(int x, int y);
 
+	/** The cell the editor's Reset action returns this panel to. */
+	default int defaultAnchor() {
+		return HudElementModule.ANCHOR_TOP_LEFT;
+	}
+
 	/** Puts the panel back on its cell. */
 	void resetPosition();
 
