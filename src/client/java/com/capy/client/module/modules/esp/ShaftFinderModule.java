@@ -2,6 +2,8 @@ package com.capy.client.module.modules.esp;
 
 import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.Chunks;
+import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.ShaftFinder;
 import com.capy.client.module.ColorSetting;
 import com.capy.client.module.SliderSetting;
@@ -66,6 +68,18 @@ public final class ShaftFinderModule extends ShaftScanModule {
 	public int colorFor(AABB box, double timeSec) {
 		boolean three = box.maxX - box.minX > 1.5 || box.maxZ - box.minZ > 1.5;
 		return three ? colorThree.argbAt(timeSec) : color.argbAt(timeSec);
+	}
+
+	@Override
+	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
+		for (AABB box : boxesNearestFirst()) {
+			double distance = boxDistance(box);
+			if (!drawableFlag(distance) || !fullStyle(distance, 140)) {
+				continue;
+			}
+			FlagStyles.depthGauge(sink, (box.minX + box.maxX) * 0.5, (box.minZ + box.maxZ) * 0.5,
+					box.maxY, box.minY, colorFor(box, timeSec) & 0xFFFFFF, timeMs);
+		}
 	}
 
 	@Override

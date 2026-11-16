@@ -3,8 +3,12 @@ package com.capy.client.module.modules.esp;
 import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagCost;
 import com.capy.client.finder.core.FlagMemory;
+import com.capy.client.finder.core.FlagQuality;
+import com.capy.client.finder.core.FlagRender;
 import com.capy.client.module.Category;
+import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.ColorSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
@@ -15,6 +19,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -48,7 +53,11 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 	public record Flag(long chunkKey, String reason, int score) {
 	}
 
+	private static final FlagCost FLAG_COST = new FlagCost();
+
 	protected final ColorSetting color;
+	protected final ChoiceSetting flagQuality = setting(new ChoiceSetting("flag_quality", 0,
+			"high", "balanced", "low"));
 	protected final Map<Long, Flag> flags = new LinkedHashMap<>();
 	protected final Map<Long, List<AABB>> boxesByFlag = new LinkedHashMap<>();
 	protected final List<AABB> boxes = new ArrayList<>();
@@ -131,6 +140,83 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 
 	/** Optional chunk style hook. Shafts keep using their boxes as well. */
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
+	}
+
+	public FlagQuality quality() {
+		return FlagQuality.parse(flagQuality.option());
+	}
+
+	public double drawCostMs() {
+		return FLAG_COST.moduleMs(id());
+	}
+
+	public static boolean autoSimplified() {
+		return FLAG_COST.simplified();
+	}
+
+	public static void beginRenderFrame() {
+		FlagRender.beginFrame();
+	}
+
+	public static void endRenderFrame(long nowMs) {
+		FLAG_COST.endFrame(nowMs);
+	}
+
+	public void noteDrawNanos(long nanos) {
+		FLAG_COST.add(id(), nanos);
+	}
+
+	/** Player distance to a chunk flag's centre, used for level of detail. */
+	protected double flagDistance(long key) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) {
+			return 0.0;
+		}
+		double dx = Chunks.x(key) * 16.0 + 8.0 - mc.player.getX();
+		double dz = Chunks.z(key) * 16.0 + 8.0 - mc.player.getZ();
+		return Math.sqrt(dx * dx + dz * dz);
+	}
+
+	protected double boxDistance(AABB box) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) {
+			return 0.0;
+		}
+		double dx = (box.minX + box.maxX) * 0.5 - mc.player.getX();
+		double dy = (box.minY + box.maxY) * 0.5 - mc.player.getY();
+		double dz = (box.minZ + box.maxZ) * 0.5 - mc.player.getZ();
+		return Math.sqrt(dx * dx + dy * dy + dz * dz);
+	}
+
+	protected boolean drawableFlag(double distance) {
+		return FlagRender.level(distance) != FlagRender.Detail.NONE;
+	}
+
+	/**
+	 * True only when the saved quality, the distance and the frame budget all
+	 * allow the animated style. Failing it leaves the plate and outline drawn.
+	 */
+	protected boolean fullStyle(double distance, int primitives) {
+		return quality() == FlagQuality.HIGH && !autoSimplified()
+				&& FlagRender.level(distance) == FlagRender.Detail.FULL
+				&& FlagRender.reserve(primitives);
+	}
+
+	protected boolean fullStyle(long key, int primitives) {
+		return fullStyle(flagDistance(key), primitives);
+	}
+
+	/** Nearest first, so the primitive budget reaches the most useful flags. */
+	protected List<Long> flagsNearestFirst() {
+		List<Long> out = new ArrayList<>(flags.keySet());
+		out.sort(Comparator.comparingDouble(this::flagDistance));
+		return out;
+	}
+
+	protected List<AABB> boxesNearestFirst() {
+		List<AABB> out = new ArrayList<>(boxes());
+		out.sort(Comparator.comparingDouble(this::boxDistance));
+		return out;
 	}
 
 	@Override
@@ -528,12 +614,12 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 	@Override
 	public void loadConfig(JsonObject json) {
 		color.load(json, "color");
+		flagQuality.select(ConfigValues.stringValue(json, "flag_quality", "high"));
 	}
-
-
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		color.save(json, "color");
+		json.addProperty("flag_quality", flagQuality.option());
 	}
 }

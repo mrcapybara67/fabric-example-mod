@@ -16,10 +16,9 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 
 /**
- * Module card: a compact surface holding the module name, its description, a
- * settings indicator and the switch that enables it. Settings are not expanded
- * inside the card any more - they open in a separate popup, which keeps every
- * card exactly one row tall and the grid easy to scan.
+ * Module card: a compact surface holding the module name and the switch that
+ * enables it. Descriptions and the settings glyph are deliberately gone; the
+ * full name is the primary label and right-click opens the settings page.
  *
  * When the module is enabled the card lights up: a soft accent bloom behind
  * it, a faintly warmer body and a thin accent bar down the leading edge —
@@ -28,14 +27,10 @@ import java.util.Map;
  *
  * Interaction contract:
  *   - Left-click card body / switch -> toggle the module
- *   - Right-click a card with settings -> open the settings popup
+ *   - Right-click a card with settings -> open the settings page
  *   - Click a setting control -> drives that setting, never the module
  */
 public class ModuleCard {
-	/** Width of the settings glyph strip between the name and the switch. */
-	private static final int SETTINGS_ICON_W = 14;
-	/** Gap between the module name and its description. */
-	private static final int DESC_GAP = 3;
 	private static final int PAD = 10;
 
 	private static final int ROW_SLIDER = 40;
@@ -80,16 +75,11 @@ public class ModuleCard {
 	private int rippleX;
 	private int rippleY;
 	private boolean pressed;
-	/** True while this module's settings popup is open. */
-	private boolean settingsOpen;
-	/** Set by a right-click; the frame consumes it and opens the popup. */
+	/** Set by a right-click; the frame consumes it and opens the settings page. */
 	private boolean settingsRequested;
 
 	// Display strings are static per module — resolved once, not per frame.
 	private final String title;
-	private final String description;
-	/** Description with the category appended, used while searchinc. */
-	private final String taggedDescription;
 	private final Map<SliderSetting, String> sliderLabels = new IdentityHashMap<>();
 
 	// Geometry of the most recent frame (for hit-testing)
@@ -103,10 +93,6 @@ public class ModuleCard {
 	public ModuleCard(Module module) {
 		this.module = module;
 		this.title = resolveOrFallback(module.translationKey(), module.id());
-		this.description = resolveOrFallback(module.descriptionKey(), null);
-		this.taggedDescription = description == null
-				? module.category().title
-				: description + "  ·  " + module.category().title;
 		for (Setting<?> s : module.settings()) {
 			if (s instanceof SliderSetting slider) {
 				UiSlider ui = new UiSlider();
@@ -259,12 +245,7 @@ public class ModuleCard {
 		return title;
 	}
 
-	/** Cached description text; empty string when the module has none. */
-	public String descriptionText() {
-		return description == null ? "" : description;
-	}
-
-	/** Height of the card at rest; settings live in a popup now. */
+	/** Height of the card at rest; settings live on their own page now. */
 	public int fullHeight() {
 		return UiTheme.CARD_H;
 	}
@@ -274,7 +255,7 @@ public class ModuleCard {
 		return UiTheme.CARD_H;
 	}
 
-	/** Height of every setting row plus the popup's padding. */
+	/** Height of every setting row plus the settings page's padding. */
 	public int settingsHeight() {
 		return settingsFullHeight();
 	}
@@ -318,11 +299,6 @@ public class ModuleCard {
 		return 0;
 	}
 
-	/** Marks the card while its settings popup is open. */
-	void setSettingsOpen(boolean open) {
-		this.settingsOpen = open;
-	}
-
 	/** True once, when a right-click asked for this module's settings. */
 	boolean consumeSettingsRequest() {
 		boolean requested = settingsRequested;
@@ -330,7 +306,7 @@ public class ModuleCard {
 		return requested;
 	}
 
-	/** Card bounds from the last frame, used to anchor the settings popup. */
+	/** Card bounds from the last frame, used for hit testing and the page title. */
 	int x() {
 		return x;
 	}
@@ -354,8 +330,7 @@ public class ModuleCard {
 
 	// ---------------------------------------------------------------- render
 
-	public void render(UiCanvas c, UiType type, int x, int y, int w, int mouseX, int mouseY, float delta,
-			boolean showCategory) {
+	public void render(UiCanvas c, UiType type, int x, int y, int w, int mouseX, int mouseY, float delta) {
 		int h = UiTheme.CARD_H;
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
 		hover.to(hovered ? 1f : 0f, delta);
@@ -425,50 +400,25 @@ public class ModuleCard {
 				Ui.withAlpha(UiTheme.BORDER, 0x60));
 		Ui.innerBevel(c, x, y, w, h, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 
-		// Name and description, aligned on one left edge. The two lines are
-		// centred as one block in the card header, so a card with a
-		// description and a card without both look deliberate instead of one
-		// of them sitting high.
+		// The name owns the card. Descriptions and the old settings glyph are
+		// deliberately gone: the full module name is the one thing that has to
+		// be readable at a glance, and right-click is the settings affordance.
 		UiText medium = type.medium();
 		UiText regular = type.regular();
 		int textX = x + UiTheme.SP_5;
-		int textRight = hasSettings()
-				? settingsIconX(w) - UiTheme.SP_2
-				: x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3;
-		String desc = showCategory ? taggedDescription : description;
-		boolean hasDesc = desc != null && !desc.isEmpty();
-		int blockH = hasDesc ? medium.lineHeight() + DESC_GAP + regular.lineHeight() : medium.lineHeight();
-		int nameY = y + (UiTheme.CARD_H - blockH) / 2;
+		int textRight = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3;
 		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.8f));
 		nameColor = Ui.fadeAlpha(nameColor, revealAlpha);
 		String info = module.info();
-		String shownTitle = info == null || info.isEmpty() ? title : title + "  " + info;
 		int textW = Math.max(0, textRight - textX);
-		Ui.drawEllipsized(c, medium, shownTitle, textX, nameY, textW, nameColor);
-		if (hasDesc) {
-			Ui.drawEllipsized(c, regular, desc, textX, nameY + medium.lineHeight() + DESC_GAP,
-					textW, Ui.fadeAlpha(UiTheme.TEXT_3, revealAlpha));
+		String shownTitle = info == null || info.isEmpty() ? title : title + "  " + info;
+		if (medium.width(shownTitle) > textW) {
+			// The name outranks the live count: never lose the last word of the
+			// module name just to show how many flags it has.
+			shownTitle = title;
 		}
-
-		// A small sliders glyph marks the modules that have settings. It is
-		// the right-click target and stays lit while its popup is open.
-		if (hasSettings()) {
-			int stripX = settingsIconX(w);
-			boolean iconHovered = mouseX >= stripX && mouseX < stripX + SETTINGS_ICON_W
-					&& mouseY >= y && mouseY < y + UiTheme.CARD_H;
-			float emphasis = settingsOpen ? 1f : iconHovered ? 1f : 0f;
-			if (emphasis > 0.02f) {
-				int pillH = 20;
-				Ui.surface(c, stripX, y + (UiTheme.CARD_H - pillH) / 2, SETTINGS_ICON_W, pillH, 6,
-						Ui.withAlpha(UiTheme.PANEL_ALT, Math.round(0x5C * emphasis)),
-						Ui.withAlpha(UiTheme.PANEL_TOP, Math.round(0x3C * emphasis)));
-			}
-			int iconX = stripX + (SETTINGS_ICON_W - 10) / 2;
-			int iconY = y + (UiTheme.CARD_H - 10) / 2;
-			int ink = Ui.lerpColor(UiTheme.TEXT_3, UiTheme.ACCENT,
-					settingsOpen ? 1f : iconHovered ? 0.9f : hv * 0.5f);
-			UiIcons.draw(c, UiIcons.Icon.SLIDERS, iconX, iconY, 10, ink);
-		}
+		UiText titleFont = medium.width(shownTitle) <= textW ? medium : regular;
+		titleFont.draw(c, shownTitle, textX, Ui.centerTextY(y, UiTheme.CARD_H, titleFont), nameColor);
 
 		// The switch.
 		int tx = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W;
@@ -484,9 +434,9 @@ public class ModuleCard {
 	}
 
 	/**
-	 * Draws the setting rows into the settings popup. The popup owns the
+	 * Draws the setting rows into the settings page. The page owns the
 	 * surface, the clip and the scroll offset; this only lays out the controls,
-	 * so the editor and its hit targets always agree.
+	 * so the view and its hit targets always agree.
 	 */
 	public void renderSettingsContent(UiCanvas c, UiType type, int x, int y, int w,
 			int scroll, int mouseX, int mouseY, float delta) {
@@ -751,7 +701,7 @@ public class ModuleCard {
 			return false;
 		}
 
-		// Right-click asks for the settings popup. A module without settings
+		// Right-click asks for the settings page. A module without settings
 		// still swallows the press so it can never toggle by accident.
 		if (button == 1) {
 			if (hasSettings()) {
@@ -924,12 +874,7 @@ public class ModuleCard {
 		return false;
 	}
 
-	/** Left edge of the settings glyph strip, left of the switch. */
-	private int settingsIconX(int cardWidth) {
-		return x + cardWidth - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3 - SETTINGS_ICON_W;
-	}
-
-	/** Routes a click from inside the settings popup body. */
+	/** Routes a click from inside the settings page body. */
 	public boolean settingsMouseClicked(double mx, double my) {
 		return hasSettings() && mouseClickedSetting(mx, my);
 	}

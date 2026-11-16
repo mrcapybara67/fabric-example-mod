@@ -2,6 +2,8 @@ package com.capy.client.module.modules.esp;
 
 import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.Chunks;
+import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.module.BlockListSetting;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -174,6 +176,18 @@ public final class BlockNotifierModule extends FinderModule {
 	@Override
 	public List<AABB> boxes() {
 		return renderBoxes;
+	}
+
+	@Override
+	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
+		for (AABB box : boxesNearestFirst()) {
+			double distance = boxDistance(box);
+			if (!drawableFlag(distance) || !fullStyle(distance, 30)) {
+				continue;
+			}
+			FlagStyles.cornerTicks(sink, (box.minX + box.maxX) * 0.5, box.maxY + 0.03,
+					(box.minZ + box.maxZ) * 0.5, 0.5, colorFor(box, timeSec) & 0xFFFFFF, timeMs);
+		}
 	}
 
 	@Override

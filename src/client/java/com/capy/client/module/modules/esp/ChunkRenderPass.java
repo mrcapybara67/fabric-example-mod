@@ -52,6 +52,7 @@ public final class ChunkRenderPass {
 		if (finders.isEmpty()) {
 			return;
 		}
+		FinderModule.beginRenderFrame();
 		try {
 			ensureBatches();
 			Vec3 camera = mc.gameRenderer.getMainCamera().position();
@@ -67,7 +68,9 @@ public final class ChunkRenderPass {
 			double seconds = System.nanoTime() / 1.0e9;
 			double millis = System.currentTimeMillis();
 			for (FinderModule finder : finders) {
+				long start = System.nanoTime();
 				Guard.run("finder styles " + finder.id(), () -> finder.drawFlags(sink, seconds, millis));
+				finder.noteDrawNanos(System.nanoTime() - start);
 			}
 			// Agreement is drawn as a second, stronger plate over the whole
 			// merged area. The individual styles still say what each finder saw;
@@ -86,6 +89,8 @@ public final class ChunkRenderPass {
 		} catch (RuntimeException | LinkageError failure) {
 			Guard.report("finder styles", failure);
 			discard();
+		} finally {
+			FinderModule.endRenderFrame(System.currentTimeMillis());
 		}
 	}
 

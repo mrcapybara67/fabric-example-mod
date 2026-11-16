@@ -51,13 +51,15 @@ import net.minecraft.client.gui.GuiGraphics;
 public final class HudRenderer {
 	private static final UiType TYPE = new McType();
 
-	private static final int CHIP_H = 18;
-	private static final int PAD = 8;
+	private static final int CHIP_H = 20;
+	private static final int PAD = 9;
 	private static final int MARGIN = 8;
-	private static final int GAP = 3;
+	private static final int GAP = 4;
 	/** Gap between the muted label and the value. */
 	private static final int LABEL_GAP = 7;
-	private static final int RADIUS = 6;
+	private static final int RADIUS = 7;
+	/** Leading accent rail plus the small gap after it. */
+	private static final int ACCENT_INSET = 5;
 	private static final int CELLS = 9;
 	/** How long the glass highlight takes to cross a chip. */
 	private static final long SHEEN_PERIOD_MS = 9000L;
@@ -338,7 +340,9 @@ public final class HudRenderer {
 	}
 
 	private static int chipWidth(UiText regular, UiText medium, String label, String value) {
-		int width = PAD * 2;
+		// The accent reserve is always present, so toggling the rail does not
+		// make every chip on the HUD jump sideways.
+		int width = PAD * 2 + ACCENT_INSET;
 		if (!label.isEmpty()) {
 			width += regular.width(label) + LABEL_GAP;
 		}
@@ -362,18 +366,28 @@ public final class HudRenderer {
 			Ui.surfaceEdge(c, x, y, w, CHIP_H, RADIUS,
 					Ui.withAlpha(UiTheme.BORDER, Math.round(alpha * 0.80f)),
 					Ui.withAlpha(UiTheme.BORDER, Math.round(alpha * 0.28f)));
+			Ui.innerBevel(c, x, y, w, CHIP_H, RADIUS,
+					Ui.withAlpha(UiTheme.HIGHLIGHT, Math.round(alpha * 0.55f)),
+					Ui.withAlpha(UiTheme.SHADE, Math.round(alpha * 0.45f)));
 		}
 
-		if (UiTheme.isGlass()) {
+		if (UiTheme.isGlass() && alpha > 0) {
 			// The specular band and the top highlight are what make the plate
-			// read as glass instead of as a grey rectangle. Only the glass theme
-			// gets them: Sakura is paper, and a highlight on paper looks wet.
+			// read as glass instead of as a grey rectangle.
 			Ui.sheen(c, x, y, w, CHIP_H, RADIUS, sheen);
 			Ui.surface(c, x + RADIUS, y, Math.max(0, w - RADIUS * 2), 1, 0,
 					Ui.withAlpha(0xFFFFFF, Math.round(alpha * 0.10f)));
 		}
 
-		int textX = x + PAD;
+		int textX = x + PAD + ACCENT_INSET;
+		if (hud.accentVisible()) {
+			int railH = CHIP_H - 8;
+			Ui.surface(c, x + 3, y + 4, 2, railH, 1,
+					Ui.withAlpha(UiTheme.ACCENT, 0xD8),
+					Ui.withAlpha(UiTheme.ACCENT_DEEP, 0xC8));
+			Ui.surface(c, x + 4, y + 5, 1, Math.max(0, railH - 2), 0,
+					Ui.withAlpha(UiTheme.ACCENT_2, 0x80));
+		}
 		if (!label.isEmpty()) {
 			regular.draw(c, label, textX, Ui.centerTextY(y, CHIP_H, regular), UiTheme.TEXT_3);
 			textX += regular.width(label) + LABEL_GAP;

@@ -20,7 +20,8 @@ class StealthSourceTest {
 	void finderSourcesNeverSendOrRegisterAChannel() throws IOException {
 		List<String> violations = new ArrayList<>();
 		for (Path root : List.of(Path.of("src/client/java/com/capy/client/module/modules/esp"),
-				Path.of("src/client/java/com/capy/client/finder/core"))) {
+				Path.of("src/client/java/com/capy/client/finder/core"),
+				Path.of("src/client/java/com/capy/client/mixin/ClientPacketListenerMixin.java"))) {
 			try (Stream<Path> files = Files.walk(root)) {
 				for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
 					List<String> lines = Files.readAllLines(file);

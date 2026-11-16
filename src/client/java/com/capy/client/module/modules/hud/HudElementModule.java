@@ -66,6 +66,7 @@ public abstract class HudElementModule extends Module implements Configurable {
 	private final SliderSetting offsetX;
 	private final SliderSetting offsetY;
 	private final BooleanSetting showLabel;
+	private final BooleanSetting accentBar;
 	private final SliderSetting background;
 
 	protected HudElementModule(String id, String label, int defaultAnchor) {
@@ -77,6 +78,7 @@ public abstract class HudElementModule extends Module implements Configurable {
 		this.offsetX = setting(new SliderSetting("offset_x", 0, -MAX_NUDGE, MAX_NUDGE));
 		this.offsetY = setting(new SliderSetting("offset_y", 0, -MAX_NUDGE, MAX_NUDGE));
 		this.showLabel = setting(new BooleanSetting("show_label", true));
+		this.accentBar = setting(new BooleanSetting("accent_bar", true));
 		// A plate at ninety five percent: the chip is a label on top of the
 		// world, and the world has to stay readable through it. Zero draws the
 		// value straight over the scene, which is the look some players want.
@@ -146,6 +148,11 @@ public abstract class HudElementModule extends Module implements Configurable {
 		return showLabel.value();
 	}
 
+	/** True draws the thin accent rail at the leading edge of the chip. */
+	public boolean accentVisible() {
+		return accentBar.value();
+	}
+
 	/** Plate opacity, 0..255. */
 	public int backgroundAlpha() {
 		return Math.round(Math.max(0f, Math.min(1f, (float) background.real() / 100f)) * 255f);
@@ -159,6 +166,7 @@ public abstract class HudElementModule extends Module implements Configurable {
 		offsetX.set(ConfigValues.intValue(json, "offset_x", 0));
 		offsetY.set(ConfigValues.intValue(json, "offset_y", 0));
 		showLabel.set(ConfigValues.boolValue(json, "show_label", true));
+		accentBar.set(ConfigValues.boolValue(json, "accent_bar", true));
 		background.set(ConfigValues.intValue(json, "background", 95));
 	}
 
@@ -168,6 +176,7 @@ public abstract class HudElementModule extends Module implements Configurable {
 		json.addProperty("offset_x", offsetX());
 		json.addProperty("offset_y", offsetY());
 		json.addProperty("show_label", labelVisible());
+		json.addProperty("accent_bar", accentVisible());
 		json.addProperty("background", Math.round(background.real()));
 	}
 

@@ -249,7 +249,11 @@ public final class EspRenderer {
 					continue;
 				}
 				VertexConsumer fills = batches.getBuffer(EspRenderTypes.quads());
+				boolean finder = module instanceof FinderModule;
 				for (AABB box : boxes) {
+					if (finder && distanceSqr(box) > 160.0 * 160.0) {
+						continue;
+					}
 					// The colour belongs to the box, not to the module: storage
 					// draws a chest and a shulker box in different hues.
 					int argb = module.colorFor(box, seconds);
@@ -289,7 +293,11 @@ public final class EspRenderer {
 					}
 				}
 				if (module.outlines()) {
+					boolean finder = module instanceof FinderModule;
 					for (AABB box : boxes) {
+						if (finder && distanceSqr(box) > 320.0 * 320.0) {
+							continue;
+						}
 						int colour = module.colorFor(box, seconds);
 						int glowColor = halo(colour);
 						outline(lines, pose, box, glowColor, glow);

@@ -3,6 +3,7 @@ package com.capy.client.module.modules.esp;
 import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.ShaftFinder;
 import com.capy.client.finder.core.TerrainPlate;
 import java.util.ArrayDeque;
@@ -175,15 +176,18 @@ public final class ChunkScannerModule extends ShaftScanModule {
 			long since = flaggedAt.getOrDefault(key, now);
 			(now - since >= DIM_AFTER_MS ? old : fresh).add(key);
 		}
-		drawGroup(sink, old, dim(rgb), alpha, fill, edge, timeSec);
-		drawGroup(sink, fresh, rgb, alpha, fill, edge, timeSec);
+		drawGroup(sink, old, dim(rgb), alpha, fill, edge, timeSec, timeMs);
+		drawGroup(sink, fresh, rgb, alpha, fill, edge, timeSec, timeMs);
 	}
 
 	private void drawGroup(DrawSink sink, Set<Long> keys, int rgb, int alpha, int fill,
-			int edge, double timeSec) {
-		for (long key : keys) {
+			int edge, double timeSec, double timeMs) {
+		List<Long> ordered = new ArrayList<>(keys);
+		ordered.sort(java.util.Comparator.comparingDouble(this::flagDistance));
+		for (long key : ordered) {
 			int[] heights = cachedTerrain(key);
-			if (heights == null) {
+			double distance = flagDistance(key);
+			if (heights == null || !drawableFlag(distance)) {
 				continue;
 			}
 			int keyRgb = isStale(key) ? dimRgb(rgb) : rgb;
@@ -197,9 +201,14 @@ public final class ChunkScannerModule extends ShaftScanModule {
 			TerrainPlate.emit(sink, Chunks.x(key), Chunks.z(key), heights,
 					ChunkStyles.argb(keyFill, keyRgb), 0.05);
 			Integer shaftTop = topY.get(key);
+			Integer shaftBottom = bottomY.get(key);
 			if (shaftTop != null && shaftTop < average) {
 				ChunkStyles.beam(sink, Chunks.x(key) * 16.0 + 8, Chunks.z(key) * 16.0 + 8,
 						average + 0.05, shaftTop, ChunkStyles.argb(Math.min(180, alpha), rgb));
+			}
+			if (shaftTop != null && shaftBottom != null && fullStyle(distance, 130)) {
+				FlagStyles.depthGauge(sink, Chunks.x(key) * 16.0 + 8, Chunks.z(key) * 16.0 + 8,
+						shaftTop, shaftBottom, rgb, timeMs);
 			}
 		}
 	}

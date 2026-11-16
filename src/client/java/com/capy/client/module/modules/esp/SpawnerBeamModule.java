@@ -3,7 +3,9 @@ package com.capy.client.module.modules.esp;
 import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,11 +62,26 @@ public final class SpawnerBeamModule extends FinderModule {
 			return;
 		}
 		int argb = colorArgb(timeSec);
-		for (BlockPos pos : renderSpawners) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null) {
+			return;
+		}
+		List<BlockPos> ordered = new ArrayList<>(renderSpawners);
+		ordered.sort(Comparator.comparingDouble(pos -> mc.player.distanceToSqr(
+				pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)));
+		for (BlockPos pos : ordered) {
 			double x = pos.getX() + 0.5;
 			double z = pos.getZ() + 0.5;
 			double bottom = pos.getY() + 1.0;
-			ChunkStyles.beam(sink, x, z, bottom, bottom + 96.0, argb);
+			double distance = boxDistance(new net.minecraft.world.phys.AABB(pos));
+			if (!drawableFlag(distance)) {
+				continue;
+			}
+			if (fullStyle(distance, 110)) {
+				FlagStyles.helixBeam(sink, x, z, bottom, bottom + 96.0, argb & 0xFFFFFF, timeMs);
+			} else {
+				ChunkStyles.beam(sink, x, z, bottom, bottom + 96.0, argb);
+			}
 		}
 	}
 

@@ -4,6 +4,7 @@ import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.SeedDeepslate;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.StringSetting;
@@ -196,11 +197,22 @@ public final class DeepslateFinderModule extends FinderModule {
 		if (flags.isEmpty()) {
 			return;
 		}
-		Set<Long> chunks = new HashSet<>(flags.keySet());
+		Set<Long> chunks = new HashSet<>();
+		for (long key : flags.keySet()) {
+			if (drawableFlag(flagDistance(key))) {
+				chunks.add(key);
+			}
+		}
 		int argb = colorArgb(timeSec);
 		int alpha = argb >>> 24;
 		ChunkStyles.fillContour(sink, chunks, 8.05, argb & 0xFFFFFF,
 				Math.max(28, Math.round(alpha * 0.16f)), Math.min(255, Math.max(180, alpha)), timeSec);
+		for (long key : flagsNearestFirst()) {
+			if (fullStyle(key, 90)) {
+				FlagStyles.stratumScan(sink, Chunks.x(key), Chunks.z(key), 8.08,
+						argb & 0xFFFFFF, timeMs);
+			}
+		}
 	}
 
 	@Override

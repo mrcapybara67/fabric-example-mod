@@ -1,6 +1,8 @@
 package com.capy.client.module.modules.esp;
 
 import com.capy.client.finder.core.Chunks;
+import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.LightRegions;
 import com.capy.client.util.Guard;
 import java.util.ArrayList;
@@ -157,6 +159,20 @@ public final class ArtificialLightModule extends FinderModule {
 	@Override
 	public boolean fills() {
 		return true;
+	}
+
+	@Override
+	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
+		for (AABB box : boxesNearestFirst()) {
+			double distance = boxDistance(box);
+			if (!drawableFlag(distance)) {
+				continue;
+			}
+			if (fullStyle(distance, 150)) {
+				FlagStyles.bloom(sink, (box.minX + box.maxX) * 0.5, box.maxY + 0.06,
+						(box.minZ + box.maxZ) * 0.5, colorFor(box, timeSec) & 0xFFFFFF, timeMs);
+			}
+		}
 	}
 
 	private void publishUnion(Minecraft mc) {

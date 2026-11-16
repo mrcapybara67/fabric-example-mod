@@ -49,6 +49,7 @@ import com.capy.client.module.modules.esp.LightFinderModule;
 import com.capy.client.module.modules.esp.MotionFeed;
 import com.capy.client.module.modules.esp.MotionScannerModule;
 import com.capy.client.module.modules.esp.ShaftFinderModule;
+import com.capy.client.module.modules.esp.SoundBypassModule;
 import com.capy.client.module.modules.esp.SpawnerBeamModule;
 import com.capy.client.module.modules.esp.StalledGrowthFinderModule;
 import com.capy.client.module.modules.esp.PlayerEspModule;
@@ -126,6 +127,9 @@ public class CapyClient implements ClientModInitializer {
 		// chunk reload is a movement helper, not a read-only finder.
 		modules.register(new MotionScannerModule());
 		modules.register(new ActivityInspectorModule());
+		// Sound Bypass reads the same packet stream but keeps its own grid, so a
+		// server that strips one channel still leaves the others working.
+		modules.register(new SoundBypassModule());
 		modules.register(new BlockNotifierModule());
 		modules.register(new SpawnerBeamModule());
 		ChunkReloadModule chunkReload = new ChunkReloadModule();
@@ -351,5 +355,12 @@ public class CapyClient implements ClientModInitializer {
 	private static void resetFinders() {
 		FinderScanner.get().onWorldReset();
 		MotionFeed.reset();
+		// Sound Bypass is packet-driven and is not registered with the chunk
+		// scanner, so it needs its own reset on the same world-change edge.
+		SoundBypassModule soundBypass = ModuleManager.get().get(SoundBypassModule.class);
+		if (soundBypass != null) {
+			soundBypass.resetSession();
+		}
+		com.capy.client.finder.core.SoundBypassFeed.get().reset();
 	}
 }

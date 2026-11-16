@@ -34,6 +34,8 @@ public final class GuiFrame {
 	private static final Category[] CATEGORIES = Category.values();
 	/** Height of the section header above the card list. */
 	private static final int SECTION_HEADER_H = 26;
+	/** Below this content width, cards use one full-width column. */
+	private static final int CARD_TWO_COLUMN_MIN_W = 410;
 	private static final int FINDER_STATUS_PAD = 8;
 	private static final int FINDER_STATUS_HEADER_H = 24;
 	private static final int FINDER_STATUS_ROW_H = 16;
@@ -111,6 +113,7 @@ public final class GuiFrame {
 	private int layoutContentH;
 	private int layoutWidth = -1;
 	private int layoutHeight = -1;
+	private int layoutColumns = -1;
 	private int layoutSelected = -1;
 	private String layoutQuery = "";
 	private boolean layoutDirty = true;
@@ -121,7 +124,16 @@ public final class GuiFrame {
 	private String cachedQuery;
 	private Object hintBinding;
 	private String hintCache = "? / ESC to close";
-	private final ModuleSettingsPopup settingsPopup = new ModuleSettingsPopup();
+	private ModuleCard settingsCard;
+	private final UiScrollbar settingsScrollbar = new UiScrollbar();
+	private int settingsBackX;
+	private int settingsBackY;
+	private int settingsBackW = 62;
+	private int settingsBackH = 24;
+	private int settingsBodyX;
+	private int settingsBodyY;
+	private int settingsBodyW;
+	private int settingsBodyH;
 	private int settingsBtnX;
 	private int settingsBtnY;
 	private int finderStatusButtonX;
@@ -151,7 +163,7 @@ public final class GuiFrame {
 	/** Rebuilds the card list from the registered modules. */
 	public void rebuild() {
 		int previous = selected;
-		settingsPopup.close();
+		closeSettingsPage();
 		cards.clear();
 		for (Category category : CATEGORIES) {
 			List<ModuleCard> list = new ArrayList<>();
@@ -176,7 +188,7 @@ public final class GuiFrame {
 	public void resize(int width, int height) {
 		this.width = width;
 		this.height = height;
-		settingsPopup.close();
+		settingsScrollbar.reset();
 		layoutDirty = true;
 		windowHeight.snap(targetWindowHeight());
 	}
@@ -184,18 +196,18 @@ public final class GuiFrame {
 	/** Selects a category by index (used by the offline preview). */
 	void setCategory(int index) {
 		if (index >= 0 && index < CATEGORIES.length) {
-			settingsPopup.close();
+			closeSettingsPage();
 			selected = index;
 			lastCategory = index;
 			layoutDirty = true;
 		}
 	}
 
-	/** Opens one card's settings popup (used by the offline preview). */
+	/** Opens one card's settings page (used by the offline preview). */
 	void expandCard(Category category, int cardIndex) {
 		List<ModuleCard> list = cards.get(category);
 		if (list != null && cardIndex >= 0 && cardIndex < list.size()) {
-			settingsPopup.open(list.get(cardIndex));
+			openSettingsPage(list.get(cardIndex));
 		}
 	}
 
@@ -207,7 +219,7 @@ public final class GuiFrame {
 
 	/** Releases transient picker textures when the screen finishes closing. */
 	public void close() {
-		settingsPopup.close();
+		closeSettingsPage();
 		for (Category category : CATEGORIES) {
 			for (ModuleCard card : cards.get(category)) {
 				card.closePickers();
@@ -256,7 +268,7 @@ public final class GuiFrame {
 	 */
 	private int targetWindowHeight() {
 		List<ModuleCard> list = visibleCards();
-		int rows = (list.size() + 1) / 2;
+		int rows = cardRows(list.size());
 		int content = rows * UiTheme.CARD_H + Math.max(0, rows - 1) * UiTheme.CARD_GAP;
 		int needed = UiTheme.HEADER_H + UiTheme.SP_6 + SECTION_HEADER_H + finderStatusHeight()
 				+ content + UiTheme.SP_6;
@@ -378,6 +390,27 @@ public final class GuiFrame {
 		return search.normalisedQuery().isEmpty() && CATEGORIES[selected] == Category.BASE_FINDER;
 	}
 
+	private void openSettingsPage(ModuleCard card) {
+		if (card == null || !card.hasSettings()) {
+			return;
+		}
+		closeSettingsPage();
+		settingsCard = card;
+		settingsScrollbar.reset();
+		search.setFocused(false);
+	}
+
+	private void closeSettingsPage() {
+		if (settingsCard != null) {
+			settingsCard.clearTextInput();
+			// A colour picker can own a GL texture; releasing it on every page
+			// exit keeps the old popup's cleanup behaviour intact.
+			settingsCard.closePickers();
+			settingsCard = null;
+		}
+		settingsScrollbar.reset();
+	}
+
 	private List<FinderModule> enabledFinders() {
 		List<FinderModule> out = new ArrayList<>();
 		for (Module module : ModuleManager.get().byCategory(Category.BASE_FINDER)) {
@@ -397,8 +430,9 @@ public final class GuiFrame {
 		if (count == 0) {
 			return 0;
 		}
+		int warning = FinderModule.autoSimplified() ? FINDER_STATUS_ROW_H : 0;
 		return FINDER_STATUS_PAD * 2 + FINDER_STATUS_HEADER_H + count * FINDER_STATUS_ROW_H
-				+ UiTheme.SP_4;
+				+ warning + UiTheme.SP_4;
 	}
 
 	// ---------------------------------------------------------------- render
@@ -498,7 +532,6 @@ public final class GuiFrame {
 		renderSidebar(c, type, wx, wy, ww, wh, mouseX, mouseY, delta, (1f - ease) * 22f);
 		renderContent(c, type, mouseX, mouseY, delta, (1f - contentEase) * 26f, contentEase);
 
-		settingsPopup.render(c, type, mouseX, mouseY, delta, wx, wy, ww, wh);
 		tooltip.render(c, type.regular());
 		if (guiSettingsOpen) {
 			renderGuiSettings(c, type, mouseX, mouseY, delta);
@@ -521,7 +554,8 @@ public final class GuiFrame {
 		// header is for - where you are, and how much is switched on.
 		UiText display = type.display();
 		UiText pageFont = type.medium();
-		String pageTitle = search.normalisedQuery().isEmpty() ? CATEGORIES[selected].title : "Search results";
+		String pageTitle = settingsCard != null ? "Module settings"
+				: search.normalisedQuery().isEmpty() ? CATEGORIES[selected].title : "Search results";
 		int titleX = wx + UiTheme.SP_6;
 		int titleY = Ui.centerTextY(wy, UiTheme.HEADER_H, display);
 		int titleMax = Math.max(0, searchX(wx, ww) - titleX - UiTheme.SP_4);
@@ -839,17 +873,19 @@ public final class GuiFrame {
 
 		List<ModuleCard> list = visibleCards();
 		boolean showCategory = !search.normalisedQuery().isEmpty();
+		boolean settingsOpen = settingsCard != null;
 
 		// The section header: what is shown and how much of it there is.
 		int headerH = SECTION_HEADER_H;
 		UiText bold = type.bold();
 		UiText meta = type.regular();
-		String title = showCategory ? "Search results" : CATEGORIES[selected].title;
+		String title = settingsOpen ? "Module settings"
+				: showCategory ? "Search results" : CATEGORIES[selected].title;
 		// The module count is a pill, not loose text: it is metadata about the
 		// page, and a small surface is what makes that read as metadata. It is
 		// measured before the title is drawn, so the title is trimmed against
 		// the pill instead of against a guessed width.
-		String countLabel = listLabel(list.size());
+		String countLabel = settingsOpen ? "SETTINGS" : listLabel(list.size());
 		int pillH = Math.max(14, meta.lineHeight() + 6);
 		int pillW = meta.width(countLabel) + 14;
 		int pillX = cx + cw - pillW;
@@ -866,6 +902,11 @@ public final class GuiFrame {
 				pillY + (pillH - meta.lineHeight()) / 2, UiTheme.TEXT_3);
 		// A delicate line under the section header.
 		Ui.fadeLine(c, cx, top + headerH - 6, cw, Ui.withAlpha(UiTheme.BORDER, 0xC0));
+
+		if (settingsOpen) {
+			renderSettingsPage(c, type, cx, top + headerH, cw, bottom, mouseX, mouseY, delta);
+			return;
+		}
 
 		int finderSpace = finderStatusHeight();
 		int statusTop = top + headerH;
@@ -890,20 +931,83 @@ public final class GuiFrame {
 
 		c.pushClip(cx, listTop, cw, listH);
 		int listY = listTop - (int) Math.round(scrollbar.scroll()) + Math.round(pageSlide);
-		// Two cards per row: 0 and 1, then 2 and 3, all the way down the page.
-		int colW = Math.max(80, (cw - UiTheme.CARD_GAP) / 2);
+		// Two cards per row only while each column can still show a full name;
+		// below that the grid becomes one full-width column. The same helper is
+		// used by the layout and the window-height calculation.
+		int columns = cardColumns();
+		int colW = Math.max(80, (cw - UiTheme.CARD_GAP * (columns - 1)) / columns);
 		for (int i = 0; i < list.size(); i++) {
 			ModuleCard card = list.get(i);
 			int y = listY + layoutTops[i];
 			if (VirtualList.intersects(y, UiTheme.CARD_H, listTop - 40, bottom)) {
-				int cardX = cx + (i % 2) * (colW + UiTheme.CARD_GAP);
-				card.setReveal(Motion.clamp01(reveal * 1.35f - Math.min(i / 2, 10) * 0.035f));
-				card.render(c, type, cardX, y, colW, mouseX, mouseY, delta, showCategory);
+				int cardX = cx + (i % columns) * (colW + UiTheme.CARD_GAP);
+				card.setReveal(Motion.clamp01(reveal * 1.35f - Math.min(i / columns, 10) * 0.035f));
+				card.render(c, type, cardX, y, colW, mouseX, mouseY, delta);
 			}
 		}
 		c.popClip();
 
 		scrollbar.render(c);
+	}
+
+	/** A full-workspace settings page, replacing the card grid instead of floating over it. */
+	private void renderSettingsPage(UiCanvas c, UiType type, int x, int y, int w, int bottom,
+			int mouseX, int mouseY, float delta) {
+		int h = Math.max(0, bottom - y);
+		Ui.shadow(c, x, y, w, h, UiTheme.RADIUS_LG);
+		Ui.surface(c, x, y, w, h, UiTheme.RADIUS_LG, UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
+		Ui.surfaceEdge(c, x, y, w, h, UiTheme.RADIUS_LG,
+				Ui.withAlpha(UiTheme.ACCENT, 0xB0), Ui.withAlpha(UiTheme.BORDER, 0x44));
+		Ui.sheen(c, x, y, w, h, UiTheme.RADIUS_LG, sheenPhase());
+
+		int pad = UiTheme.SP_6;
+		settingsBackX = x + pad;
+		settingsBackY = y + pad;
+		settingsBackW = 62;
+		settingsBackH = 24;
+		boolean backHovered = mouseX >= settingsBackX && mouseX < settingsBackX + settingsBackW
+				&& mouseY >= settingsBackY && mouseY < settingsBackY + settingsBackH;
+		Ui.surface(c, settingsBackX, settingsBackY, settingsBackW, settingsBackH, 7,
+				backHovered ? Ui.withAlpha(UiTheme.ACCENT, 0x36) : UiTheme.TRACK_TOP,
+				backHovered ? Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x28) : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, settingsBackX, settingsBackY, settingsBackW, settingsBackH, 7,
+				backHovered ? UiTheme.ACCENT : UiTheme.BORDER);
+		UiIcons.draw(c, UiIcons.Icon.BACK, settingsBackX + 8,
+				settingsBackY + (settingsBackH - 10) / 2, 10,
+				backHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+		Ui.drawEllipsized(c, type.regular(), "Back", settingsBackX + 21,
+				Ui.centerTextY(settingsBackY, settingsBackH, type.regular()),
+				settingsBackW - 25, backHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+
+		UiText titleFont = type.bold();
+		String title = settingsCard.title();
+		int titleRoom = Math.max(0, w - pad * 2);
+		if (titleFont.width(title) > titleRoom) {
+			titleFont = type.medium();
+		}
+		int titleY = settingsBackY + settingsBackH + UiTheme.SP_3;
+		titleFont.draw(c, title, x + pad, titleY, UiTheme.TEXT);
+		int count = settingsCard.module().settings().size();
+		Ui.drawRightAligned(c, type.regular(), count + (count == 1 ? " option" : " options"),
+				x + w - pad, titleY + (titleFont.lineHeight() - type.regular().lineHeight()) / 2,
+				UiTheme.TEXT_3);
+
+		int ruleY = titleY + titleFont.lineHeight() + UiTheme.SP_3;
+		Ui.fadeLine(c, x + pad, ruleY, w - pad * 2, Ui.withAlpha(UiTheme.BORDER, 0xA0));
+		settingsBodyX = x + 1;
+		settingsBodyY = ruleY + UiTheme.SP_3;
+		settingsBodyW = w - 2;
+		settingsBodyH = Math.max(1, bottom - settingsBodyY - UiTheme.SP_3);
+
+		settingsScrollbar.update(settingsBodyY, settingsBodyY + settingsBodyH,
+				settingsCard.settingsHeight() + UiTheme.SP_4, delta);
+		settingsScrollbar.setRailX(x + w - 14);
+		c.pushClip(x + 1, settingsBodyY, w - 2, settingsBodyH);
+		int contentW = Math.max(60, w - pad * 2 - 14);
+		settingsCard.renderSettingsContent(c, type, x + pad, settingsBodyY, contentW,
+				(int) Math.round(settingsScrollbar.scroll()), mouseX, mouseY, delta);
+		c.popClip();
+		settingsScrollbar.render(c);
 	}
 
 	/**
@@ -963,16 +1067,23 @@ public final class GuiFrame {
 			Ui.drawEllipsized(c, medium, finder.displayName(), nameX, lineY, nameW,
 					finder.colorArgb(System.nanoTime() / 1.0e9));
 			int statusY = rowY + Math.max(0, (FINDER_STATUS_ROW_H - regular.lineHeight()) / 2);
-			Ui.drawEllipsized(c, regular, finder.statusLine() + "  ·  " + finder.reliability(), statusX, statusY,
-					Math.max(0, x + w - FINDER_STATUS_PAD - statusX), UiTheme.TEXT_3);
+			String cost = String.format(Locale.ROOT, "%.2f ms per frame", finder.drawCostMs());
+			Ui.drawEllipsized(c, regular, cost + "  ·  " + finder.statusLine() + "  ·  " + finder.reliability(),
+					statusX, statusY, Math.max(0, x + w - FINDER_STATUS_PAD - statusX), UiTheme.TEXT_3);
 			rowY += FINDER_STATUS_ROW_H;
+		}
+		if (FinderModule.autoSimplified()) {
+			int warningY = rowY + Math.max(0, (FINDER_STATUS_ROW_H - regular.lineHeight()) / 2);
+			regular.draw(c, "flags simplified (frame cost)", nameX, warningY, UiTheme.ACCENT_2);
 		}
 	}
 
 	private void ensureCardLayout(List<ModuleCard> list) {
+		int columns = cardColumns();
 		boolean sizeChanged = list.size() != layoutTops.length;
 		if (!layoutDirty && !sizeChanged
-				&& layoutWidth == width && layoutHeight == height && layoutSelected == selected
+				&& layoutWidth == width && layoutHeight == height
+				&& layoutColumns == columns && layoutSelected == selected
 				&& layoutQuery.equals(search.query())) {
 			return;
 		}
@@ -980,18 +1091,34 @@ public final class GuiFrame {
 			layoutTops = new int[list.size()];
 			layoutHeights = new int[list.size()];
 		}
-		int rows = (list.size() + 1) / 2;
+		int rows = cardRows(list.size());
 		for (int i = 0; i < list.size(); i++) {
-			layoutTops[i] = (i / 2) * (UiTheme.CARD_H + UiTheme.CARD_GAP);
+			layoutTops[i] = (i / columns) * (UiTheme.CARD_H + UiTheme.CARD_GAP);
 			layoutHeights[i] = UiTheme.CARD_H;
 		}
 		layoutContentH = rows == 0 ? 0
 				: rows * UiTheme.CARD_H + (rows - 1) * UiTheme.CARD_GAP;
 		layoutWidth = width;
 		layoutHeight = height;
+		layoutColumns = columns;
 		layoutSelected = selected;
 		layoutQuery = search.query();
 		layoutDirty = false;
+	}
+
+	/**
+	 * Two columns only when each one leaves enough room for the longest module
+	 * name plus the switch. The threshold is measured in content pixels, not
+	 * window pixels, so it also holds while the shell is clamped to a small
+	 * screen.
+	 */
+	private int cardColumns() {
+		return contentW() >= CARD_TWO_COLUMN_MIN_W ? 2 : 1;
+	}
+
+	private int cardRows(int cardCount) {
+		int columns = cardColumns();
+		return (cardCount + columns - 1) / columns;
 	}
 
 	/**
@@ -1011,7 +1138,6 @@ public final class GuiFrame {
 			for (Category category : CATEGORIES) {
 				for (ModuleCard card : cards.get(category)) {
 					if (card.title().toLowerCase(Locale.ROOT).contains(q)
-							|| card.descriptionText().toLowerCase(Locale.ROOT).contains(q)
 							|| card.module().id().replace('_', ' ').contains(q)) {
 						cachedMatches.add(card);
 					}
@@ -1064,20 +1190,6 @@ public final class GuiFrame {
 			return true; // swallow clicks outside the window
 		}
 
-		// The settings popup is above the grid: a press inside it belongs to
-		// its controls, a press outside closes it and continues normally.
-		if (settingsPopup.isOpen()) {
-			if (settingsPopup.mouseClicked(mx, my)) {
-				return true;
-			}
-			boolean sameCard = button == 1 && settingsPopup.card() != null
-					&& settingsPopup.card().contains(mx, my);
-			settingsPopup.close();
-			if (sameCard) {
-				return true;
-			}
-		}
-
 		// The header chips are checked before the search field because they sit
 		// on the same row.
 		if (button == 0) {
@@ -1104,6 +1216,7 @@ public final class GuiFrame {
 		// Search.
 		if (button == 0 && search.contains(mx, my)) {
 			GuiSounds.click();
+			closeSettingsPage();
 			if (search.isOnClear(mx, my)) {
 				search.clear();
 			} else {
@@ -1138,12 +1251,32 @@ public final class GuiFrame {
 				if (selected != index) {
 					GuiSounds.tab();
 				}
-				settingsPopup.close();
+				closeSettingsPage();
 				selected = index;
 				lastCategory = index;
 				search.clear();
 				return true;
 			}
+		}
+
+		// The settings page owns the workspace while it is open.
+		if (settingsCard != null) {
+			if (button == 0 && mx >= settingsBackX && mx < settingsBackX + settingsBackW
+					&& my >= settingsBackY && my < settingsBackY + settingsBackH) {
+				closeSettingsPage();
+				GuiSounds.close();
+				return true;
+			}
+			int settingsRailX = contentX() + contentW() - 14;
+			if (button == 0 && mx >= settingsRailX - 3 && mx < settingsRailX + 7
+					&& my >= settingsBodyY && my < settingsBodyY + settingsBodyH) {
+				settingsScrollbar.pressed(my);
+				return true;
+			}
+			if (my >= settingsBodyY && my < settingsBodyY + settingsBodyH) {
+				settingsCard.settingsMouseClicked(mx, my);
+			}
+			return true;
 		}
 
 		// Finder status panel action.
@@ -1174,7 +1307,7 @@ public final class GuiFrame {
 				ModuleCard card = list.get(i);
 				if (card.contains(mx, my) && card.mouseClicked(mx, my, button)) {
 					if (card.consumeSettingsRequest()) {
-						settingsPopup.open(card);
+						openSettingsPage(card);
 					}
 					return true;
 				}
@@ -1188,8 +1321,13 @@ public final class GuiFrame {
 			setGuiVolume(mx);
 			return true;
 		}
-		if (settingsPopup.isOpen()) {
-			return settingsPopup.mouseDragged(mx, my);
+		if (settingsCard != null) {
+			if (settingsScrollbar.isDragging()) {
+				settingsScrollbar.dragged(my);
+			} else {
+				settingsCard.mouseDragged(mx, my);
+			}
+			return true;
 		}
 		if (scrollbar.isDragging()) {
 			scrollbar.dragged(my);
@@ -1208,7 +1346,11 @@ public final class GuiFrame {
 			volumeDragging = false;
 			ClientConfig.saveNow();
 		}
-		settingsPopup.mouseReleased(mx, my);
+		if (settingsCard != null) {
+			settingsScrollbar.released();
+			settingsCard.mouseReleased(mx, my);
+			return true;
+		}
 		scrollbar.released();
 		for (Category category : CATEGORIES) {
 			for (ModuleCard card : cards.get(category)) {
@@ -1293,8 +1435,9 @@ public final class GuiFrame {
 	}
 
 	public boolean mouseScrolled(double mx, double my, double amount) {
-		if (settingsPopup.isOpen() && settingsPopup.contains(mx, my)) {
-			return settingsPopup.mouseScrolled(amount);
+		if (settingsCard != null) {
+			return my >= settingsBodyY && my < settingsBodyY + settingsBodyH
+					&& settingsScrollbar.onScroll(amount);
 		}
 		// Only the workspace scrolls. A wheel turn over the sidebar used to move
 		// the module list, which made the category panel feel like it was
@@ -1308,8 +1451,10 @@ public final class GuiFrame {
 	}
 
 	public boolean charTyped(CharacterEvent event) {
+		if (settingsCard != null) {
+			return settingsCard.charTyped(event);
+		}
 		if (search.charTyped(event)) {
-			settingsPopup.close();
 			return true;
 		}
 		for (Category category : CATEGORIES) {
@@ -1332,10 +1477,10 @@ public final class GuiFrame {
 		// blurred the field and the window stayed open over a frozen world -
 		// which reads as "the GUI will not close".
 		if (event.isEscape()) {
-			// Escape backs out one layer at a time: the settings popup first,
-			// then the window.
-			if (settingsPopup.isOpen()) {
-				settingsPopup.close();
+			// Escape backs out one layer at a time: settings, then the window.
+			if (settingsCard != null) {
+				closeSettingsPage();
+				GuiSounds.close();
 				return true;
 			}
 			clearAllTextFocus();
@@ -1346,6 +1491,9 @@ public final class GuiFrame {
 				&& ClientKeybinds.openClickGui().matches(event)) {
 			closeRequested = true;
 			return true;
+		}
+		if (settingsCard != null) {
+			return settingsCard.keyPressed(event);
 		}
 		if (search.keyPressed(event)) {
 			return true;
@@ -1362,6 +1510,9 @@ public final class GuiFrame {
 
 	/** True while a text field owns the keyboard. */
 	public boolean hasTextInput() {
+		if (settingsCard != null) {
+			return settingsCard.hasTextInput();
+		}
 		if (search.isFocused()) {
 			return true;
 		}

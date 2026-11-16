@@ -2,6 +2,8 @@ package com.capy.client.module.modules.esp;
 
 import com.capy.client.finder.core.BedrockVoid;
 import com.capy.client.finder.core.Chunks;
+import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -87,6 +89,18 @@ public final class BedrockVoidModule extends FinderModule {
 	@Override
 	public List<AABB> boxes() {
 		return renderBoxes;
+	}
+
+	@Override
+	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
+		for (AABB box : boxesNearestFirst()) {
+			double distance = boxDistance(box);
+			if (!drawableFlag(distance) || !fullStyle(distance, 160)) {
+				continue;
+			}
+			FlagStyles.vortex(sink, (box.minX + box.maxX) * 0.5, box.maxY + 0.02,
+					(box.minZ + box.maxZ) * 0.5, colorFor(box, timeSec) & 0xFFFFFF, timeMs);
+		}
 	}
 
 	@Override

@@ -2,11 +2,16 @@ package com.capy.client.module.modules.esp;
 
 import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.ChunkStyles;
+import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.MotionScores;
 import com.capy.client.module.ColorSetting;
 import com.google.gson.JsonObject;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
@@ -73,28 +78,35 @@ public final class MotionScannerModule extends FinderModule {
 			return;
 		}
 		if (!busy.isEmpty()) {
-			draw(sink, busy, colorArgb(timeSec), timeSec);
+			draw(sink, busy, colorArgb(timeSec), timeSec, timeMs);
 		}
 		if (!veryBusy.isEmpty()) {
-			draw(sink, veryBusy, colorVeryBusy.argbAt(timeSec), timeSec);
+			draw(sink, veryBusy, colorVeryBusy.argbAt(timeSec), timeSec, timeMs);
 		}
 	}
 
-	private void draw(DrawSink sink, Set<Long> chunks, int argb, double timeSec) {
+	private void draw(DrawSink sink, Set<Long> chunks, int argb, double timeSec, double timeMs) {
 		int rgb = argb & 0xFFFFFF;
 		int alpha = (argb >>> 24) & 0xFF;
 		int fill = Math.max(28, Math.round(alpha * 0.38f));
 		int edge = Math.min(255, Math.max(170, alpha));
 		Set<Long> one = new java.util.LinkedHashSet<>(1);
-		for (long key : chunks) {
+		List<Long> ordered = new ArrayList<>(chunks);
+		ordered.sort(Comparator.comparingDouble(this::flagDistance));
+		for (long key : ordered) {
 			int[] heights = cachedTerrain(key);
-			if (heights == null) {
+			double distance = flagDistance(key);
+			if (heights == null || !drawableFlag(distance)) {
 				continue;
 			}
+			double surface = com.capy.client.finder.core.TerrainPlate.average(heights) + 0.05;
 			one.clear();
 			one.add(key);
-			ChunkStyles.fillContour(sink, one, com.capy.client.finder.core.TerrainPlate.average(heights) + 0.05,
-					rgb, fill, edge, timeSec);
+			ChunkStyles.fillContour(sink, one, surface, rgb, fill, edge, timeSec);
+			if (fullStyle(distance, 220)) {
+				FlagStyles.sonar(sink, Chunks.x(key) * 16.0 + 8, surface + 0.03,
+						Chunks.z(key) * 16.0 + 8, rgb, 6.0, timeMs, 1600.0);
+			}
 		}
 	}
 

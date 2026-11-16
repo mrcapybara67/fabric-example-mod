@@ -3,16 +3,19 @@ package com.capy.client.mixin;
 import com.capy.client.module.modules.antiadmin.PacketSignals;
 import com.capy.client.module.modules.esp.FinderScanner;
 import com.capy.client.module.modules.esp.MotionFeed;
+import com.capy.client.module.modules.esp.SoundBypassPackets;
 import com.capy.client.util.Guard;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundCommandSuggestionsPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
+import net.minecraft.network.protocol.game.ClientboundLevelEventPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
@@ -26,6 +29,7 @@ import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerTeamPacket;
+import net.minecraft.network.protocol.game.ClientboundSoundEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
@@ -79,6 +83,12 @@ public class ClientPacketListenerMixin {
 		Guard.run("anti-admin sound", () -> PacketSignals.onSound(packet));
 		Guard.run("motion sound", () -> MotionFeed.onSound(packet.getX(), packet.getY(), packet.getZ(),
 				packet.getSource()));
+		Guard.run("sound bypass sound", () -> SoundBypassPackets.onSound(packet));
+	}
+
+	@Inject(method = "handleSoundEntityEvent", at = @At("HEAD"))
+	private void capy$onSoundEntity(ClientboundSoundEntityPacket packet, CallbackInfo ci) {
+		Guard.run("sound bypass entity sound", () -> SoundBypassPackets.onSoundEntity(Minecraft.getInstance(), packet));
 	}
 
 	@Inject(method = "handleAddEntity", at = @At("HEAD"))
@@ -86,12 +96,19 @@ public class ClientPacketListenerMixin {
 		Guard.run("anti-admin entity spawn", () -> PacketSignals.onEntitySpawn(packet));
 	}
 
+	@Inject(method = "handleAddEntity", at = @At("TAIL"))
+	private void capy$onAddEntitySoundBypass(ClientboundAddEntityPacket packet, CallbackInfo ci) {
+		Guard.run("sound bypass entity add", () -> SoundBypassPackets.onAddEntity(Minecraft.getInstance(), packet));
+	}
+
 	@Inject(method = "handleMoveEntity", at = @At("TAIL"))
 	private void capy$onMoveEntity(ClientboundMoveEntityPacket packet, CallbackInfo ci) {
 		Guard.run("motion entity move", () -> {
 			Minecraft mc = Minecraft.getInstance();
 			if (packet.hasPosition() && mc != null && mc.level != null) {
-				MotionFeed.onEntityMoved(packet.getEntity(mc.level));
+				var entity = packet.getEntity(mc.level);
+				MotionFeed.onEntityMoved(entity);
+				SoundBypassPackets.onMoveEntity(mc, packet, entity);
 			}
 		});
 	}
@@ -136,6 +153,17 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleBlockEvent", at = @At("HEAD"))
 	private void capy$onBlockEvent(ClientboundBlockEventPacket packet, CallbackInfo ci) {
 		Guard.run("motion block event", () -> MotionFeed.onBlockEvent(packet.getBlock(), packet.getPos()));
+		Guard.run("sound bypass block event", () -> SoundBypassPackets.onBlockEvent(packet));
+	}
+
+	@Inject(method = "handleLevelEvent", at = @At("HEAD"))
+	private void capy$onLevelEvent(ClientboundLevelEventPacket packet, CallbackInfo ci) {
+		Guard.run("sound bypass level event", () -> SoundBypassPackets.onLevelEvent(packet));
+	}
+
+	@Inject(method = "handleBlockDestruction", at = @At("HEAD"))
+	private void capy$onBlockDestruction(ClientboundBlockDestructionPacket packet, CallbackInfo ci) {
+		Guard.run("sound bypass destruction", () -> SoundBypassPackets.onBlockDestruction(packet));
 	}
 
 	@Inject(method = "handleChunkBlocksUpdate", at = @At("HEAD"))
@@ -197,5 +225,6 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleRemoveEntities", at = @At("HEAD"))
 	private void capy$onRemoveEntities(ClientboundRemoveEntitiesPacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin remove entities", () -> PacketSignals.onRemoveEntities(packet));
+		Guard.run("sound bypass remove entities", () -> SoundBypassPackets.onRemoveEntities(packet));
 	}
 }

@@ -3,11 +3,13 @@ package com.capy.client.module.modules.esp;
 import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.GrowthRules;
 import com.capy.client.finder.core.TerrainPlate;
 import com.capy.client.finder.core.PocketFilter;
 import com.capy.client.finder.core.SusChunkEngine;
 import com.capy.client.mixin.ClientCommonPacketListenerAccessor;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -447,9 +449,11 @@ public final class StalledGrowthFinderModule extends FinderModule {
 		int rgb = argb & 0xFFFFFF;
 		int fill = Math.round((argb >>> 24) * 0.40f);
 		int edge = Math.min(255, Math.max(170, argb >>> 24));
-		for (long key : renderChunks) {
+		List<Long> ordered = new ArrayList<>(renderChunks);
+		ordered.sort(java.util.Comparator.comparingDouble(this::flagDistance));
+		for (long key : ordered) {
 			int[] heights = cachedTerrain(key);
-			if (heights == null) {
+			if (heights == null || !drawableFlag(flagDistance(key))) {
 				continue;
 			}
 			int keyRgb = isStale(key) ? dimRgb(rgb) : rgb;
@@ -461,6 +465,14 @@ public final class StalledGrowthFinderModule extends FinderModule {
 			ChunkStyles.fillContour(sink, oneChunk, average + 0.05, keyRgb, 0, keyEdge, timeSec);
 			TerrainPlate.emit(sink, Chunks.x(key), Chunks.z(key), heights,
 					ChunkStyles.argb(keyFill, keyRgb), 0.05);
+		}
+		for (long key : flagsNearestFirst()) {
+			int[] heights = cachedTerrain(key);
+			if (heights == null || !fullStyle(key, 110)) {
+				continue;
+			}
+			FlagStyles.radarSweep(sink, Chunks.x(key), Chunks.z(key),
+					TerrainPlate.average(heights) + 0.08, isStale(key) ? dimRgb(rgb) : rgb, timeMs);
 		}
 	}
 

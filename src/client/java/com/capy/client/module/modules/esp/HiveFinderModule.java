@@ -4,6 +4,7 @@ import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.HiveFinder;
 import com.capy.client.finder.core.TerrainPlate;
 import com.capy.client.module.SliderSetting;
@@ -152,14 +153,20 @@ public final class HiveFinderModule extends FinderModule {
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
 		int base = colorArgb(timeSec);
-		for (long key : flags.keySet()) {
+		for (long key : flagsNearestFirst()) {
 			int[] heights = cachedTerrain(key);
-			if (heights == null) {
+			double distance = flagDistance(key);
+			if (heights == null || !drawableFlag(distance)) {
 				continue;
 			}
 			int argb = staleColor(key, base);
-			ChunkStyles.marker(sink, Chunks.x(key), Chunks.z(key),
-					TerrainPlate.average(heights) + 0.04, argb & 0xFFFFFF, 1.0, timeMs, true);
+			double y = TerrainPlate.average(heights) + 0.04;
+			if (fullStyle(distance, 260)) {
+				ChunkStyles.marker(sink, Chunks.x(key), Chunks.z(key), y, argb & 0xFFFFFF, 1.0, timeMs, true);
+				FlagStyles.honeycomb(sink, Chunks.x(key), Chunks.z(key), y + 0.02, argb & 0xFFFFFF, timeMs);
+			} else {
+				ChunkStyles.simple(sink, Chunks.x(key), Chunks.z(key), y, argb, false);
+			}
 		}
 	}
 

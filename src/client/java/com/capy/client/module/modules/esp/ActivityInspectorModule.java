@@ -4,6 +4,7 @@ import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.MotionScores;
 import com.capy.client.gui.McCanvas;
 import com.capy.client.gui.McType;
@@ -112,9 +113,21 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 			return;
 		}
 		double y = Math.max(level.getMinY(), 0) + 0.05;
-		int rgb = highActivityColor.rgb();
-		for (long key : lowChunks) {
-			ChunkStyles.marker(sink, Chunks.x(key), Chunks.z(key), y, rgb, 1.0, timeMs, false);
+		int rgb = highActivityColor.argbAt(timeSec) & 0xFFFFFF;
+		List<Long> ordered = new ArrayList<>(lowChunks);
+		ordered.sort(Comparator.comparingDouble(this::flagDistance));
+		for (long key : ordered) {
+			double distance = flagDistance(key);
+			if (!drawableFlag(distance)) {
+				continue;
+			}
+			if (fullStyle(distance, 90)) {
+				double score = MotionFeed.lowScores().score(key, (long) timeMs);
+				FlagStyles.heatRing(sink, Chunks.x(key) * 16.0 + 8, y, Chunks.z(key) * 16.0 + 8,
+						6.0, rgb, score, timeMs);
+			} else {
+				ChunkStyles.simple(sink, Chunks.x(key), Chunks.z(key), y, rgb, false);
+			}
 		}
 	}
 

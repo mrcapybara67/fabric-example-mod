@@ -2,6 +2,8 @@ package com.capy.client.module.modules.esp;
 
 import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.Chunks;
+import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.module.ColorSetting;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
@@ -139,6 +141,20 @@ public final class LightFinderModule extends FinderModule {
 	@Override
 	public List<AABB> boxes() {
 		return renderBoxes;
+	}
+
+	@Override
+	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
+		for (AABB box : boxesNearestFirst()) {
+			double distance = boxDistance(box);
+			if (!drawableFlag(distance)) {
+				continue;
+			}
+			if (fullStyle(distance, 150)) {
+				FlagStyles.bloom(sink, (box.minX + box.maxX) * 0.5, box.maxY + 0.06,
+						(box.minZ + box.maxZ) * 0.5, colorFor(box, timeSec) & 0xFFFFFF, timeMs);
+			}
+		}
 	}
 
 	@Override

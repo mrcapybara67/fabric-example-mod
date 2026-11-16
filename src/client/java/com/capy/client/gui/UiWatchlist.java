@@ -79,7 +79,7 @@ public class UiWatchlist {
 
 	/** Height of the editor for the current number of entries. */
 	public int height() {
-		// Every watched name is rendered. The settings popup scrolls, so a
+		// Every watched name is rendered. The settings page scrolls, so a
 		// long list is never hidden behind a "+N more" line again.
 		return HEADER_H + INPUT_H + UiTheme.SP_2 + STATUS_H
 				+ model.entries().size() * ENTRY_H;
