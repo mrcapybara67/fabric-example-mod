@@ -416,7 +416,15 @@ public class ModuleCard {
 		int textW = Math.max(0, textRight - textX);
 		UiText titleFont = bold.width(title) <= textW ? bold
 				: medium.width(title) <= textW ? medium : regular;
-		titleFont.draw(c, title, textX, Ui.centerTextY(y, UiTheme.CARD_H, titleFont), nameColor);
+		int titleY = Ui.centerTextY(y, UiTheme.CARD_H, titleFont);
+		if (titleFont.width(title) <= textW) {
+			titleFont.draw(c, title, textX, titleY, nameColor);
+		} else {
+			// Two columns are allowed at a narrower width now. Ellipsizing the
+			// one name that does not fit is better than letting it paint over
+			// the switch and making the whole card look broken.
+			Ui.drawEllipsized(c, regular, title, textX, titleY, textW, nameColor);
+		}
 
 		// The switch.
 		int tx = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W;

@@ -34,7 +34,9 @@ public final class GuiFrame {
 	/** Height of the section header above the card list. */
 	private static final int SECTION_HEADER_H = 26;
 	/** Below this content width, cards use one full-width column. */
-	private static final int CARD_TWO_COLUMN_MIN_W = 410;
+	private static final int CARD_TWO_COLUMN_MIN_W = 330;
+	/** Window width that gives the workspace room for two usable columns. */
+	private static final int TWO_COLUMN_WINDOW_MIN_W = 624;
 
 	/** Height of the theme picker button at the foot of the sidebar. */
 	private static final int THEME_PICKER_H = 26;
@@ -232,10 +234,26 @@ public final class GuiFrame {
 		// Size is applied as a uniform pose scale by the owning screen, so this
 		// is the virtual viewport's width. Scaling it a second time here made
 		// the large preset wider without making anything else larger.
-		int maxAllowed = Math.min(760, width - 16);
-		int minWanted = Math.min(470, maxAllowed);
-		int preferred = Math.round(width * 0.58f);
+		return windowWidthFor(width);
+	}
+
+	/**
+	 * The shell uses the available viewport instead of a narrow fixed column.
+	 * At the common 640-pixel virtual width this lands on 624 pixels, which is
+	 * exactly what the workspace needs for two cards per row. The old 58%
+	 * preference produced a one-column list, so the lower rows fell outside
+	 * the clipped content area and looked chopped off.
+	 */
+	static int windowWidthFor(int viewportWidth) {
+		int maxAllowed = Math.max(1, Math.min(760, viewportWidth - 16));
+		int minWanted = Math.min(TWO_COLUMN_WINDOW_MIN_W, maxAllowed);
+		int preferred = Math.round(Math.max(0, viewportWidth) * 0.72f);
 		return Math.min(maxAllowed, Math.max(minWanted, Math.min(680, preferred)));
+	}
+
+	/** Workspace width after the sidebar and both gutters. */
+	static int contentWidthFor(int windowWidth) {
+		return windowWidth - UiTheme.SIDEBAR_W - UiTheme.SP_6 * 2 - UiTheme.SP_5;
 	}
 
 	/** True when the header has to shed its labels to fit the window. */
@@ -261,12 +279,11 @@ public final class GuiFrame {
 		int content = rows * UiTheme.CARD_H + Math.max(0, rows - 1) * UiTheme.CARD_GAP;
 		int needed = UiTheme.HEADER_H + UiTheme.SP_6 + SECTION_HEADER_H
 				+ content + UiTheme.SP_6;
-		int max = Math.min(520, (int) (height * 0.82f));
-		// The sidebar is allowed to push the window past the content cap, but
-		// never off the screen: on a short window showing every category
-		// matters more than the empty space the 82% rule would leave.
-		int hardMax = Math.min(520, (int) (height * 0.94f));
-		int min = Math.min(hardMax, sidebarMinHeight());
+		// Use the room that is actually there. The old 82% cap left the second
+		// card row below the viewport on a short screen even when the window had
+		// enough space; only the outer 4% is kept as breathing room now.
+		int max = Math.min(520, Math.max(1, Math.round(height * 0.92f)));
+		int min = Math.min(max, sidebarMinHeight());
 		return Math.max(min, Math.min(max, needed));
 	}
 
@@ -359,7 +376,7 @@ public final class GuiFrame {
 	}
 
 	private int contentW() {
-		return windowX() + windowWidth() - UiTheme.SP_6 - UiTheme.SP_5 - contentX();
+		return contentWidthFor(windowWidth());
 	}
 
 	private int contentTop() {
@@ -1030,7 +1047,11 @@ public final class GuiFrame {
 	 * screen.
 	 */
 	private int cardColumns() {
-		return contentW() >= CARD_TWO_COLUMN_MIN_W ? 2 : 1;
+		return cardColumnsFor(contentW());
+	}
+
+	static int cardColumnsFor(int contentWidth) {
+		return contentWidth >= CARD_TWO_COLUMN_MIN_W ? 2 : 1;
 	}
 
 	private int cardRows(int cardCount) {
@@ -1091,17 +1112,18 @@ public final class GuiFrame {
 	public boolean mouseClicked(MouseButtonEvent event, double mx, double my) {
 		int button = event.button();
 
-		// A mouse button bound to the GUI closes it.
-		if (ClientKeybinds.openClickGui() != null && ClientKeybinds.openClickGui().matchesMouse(event)) {
-			closeRequested = true;
-			return true;
-		}
-
 		int wx = windowX();
 		int wy = windowY();
 		int ww = windowWidth();
 		int wh = windowHeight();
 		if (mx < wx || mx >= wx + ww || my < wy || my >= wy + wh) {
+			// Only a click on the scrim may use the mouse-bound GUI key. Doing
+			// this before the bounds check meant a player who bound the GUI to
+			// a mouse button closed the window on every card press.
+			if (ClientKeybinds.openClickGui() != null
+					&& ClientKeybinds.openClickGui().matchesMouse(event)) {
+				closeRequested = true;
+			}
 			return true; // swallow clicks outside the window
 		}
 
