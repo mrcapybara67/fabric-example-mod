@@ -5,7 +5,6 @@ import com.capy.client.keybind.ClientKeybinds;
 import com.capy.client.module.Category;
 import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
-import com.capy.client.module.modules.esp.FinderModule;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -36,10 +35,6 @@ public final class GuiFrame {
 	private static final int SECTION_HEADER_H = 26;
 	/** Below this content width, cards use one full-width column. */
 	private static final int CARD_TWO_COLUMN_MIN_W = 410;
-	private static final int FINDER_STATUS_PAD = 8;
-	private static final int FINDER_STATUS_HEADER_H = 24;
-	private static final int FINDER_STATUS_ROW_H = 16;
-	private static final int FINDER_STATUS_BUTTON_H = 18;
 
 	/** Height of the theme picker button at the foot of the sidebar. */
 	private static final int THEME_PICKER_H = 26;
@@ -52,17 +47,19 @@ public final class GuiFrame {
 
 	/** The smallest a category row may get before it stops being usable. */
 	private static final int CATEGORY_H_MIN = 15;
-	/** Width of the settings popover. */
-	private static final int SETTINGS_PANEL_W = 300;
-	private static final int SETTINGS_TOGGLE_TOP = 36;
-	private static final int SETTINGS_TOGGLE_PITCH = 29;
-	private static final int SETTINGS_SIZE_Y = SETTINGS_TOGGLE_TOP + 6 * SETTINGS_TOGGLE_PITCH + 4;
-	private static final int SETTINGS_QUALITY_Y = SETTINGS_SIZE_Y + 30;
-	private static final int SETTINGS_VOLUME_Y = SETTINGS_QUALITY_Y + 30;
-	private static final int SETTINGS_HUD_Y = SETTINGS_VOLUME_Y + 30;
-	private static final int SETTINGS_PANEL_H = SETTINGS_HUD_Y + 24 + 12;
-	private static final String[] SETTINGS_LABELS = {"Sounds", "Reduce animations", "Blur (optional)",
-			"Glass debug", "GUI debug", "Stealth mode"};
+	/** Width and compact row geometry of the settings popover. */
+	private static final int SETTINGS_PANEL_W = 336;
+	private static final int SETTINGS_PANEL_H = 272;
+	private static final int SETTINGS_PAD = 16;
+	private static final int SETTINGS_SOUND_Y = 58;
+	private static final int SETTINGS_VOLUME_Y = 88;
+	private static final int SETTINGS_ANIM_Y = 120;
+	private static final int SETTINGS_SIZE_Y = 148;
+	private static final int SETTINGS_QUALITY_Y = 176;
+	private static final int SETTINGS_STEALTH_Y = 204;
+	private static final int SETTINGS_HUD_Y = 236;
+	private static final int SETTINGS_VOLUME_LABEL_W = 78;
+	private static final int SETTINGS_VOLUME_PCT_W = 30;
 
 	/**
 	 * The page the window was last showing.
@@ -89,9 +86,6 @@ public final class GuiFrame {
 	private final UiTooltip tooltip = new UiTooltip();
 	private final UiToggle soundsToggle = new UiToggle();
 	private final UiToggle animationsToggle = new UiToggle();
-	private final UiToggle blurToggle = new UiToggle();
-	private final UiToggle glassDebugToggle = new UiToggle();
-	private final UiToggle debugToggle = new UiToggle();
 	private final UiToggle stealthToggle = new UiToggle();
 	private final Anim tabIndicator = new Anim(0f, 16f);
 	private final String[] categoryCounts = new String[CATEGORIES.length];
@@ -136,10 +130,6 @@ public final class GuiFrame {
 	private int settingsBodyH;
 	private int settingsBtnX;
 	private int settingsBtnY;
-	private int finderStatusButtonX;
-	private int finderStatusButtonY;
-	private int finderStatusButtonW;
-	private int finderStatusButtonH;
 	/**
 	 * Opens the drag editor. Supplied by the screen, because the frame is also
 	 * rendered outside Minecraft by the preview tool and must not depend on
@@ -239,14 +229,13 @@ public final class GuiFrame {
 	}
 
 	private int windowWidth() {
-		// The size preset chooses how wide the shell opens; the screen always
-		// has the last word, so the window never hangs off either edge.
-		float scale = ClientConfig.get().guiSize().widthScale();
+		// Size is applied as a uniform pose scale by the owning screen, so this
+		// is the virtual viewport's width. Scaling it a second time here made
+		// the large preset wider without making anything else larger.
 		int maxAllowed = Math.min(760, width - 16);
-		int maxWanted = Math.min(760, Math.round(680 * scale));
 		int minWanted = Math.min(470, maxAllowed);
-		int preferred = Math.round(width * 0.58f * scale);
-		return Math.min(maxAllowed, Math.max(minWanted, Math.min(maxWanted, preferred)));
+		int preferred = Math.round(width * 0.58f);
+		return Math.min(maxAllowed, Math.max(minWanted, Math.min(680, preferred)));
 	}
 
 	/** True when the header has to shed its labels to fit the window. */
@@ -270,7 +259,7 @@ public final class GuiFrame {
 		List<ModuleCard> list = visibleCards();
 		int rows = cardRows(list.size());
 		int content = rows * UiTheme.CARD_H + Math.max(0, rows - 1) * UiTheme.CARD_GAP;
-		int needed = UiTheme.HEADER_H + UiTheme.SP_6 + SECTION_HEADER_H + finderStatusHeight()
+		int needed = UiTheme.HEADER_H + UiTheme.SP_6 + SECTION_HEADER_H
 				+ content + UiTheme.SP_6;
 		int max = Math.min(520, (int) (height * 0.82f));
 		// The sidebar is allowed to push the window past the content cap, but
@@ -381,13 +370,9 @@ public final class GuiFrame {
 		return windowY() + windowHeight() - UiTheme.SP_5;
 	}
 
-	/** The first card pixel, below the section header and the finder status panel. */
+	/** The first card pixel, below the section header. */
 	private int contentListTop() {
-		return contentTop() + SECTION_HEADER_H + finderStatusHeight();
-	}
-
-	private boolean finderStatusVisible() {
-		return search.normalisedQuery().isEmpty() && CATEGORIES[selected] == Category.BASE_FINDER;
+		return contentTop() + SECTION_HEADER_H;
 	}
 
 	private void openSettingsPage(ModuleCard card) {
@@ -409,30 +394,6 @@ public final class GuiFrame {
 			settingsCard = null;
 		}
 		settingsScrollbar.reset();
-	}
-
-	private List<FinderModule> enabledFinders() {
-		List<FinderModule> out = new ArrayList<>();
-		for (Module module : ModuleManager.get().byCategory(Category.BASE_FINDER)) {
-			if (module instanceof FinderModule finder && module.isEnabled()) {
-				out.add(finder);
-			}
-		}
-		return out;
-	}
-
-	/** Space taken by the status panel, including the gap below it; zero when hidden. */
-	private int finderStatusHeight() {
-		if (!finderStatusVisible()) {
-			return 0;
-		}
-		int count = enabledFinders().size();
-		if (count == 0) {
-			return 0;
-		}
-		int warning = FinderModule.autoSimplified() ? FINDER_STATUS_ROW_H : 0;
-		return FINDER_STATUS_PAD * 2 + FINDER_STATUS_HEADER_H + count * FINDER_STATUS_ROW_H
-				+ warning + UiTheme.SP_4;
 	}
 
 	// ---------------------------------------------------------------- render
@@ -545,19 +506,18 @@ public final class GuiFrame {
 	}
 
 	private void renderHeader(UiCanvas c, UiType type, int wx, int wy, int ww, int mouseX, int mouseY, float delta) {
-		int cy = wy + (UiTheme.HEADER_H - 34) / 2;
-
-		// The page leads the band. The badge, the crest and the wordmark that
-		// used to sit here were a logo inside a title bar that already carries
-		// the window's name: they took the width the page title needs and told
-		// the player nothing the sidebar does not. What replaces them is what a
-		// header is for - where you are, and how much is switched on.
+		// Two custom weights lead the band: a small uppercase wordmark above
+		// the large page title. It gives the header a typographic hierarchy
+		// without adding another panel or another icon.
 		UiText display = type.display();
+		UiText overlineFont = type.bold();
 		UiText pageFont = type.medium();
 		String pageTitle = settingsCard != null ? "Module settings"
 				: search.normalisedQuery().isEmpty() ? CATEGORIES[selected].title : "Search results";
 		int titleX = wx + UiTheme.SP_6;
-		int titleY = Ui.centerTextY(wy, UiTheme.HEADER_H, display);
+		overlineFont.draw(c, "CAPY / CLIENT", titleX, wy + 8,
+				Ui.withAlpha(UiTheme.ACCENT_2, 0xC8));
+		int titleY = wy + 20;
 		int titleMax = Math.max(0, searchX(wx, ww) - titleX - UiTheme.SP_4);
 		int titleW = Math.min(display.width(pageTitle), titleMax);
 		Ui.drawEllipsized(c, display, pageTitle, titleX, titleY, titleMax, UiTheme.TEXT);
@@ -578,17 +538,17 @@ public final class GuiFrame {
 		int pillW = pageFont.width(count) + UiTheme.SP_4;
 		int pillH = 18;
 		int pillX = titleX + titleW + UiTheme.SP_4;
-		int pillY = wy + (UiTheme.HEADER_H - pillH) / 2;
+		int pillY = wy + 20;
 		if (!compactHeader() && pillX + pillW < settingsX(wx, ww) - UiTheme.SP_4) {
 			boolean hot = mouseX >= pillX && mouseX < pillX + pillW
 					&& mouseY >= pillY && mouseY < pillY + pillH;
-			Ui.surface(c, pillX, pillY, pillW, pillH, pillH / 2,
+			Ui.surface(c, pillX, pillY, pillW, pillH, 3,
 					hot ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
 					hot ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
-			Ui.outline(c, pillX, pillY, pillW, pillH, pillH / 2,
+			Ui.outline(c, pillX, pillY, pillW, pillH, 3,
 					hot ? UiTheme.ACCENT : UiTheme.BORDER);
-			Ui.drawCentered(c, pageFont, count, pillX + pillW / 2, pillY + 5,
-					hot ? UiTheme.TEXT : UiTheme.ACCENT);
+			Ui.drawCentered(c, pageFont, count, pillX + pillW / 2,
+					Ui.centerTextY(pillY, pillH, pageFont), hot ? UiTheme.TEXT : UiTheme.ACCENT);
 		}
 
 		int fieldX = searchX(wx, ww);
@@ -695,66 +655,96 @@ public final class GuiFrame {
 		Ui.surface(c, x, y, w, h, UiTheme.RADIUS_LG, UiTheme.PANEL_TOP, UiTheme.PANEL_BOTTOM);
 		Ui.outline(c, x, y, w, h, UiTheme.RADIUS_LG, UiTheme.BORDER);
 		Ui.sheen(c, x, y, w, h, UiTheme.RADIUS_LG, sheenPhase());
+		Ui.surface(c, x + UiTheme.RADIUS_LG, y + 1, w - UiTheme.RADIUS_LG * 2, 1, 0,
+				Ui.withAlpha(UiTheme.ACCENT, 0x73));
+
+		UiText display = type.display();
+		UiText bold = type.bold();
 		UiText regular = type.regular();
-		type.medium().draw(c, "SETTINGS", x + UiTheme.SP_5, y + UiTheme.SP_4, UiTheme.TEXT);
+		display.draw(c, "INTERFACE", x + SETTINGS_PAD, y + 12, UiTheme.TEXT);
+		regular.draw(c, "Changes save instantly", x + SETTINGS_PAD, y + 30, UiTheme.TEXT_3);
+		Ui.drawRightAligned(c, regular, "ESC", x + w - SETTINGS_PAD, y + 30,
+				Ui.withAlpha(UiTheme.TEXT_3, 0xB0));
+		Ui.fadeLine(c, x + SETTINGS_PAD, y + 47, w - SETTINGS_PAD * 2,
+				Ui.withAlpha(UiTheme.BORDER, 0x8C));
 
-		int rowX = x + UiTheme.SP_5;
-		int rowW = w - UiTheme.SP_5 * 2;
-		int toggleX = x + w - UiTheme.SP_5 - UiTheme.TOGGLE_W;
-		for (int i = 0; i < SETTINGS_LABELS.length; i++) {
-			int rowY = y + SETTINGS_TOGGLE_TOP + i * SETTINGS_TOGGLE_PITCH;
-			boolean hovered = mouseX >= rowX && mouseX < rowX + rowW
-					&& mouseY >= rowY && mouseY < rowY + UiTheme.TOGGLE_H + 4;
-			UiToggle toggle = i == 0 ? soundsToggle : i == 1 ? animationsToggle
-					: i == 2 ? blurToggle : i == 3 ? glassDebugToggle : i == 4 ? debugToggle : stealthToggle;
-			boolean value = i == 0 ? config.guiSounds() : i == 1 ? config.reduceAnimations()
-					: i == 2 ? config.blur() : i == 3 ? config.glassDebug()
-					: i == 4 ? config.guiDebug() : config.stealth();
-			toggle.update(value, hovered, delta);
-			toggle.render(c, toggleX, rowY, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
-			regular.draw(c, SETTINGS_LABELS[i], rowX,
-					Ui.centerTextY(rowY, UiTheme.TOGGLE_H, regular),
-					hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+		int rowX = x + SETTINGS_PAD;
+		int rowW = w - SETTINGS_PAD * 2;
+		int toggleX = x + w - SETTINGS_PAD - UiTheme.TOGGLE_W;
+		drawSettingToggle(c, type.medium(), "Sounds", soundsToggle, config.guiSounds(),
+				rowX, y + SETTINGS_SOUND_Y, rowW, toggleX, mouseX, mouseY, delta);
+
+		int volumeY = y + SETTINGS_VOLUME_Y;
+		regular.draw(c, "Volume", rowX, Ui.centerTextY(volumeY, 22, regular), UiTheme.TEXT_2);
+		int trackX = settingsVolumeTrackX(x);
+		int trackY = volumeY + 11;
+		int trackW = settingsVolumeTrackW(x, w);
+		Ui.surface(c, trackX, trackY - 3, trackW, 6, 2, UiTheme.TRACK_TOP, UiTheme.TRACK_BOTTOM);
+		int fill = Math.max(0, Math.min(trackW,
+				Math.round(trackW * config.guiVolume() / 100f)));
+		if (fill > 0) {
+			Ui.surface(c, trackX, trackY - 3, fill, 6, 2, UiTheme.ACCENT, UiTheme.ACCENT_DEEP);
 		}
+		int knobX = trackX + Math.max(0, Math.min(trackW - 4, fill - 2));
+		Ui.surface(c, knobX, trackY - 6, 4, 12, 1, UiTheme.ACCENT_2);
+		Ui.drawRightAligned(c, regular, config.guiVolume() + "%", x + w - SETTINGS_PAD,
+				Ui.centerTextY(volumeY, 22, regular), UiTheme.ACCENT_2);
 
-		int pillW = 96;
-		int pillX = x + w - UiTheme.SP_5 - pillW;
+		drawSettingToggle(c, type.medium(), "Reduce animations", animationsToggle,
+				config.reduceAnimations(), rowX, y + SETTINGS_ANIM_Y, rowW, toggleX,
+				mouseX, mouseY, delta);
+
+		int pillW = 104;
+		int pillX = x + w - SETTINGS_PAD - pillW;
 		drawSettingsStepper(c, regular, "Window size", config.guiSize().label(), rowX,
 				y + SETTINGS_SIZE_Y, pillX, pillW, mouseX, mouseY);
 		drawSettingsStepper(c, regular, "Quality", config.guiQuality().name(), rowX,
 				y + SETTINGS_QUALITY_Y, pillX, pillW, mouseX, mouseY);
-
-		int volumeY = y + SETTINGS_VOLUME_Y;
-		regular.draw(c, "Volume", rowX, Ui.centerTextY(volumeY, 22, regular), UiTheme.TEXT_2);
-		int trackX = rowX + 72;
-		int trackY = volumeY + 11;
-		int trackW = x + w - UiTheme.SP_5 - trackX;
-		Ui.surface(c, trackX, trackY - 4, trackW, 8, 4, UiTheme.TRACK_TOP, UiTheme.TRACK_BOTTOM);
-		int fill = Math.round(trackW * config.guiVolume() / 100f);
-		Ui.surface(c, trackX, trackY - 4, fill, 8, 4, UiTheme.ACCENT, UiTheme.ACCENT_DEEP);
-		Ui.circle(c, trackX + fill, trackY, 6, UiTheme.ACCENT_2);
+		drawSettingToggle(c, type.medium(), "Stealth mode", stealthToggle, config.stealth(),
+				rowX, y + SETTINGS_STEALTH_Y, rowW, toggleX, mouseX, mouseY, delta);
 
 		int hudY = y + SETTINGS_HUD_Y;
 		boolean hudHovered = mouseX >= rowX && mouseX < rowX + rowW
-				&& mouseY >= hudY && mouseY < hudY + 24;
-		Ui.surface(c, rowX, hudY, rowW, 24, UiTheme.RADIUS,
-				hudHovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
-				hudHovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
-		Ui.outline(c, rowX, hudY, rowW, 24, UiTheme.RADIUS,
+				&& mouseY >= hudY && mouseY < hudY + 26;
+		Ui.surface(c, rowX, hudY, rowW, 26, 3,
+				hudHovered ? Ui.withAlpha(UiTheme.ACCENT, 0x2E) : UiTheme.TRACK_TOP,
+				hudHovered ? Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x22) : UiTheme.TRACK_BOTTOM);
+		Ui.outline(c, rowX, hudY, rowW, 26, 3,
 				hudHovered ? UiTheme.ACCENT : UiTheme.BORDER);
-		Ui.drawCentered(c, regular, "Edit HUD", rowX + rowW / 2,
-				Ui.centerTextY(hudY, 24, regular), hudHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+		Ui.drawCentered(c, bold, "Edit HUD", rowX + rowW / 2,
+				Ui.centerTextY(hudY, 26, bold), hudHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
 	}
 
-	/** One label plus a click-to-cycle pill, shared by the settings rows. */
+	private void drawSettingToggle(UiCanvas c, UiText font, String label, UiToggle toggle,
+			boolean value, int rowX, int rowY, int rowW, int toggleX,
+			int mouseX, int mouseY, float delta) {
+		boolean hovered = mouseX >= rowX && mouseX < rowX + rowW
+				&& mouseY >= rowY && mouseY < rowY + UiTheme.TOGGLE_H + 6;
+		toggle.update(value, hovered, delta);
+		toggle.render(c, toggleX, rowY, UiTheme.TOGGLE_W, UiTheme.TOGGLE_H);
+		font.draw(c, label, rowX,
+				Ui.centerTextY(rowY, UiTheme.TOGGLE_H, font),
+				hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+	}
+
+	private static int settingsVolumeTrackX(int x) {
+		return x + SETTINGS_PAD + SETTINGS_VOLUME_LABEL_W;
+	}
+
+	private static int settingsVolumeTrackW(int x, int w) {
+		int trackX = settingsVolumeTrackX(x);
+		return Math.max(24, x + w - SETTINGS_PAD - SETTINGS_VOLUME_PCT_W - 8 - trackX);
+	}
+
+	/** One label plus a click-to-cycle control, using the same blocky radius. */
 	private void drawSettingsStepper(UiCanvas c, UiText font, String label, String value,
 			int labelX, int rowY, int x, int w, int mouseX, int mouseY) {
 		font.draw(c, label, labelX, Ui.centerTextY(rowY, 22, font), UiTheme.TEXT_2);
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= rowY && mouseY < rowY + 22;
-		Ui.surface(c, x, rowY, w, 22, 8,
+		Ui.surface(c, x, rowY, w, 22, 3,
 				hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
 				hovered ? UiTheme.PANEL_TOP : UiTheme.TRACK_BOTTOM);
-		Ui.outline(c, x, rowY, w, 22, 8, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
+		Ui.outline(c, x, rowY, w, 22, 3, hovered ? UiTheme.ACCENT : UiTheme.BORDER);
 		Ui.drawCentered(c, font, value, x + w / 2, Ui.centerTextY(rowY, 22, font),
 				hovered ? UiTheme.TEXT : UiTheme.ACCENT_2);
 	}
@@ -817,7 +807,7 @@ public final class GuiFrame {
 				int bw = regular.width(label) + 10;
 				int bx = sx0 + sw - UiTheme.SP_4 - bw;
 				int by = y + (rowH - 14) / 2;
-				Ui.surface(c, bx, by, bw, 14, 7,
+				Ui.surface(c, bx, by, bw, 14, 3,
 						Ui.lerpColor(Ui.withAlpha(UiTheme.PANEL_ALT, 0xD0), Ui.withAlpha(UiTheme.ACCENT, 0x59), sel),
 						Ui.lerpColor(Ui.withAlpha(UiTheme.PANEL_TOP, 0xD0), Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x33), sel));
 				Ui.drawCentered(c, regular, label, bx + bw / 2, Ui.centerTextY(by, 14, regular),
@@ -852,7 +842,7 @@ public final class GuiFrame {
 		String hint = hintCache;
 		int hintY = Ui.textYFromBottom(py + ph, UiTheme.SP_5, type.regular());
 		int hintX = sx0 + UiTheme.SP_3;
-		Ui.drawEllipsized(c, type.regular(), hint + " / ESC to close", hintX, hintY,
+		Ui.drawEllipsized(c, type.regular(), hint, hintX, hintY,
 				sw - UiTheme.SP_4, UiTheme.TEXT_3);
 		boolean hintHovered = mouseX >= hintX && mouseX < hintX + sw - UiTheme.SP_4
 				&& mouseY >= hintY - 2 && mouseY < hintY + type.regular().lineHeight() + 2;
@@ -879,8 +869,8 @@ public final class GuiFrame {
 		int headerH = SECTION_HEADER_H;
 		UiText bold = type.bold();
 		UiText meta = type.regular();
-		String title = settingsOpen ? "Module settings"
-				: showCategory ? "Search results" : CATEGORIES[selected].title;
+		String title = settingsOpen ? "MODULE SETTINGS"
+				: showCategory ? "SEARCH RESULTS" : CATEGORIES[selected].title.toUpperCase(Locale.ROOT);
 		// The module count is a pill, not loose text: it is metadata about the
 		// page, and a small surface is what makes that read as metadata. It is
 		// measured before the title is drawn, so the title is trimmed against
@@ -895,9 +885,9 @@ public final class GuiFrame {
 		int titleX = cx + UiTheme.RADIUS_LG;
 		int titleRoom = Math.max(0, pillX - titleX - UiTheme.SP_4);
 		Ui.drawEllipsized(c, bold, title, titleX, Ui.centerTextY(top, headerH, bold), titleRoom, UiTheme.TEXT);
-		Ui.surface(c, pillX, pillY, pillW, pillH, pillH / 2,
+		Ui.surface(c, pillX, pillY, pillW, pillH, 3,
 				Ui.withAlpha(UiTheme.PANEL_ALT, 0xB8), Ui.withAlpha(UiTheme.PANEL_TOP, 0x94));
-		Ui.outline(c, pillX, pillY, pillW, pillH, pillH / 2, Ui.withAlpha(UiTheme.BORDER, 0x8C));
+		Ui.outline(c, pillX, pillY, pillW, pillH, 3, Ui.withAlpha(UiTheme.BORDER, 0x8C));
 		Ui.drawCentered(c, meta, countLabel, pillX + pillW / 2,
 				pillY + (pillH - meta.lineHeight()) / 2, UiTheme.TEXT_3);
 		// A delicate line under the section header.
@@ -908,12 +898,7 @@ public final class GuiFrame {
 			return;
 		}
 
-		int finderSpace = finderStatusHeight();
-		int statusTop = top + headerH;
-		if (finderSpace > 0) {
-			renderFinderStatus(c, type, cx, statusTop, cw, finderSpace - UiTheme.SP_4, mouseX, mouseY);
-		}
-		int listTop = statusTop + finderSpace;
+		int listTop = top + headerH;
 		int listH = Math.max(0, bottom - listTop);
 
 		// Content that moves between pages slides a little.
@@ -1010,74 +995,6 @@ public final class GuiFrame {
 		settingsScrollbar.render(c);
 	}
 
-	/**
-	 * The base-finder status strip: one live line per enabled finder, and the
-	 * shared elimination-map switch. It is deliberately in the workspace and
-	 * not in chat; the player opens the page to read a state, not to scroll
-	 * back through messages.
-	 */
-	private void renderFinderStatus(UiCanvas c, UiType type, int x, int y, int w, int h,
-			int mouseX, int mouseY) {
-		List<FinderModule> finders = enabledFinders();
-		if (finders.isEmpty() || w <= 0 || h <= 0) {
-			return;
-		}
-		UiText regular = type.regular();
-		UiText medium = type.medium();
-		boolean mapVisible = FinderModule.eliminationMapVisible();
-		int accent = mapVisible ? UiTheme.ACCENT_2 : UiTheme.ACCENT;
-
-		Ui.roundRect(c, x + 1, y + 2, w, h, UiTheme.RADIUS_LG, 0x33000000);
-		Ui.surface(c, x, y, w, h, UiTheme.RADIUS_LG, UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
-		Ui.surfaceEdge(c, x, y, w, h, UiTheme.RADIUS_LG,
-				Ui.withAlpha(accent, 0xB0), Ui.withAlpha(UiTheme.BORDER, 0x44));
-		Ui.sheen(c, x, y, w, h, UiTheme.RADIUS_LG, sheenPhase());
-
-		int headerY = y + FINDER_STATUS_PAD;
-		int titleX = x + FINDER_STATUS_PAD + 8;
-		Ui.surface(c, x + FINDER_STATUS_PAD, headerY + 3, 2, 10, 1, accent, UiTheme.ACCENT_DEEP);
-		medium.draw(c, "FINDER STATUS", titleX, headerY + Math.max(0, (FINDER_STATUS_HEADER_H - medium.lineHeight()) / 2),
-				UiTheme.TEXT_2);
-
-		String buttonLabel = UiLabels.translate("capy.finder.show_elimination", "show elimination map");
-		int buttonW = Math.min(w / 2, regular.width(buttonLabel) + UiTheme.SP_4 * 2);
-		int buttonX = x + w - FINDER_STATUS_PAD - buttonW;
-		int buttonY = headerY + (FINDER_STATUS_HEADER_H - FINDER_STATUS_BUTTON_H) / 2;
-		boolean hovered = mouseX >= buttonX && mouseX < buttonX + buttonW
-				&& mouseY >= buttonY && mouseY < buttonY + FINDER_STATUS_BUTTON_H;
-		finderStatusButtonX = buttonX;
-		finderStatusButtonY = buttonY;
-		finderStatusButtonW = buttonW;
-		finderStatusButtonH = FINDER_STATUS_BUTTON_H;
-		Ui.surface(c, buttonX, buttonY, buttonW, FINDER_STATUS_BUTTON_H, 6,
-				mapVisible ? Ui.withAlpha(UiTheme.ACCENT, 0x42) : hovered ? UiTheme.PANEL_ALT : UiTheme.TRACK_TOP,
-				mapVisible ? Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x32) : UiTheme.TRACK_BOTTOM);
-		Ui.outline(c, buttonX, buttonY, buttonW, FINDER_STATUS_BUTTON_H, 6,
-				mapVisible || hovered ? UiTheme.ACCENT : UiTheme.BORDER);
-		Ui.drawEllipsized(c, regular, buttonLabel, buttonX + UiTheme.SP_3,
-				Ui.centerTextY(buttonY, FINDER_STATUS_BUTTON_H, regular), buttonW - UiTheme.SP_3 * 2,
-				mapVisible ? UiTheme.ACCENT_2 : hovered ? UiTheme.TEXT : UiTheme.TEXT_2);
-
-		int rowY = headerY + FINDER_STATUS_HEADER_H;
-		int nameX = x + FINDER_STATUS_PAD + 8;
-		int nameW = Math.min(132, Math.max(80, w / 3));
-		int statusX = nameX + nameW + UiTheme.SP_4;
-		for (FinderModule finder : finders) {
-			int lineY = rowY + Math.max(0, (FINDER_STATUS_ROW_H - medium.lineHeight()) / 2);
-			Ui.drawEllipsized(c, medium, finder.displayName(), nameX, lineY, nameW,
-					finder.colorArgb(System.nanoTime() / 1.0e9));
-			int statusY = rowY + Math.max(0, (FINDER_STATUS_ROW_H - regular.lineHeight()) / 2);
-			String cost = String.format(Locale.ROOT, "%.2f ms per frame", finder.drawCostMs());
-			Ui.drawEllipsized(c, regular, cost + "  ·  " + finder.statusLine() + "  ·  " + finder.reliability(),
-					statusX, statusY, Math.max(0, x + w - FINDER_STATUS_PAD - statusX), UiTheme.TEXT_3);
-			rowY += FINDER_STATUS_ROW_H;
-		}
-		if (FinderModule.autoSimplified()) {
-			int warningY = rowY + Math.max(0, (FINDER_STATUS_ROW_H - regular.lineHeight()) / 2);
-			regular.draw(c, "flags simplified (frame cost)", nameX, warningY, UiTheme.ACCENT_2);
-		}
-	}
-
 	private void ensureCardLayout(List<ModuleCard> list) {
 		int columns = cardColumns();
 		boolean sizeChanged = list.size() != layoutTops.length;
@@ -1171,9 +1088,7 @@ public final class GuiFrame {
 	// ----------------------------------------------------------------- input
 
 	/** Handles a click. Returns true when the click was consumed. */
-	public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
-		double mx = event.x();
-		double my = event.y();
+	public boolean mouseClicked(MouseButtonEvent event, double mx, double my) {
 		int button = event.button();
 
 		// A mouse button bound to the GUI closes it.
@@ -1210,7 +1125,11 @@ public final class GuiFrame {
 			if (guiSettingsClicked(mx, my)) {
 				return true;
 			}
+			// Clicking away closes the sheet without also toggling whatever
+			// card happened to sit under the pointer.
 			guiSettingsOpen = false;
+			GuiSounds.close();
+			return true;
 		}
 
 		// Search.
@@ -1278,15 +1197,6 @@ public final class GuiFrame {
 			if (button == 0 && my >= settingsBodyY && my < settingsBodyY + settingsBodyH) {
 				settingsCard.settingsMouseClicked(mx, my);
 			}
-			return true;
-		}
-
-		// Finder status panel action.
-		if (button == 0 && finderStatusVisible() && finderStatusHeight() > 0 && finderStatusButtonW > 0
-				&& mx >= finderStatusButtonX && mx < finderStatusButtonX + finderStatusButtonW
-				&& my >= finderStatusButtonY && my < finderStatusButtonY + finderStatusButtonH) {
-			FinderModule.toggleEliminationMap();
-			GuiSounds.click();
 			return true;
 		}
 
@@ -1370,31 +1280,34 @@ public final class GuiFrame {
 			return false;
 		}
 		ClientConfig config = ClientConfig.get();
-		for (int i = 0; i < SETTINGS_LABELS.length; i++) {
-			int rowY = y + SETTINGS_TOGGLE_TOP + i * SETTINGS_TOGGLE_PITCH;
-			if (my >= rowY && my < rowY + UiTheme.TOGGLE_H + 4) {
-				if (i == 0) {
-					config.setGuiSounds(!config.guiSounds());
-				} else if (i == 1) {
-					config.setReduceAnimations(!config.reduceAnimations());
-				} else if (i == 2) {
-					config.setBlur(!config.blur());
-				} else if (i == 3) {
-					config.setGlassDebug(!config.glassDebug());
-				} else if (i == 4) {
-					config.setGuiDebug(!config.guiDebug());
-				} else {
-					config.setStealth(!config.stealth());
-				}
-				ClientConfig.saveNow();
-				GuiSounds.click();
+		int rowX = x + SETTINGS_PAD;
+		int rowW = w - SETTINGS_PAD * 2;
+		int toggleX = x + w - SETTINGS_PAD - UiTheme.TOGGLE_W;
+		if (rowHit(mx, my, rowX, y + SETTINGS_SOUND_Y, rowW, UiTheme.TOGGLE_H + 6)) {
+			config.setGuiSounds(!config.guiSounds());
+			ClientConfig.saveNow();
+			GuiSounds.toggle(config.guiSounds());
+			return true;
+		}
+		int volumeY = y + SETTINGS_VOLUME_Y;
+		if (my >= volumeY && my < volumeY + 22) {
+			int trackX = settingsVolumeTrackX(x);
+			if (mx >= trackX - 6 && mx < x + w - SETTINGS_PAD) {
+				volumeDragging = true;
+				setGuiVolume(mx);
 				return true;
 			}
 		}
-		int pillW = 96;
-		int pillX = x + w - UiTheme.SP_5 - pillW;
+		if (rowHit(mx, my, rowX, y + SETTINGS_ANIM_Y, rowW, UiTheme.TOGGLE_H + 6)) {
+			config.setReduceAnimations(!config.reduceAnimations());
+			ClientConfig.saveNow();
+			GuiSounds.toggle(config.reduceAnimations());
+			return true;
+		}
+		int pillW = 104;
+		int pillX = x + w - SETTINGS_PAD - pillW;
 		int sizeY = y + SETTINGS_SIZE_Y;
-		if (mx >= pillX && mx < pillX + pillW && my >= sizeY && my < sizeY + 22) {
+		if (rowHit(mx, my, pillX, sizeY, pillW, 22)) {
 			GuiSize[] all = GuiSize.values();
 			config.setGuiSize(all[(config.guiSize().ordinal() + 1) % all.length]);
 			ClientConfig.saveNow();
@@ -1402,24 +1315,21 @@ public final class GuiFrame {
 			return true;
 		}
 		int qualityY = y + SETTINGS_QUALITY_Y;
-		if (mx >= pillX && mx < pillX + pillW && my >= qualityY && my < qualityY + 22) {
+		if (rowHit(mx, my, pillX, qualityY, pillW, 22)) {
 			GuiQuality[] all = GuiQuality.values();
 			config.setGuiQuality(all[(config.guiQuality().ordinal() + 1) % all.length]);
 			ClientConfig.saveNow();
 			GuiSounds.tab();
 			return true;
 		}
-		int volumeY = y + SETTINGS_VOLUME_Y;
-		int trackX = x + UiTheme.SP_5 + 72;
-		int trackW = w - UiTheme.SP_5 * 2 - 72;
-		if (my >= volumeY && my < volumeY + 22 && mx >= trackX - 8 && mx < trackX + trackW + 8) {
-			volumeDragging = true;
-			setGuiVolume(mx);
+		if (rowHit(mx, my, rowX, y + SETTINGS_STEALTH_Y, rowW, UiTheme.TOGGLE_H + 6)) {
+			config.setStealth(!config.stealth());
+			ClientConfig.saveNow();
+			GuiSounds.toggle(config.stealth());
 			return true;
 		}
 		int hudY = y + SETTINGS_HUD_Y;
-		int rowX = x + UiTheme.SP_5;
-		if (mx >= rowX && mx < x + w - UiTheme.SP_5 && my >= hudY && my < hudY + 24) {
+		if (rowHit(mx, my, rowX, hudY, rowW, 26)) {
 			guiSettingsOpen = false;
 			GuiSounds.click();
 			openHudEditor.run();
@@ -1428,15 +1338,26 @@ public final class GuiFrame {
 		return true;
 	}
 
+	private static boolean rowHit(double mx, double my, int x, int y, int w, int h) {
+		return mx >= x && mx < x + w && my >= y && my < y + h;
+	}
+
 	private void setGuiVolume(double mx) {
 		int w = Math.min(SETTINGS_PANEL_W, width - 24);
-		int trackX = settingsPanelX + UiTheme.SP_5 + 72;
-		int trackW = w - UiTheme.SP_5 * 2 - 72;
+		int trackX = settingsVolumeTrackX(settingsPanelX);
+		int trackW = settingsVolumeTrackW(settingsPanelX, w);
 		int value = Math.round((float) ((mx - trackX) / Math.max(1, trackW)) * 100f);
 		ClientConfig.get().setGuiVolume(value);
 	}
 
 	public boolean mouseScrolled(double mx, double my, double amount) {
+		if (guiSettingsOpen) {
+			int w = Math.min(SETTINGS_PANEL_W, width - 24);
+			if (mx >= settingsPanelX && mx < settingsPanelX + w
+					&& my >= settingsPanelY && my < settingsPanelY + SETTINGS_PANEL_H) {
+				return true;
+			}
+		}
 		if (settingsCard != null) {
 			return my >= settingsBodyY && my < settingsBodyY + settingsBodyH
 					&& settingsScrollbar.onScroll(amount);
@@ -1479,7 +1400,13 @@ public final class GuiFrame {
 		// blurred the field and the window stayed open over a frozen world -
 		// which reads as "the GUI will not close".
 		if (event.isEscape()) {
-			// Escape backs out one layer at a time: settings, then the window.
+			// Escape backs out one layer at a time: the settings sheet, then a
+			// module page, then the window.
+			if (guiSettingsOpen) {
+				guiSettingsOpen = false;
+				GuiSounds.close();
+				return true;
+			}
 			if (settingsCard != null) {
 				closeSettingsPage();
 				GuiSounds.close();

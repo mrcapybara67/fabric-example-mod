@@ -16,6 +16,7 @@ import com.capy.client.module.ModuleManager;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.capy.client.module.WatchlistSetting;
+import com.capy.client.module.modules.antivanish.AntiVanishModule;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
 import com.capy.client.module.modules.antiadmin.ProbeState;
 import com.capy.client.module.modules.antiadmin.TabList;
@@ -267,7 +268,9 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 			return;
 		}
 		AntiAdminModule antiAdmin = ModuleManager.get().get(AntiAdminModule.class);
+		AntiVanishModule antiVanish = ModuleManager.get().get(AntiVanishModule.class);
 		boolean withProbe = antiAdmin != null && antiAdmin.isEnabled();
+		boolean withVanish = antiVanish != null && antiVanish.isEnabled();
 		if (forceScan) {
 			scannedWorld = AdminDetector.scan(mc, watchlist);
 			scannedTells = AdminDetector.scanTells(mc, watchlist);
@@ -298,7 +301,8 @@ public class StaffListModule extends Module implements Configurable, HudPanel, T
 					|| findMatch(scannedVanished, name) != null;
 			ProbeState probe = withProbe && antiAdmin != null ? antiAdmin.probeState(name) : ProbeState.UNKNOWN;
 			boolean leaked = probe == ProbeState.HIDDEN;
-			boolean online = StaffListFilter.isOnline(tabVisible, entity != null, tabHidden, leaked);
+			boolean vanishClue = withVanish && antiVanish.hasActiveVanish(name, now);
+			boolean online = StaffListFilter.isOnline(tabVisible, entity != null, tabHidden || vanishClue, leaked);
 
 			// A watched name that is offline still gets a row, dimmed, so the
 			// Staff List shows every account that was typed into the watchlist.

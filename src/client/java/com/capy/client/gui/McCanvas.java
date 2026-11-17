@@ -13,9 +13,19 @@ public final class McCanvas implements UiCanvas {
 	private static final int SRC = UiSprites.SRC_CORNER;
 	private static final int SRC_CENTRE = UiSprites.SRC_CENTER;
 	private static final int TEX = UiSprites.SIZE;
+	private static final int MAX_CLIPS = 32;
 	private GuiGraphics graphics;
 	private int clipDepth;
 	private int draws;
+	/** Logical-to-screen scale used by the ClickGUI size preset. */
+	private float layoutScale = 1f;
+	// Scissor rectangles in screen coordinates. A stack is required because a
+	// card ripple clips inside the list clip; disabling the inner scissor used
+	// to drop the outer one and let the card paint over the section header.
+	private final int[] clipLeft = new int[MAX_CLIPS];
+	private final int[] clipTop = new int[MAX_CLIPS];
+	private final int[] clipRight = new int[MAX_CLIPS];
+	private final int[] clipBottom = new int[MAX_CLIPS];
 
 	/** Reusable canvas; bind a new frame with {@link #bind(GuiGraphics)}. */
 	public McCanvas() {
@@ -33,6 +43,17 @@ public final class McCanvas implements UiCanvas {
 		this.graphics = graphics;
 		this.clipDepth = 0;
 		this.draws = 0;
+		this.layoutScale = 1f;
+		return this;
+	}
+
+	/**
+	 * Sets the uniform scale applied by the caller's pose. Geometry is already
+	 * scaled by the pose; scissor rectangles are raw screen coordinates, so
+	 * they are the one thing this canvas has to transform itself.
+	 */
+	public McCanvas layoutScale(float scale) {
+		layoutScale = scale > 0f ? scale : 1f;
 		return this;
 	}
 
@@ -197,19 +218,38 @@ public final class McCanvas implements UiCanvas {
 
 	@Override
 	public void pushClip(int x, int y, int width, int height) {
-		if (width <= 0 || height <= 0) {
-			graphics.enableScissor(x, y, x, y);
-		} else {
-			graphics.enableScissor(x, y, x + width, y + height);
+		int x1 = Math.round(x * layoutScale);
+		int y1 = Math.round(y * layoutScale);
+		int x2 = width <= 0 ? x1 : Math.round((x + width) * layoutScale);
+		int y2 = height <= 0 ? y1 : Math.round((y + height) * layoutScale);
+		if (clipDepth > 0) {
+			x1 = Math.max(x1, clipLeft[clipDepth - 1]);
+			y1 = Math.max(y1, clipTop[clipDepth - 1]);
+			x2 = Math.min(x2, clipRight[clipDepth - 1]);
+			y2 = Math.min(y2, clipBottom[clipDepth - 1]);
 		}
+		if (clipDepth >= MAX_CLIPS) {
+			return;
+		}
+		clipLeft[clipDepth] = x1;
+		clipTop[clipDepth] = y1;
+		clipRight[clipDepth] = Math.max(x1, x2);
+		clipBottom[clipDepth] = Math.max(y1, y2);
 		clipDepth++;
+		graphics.enableScissor(x1, y1, clipRight[clipDepth - 1], clipBottom[clipDepth - 1]);
 	}
 
 	@Override
 	public void popClip() {
-		if (clipDepth > 0) {
+		if (clipDepth <= 0) {
+			return;
+		}
+		clipDepth--;
+		if (clipDepth == 0) {
 			graphics.disableScissor();
-			clipDepth--;
+		} else {
+			graphics.enableScissor(clipLeft[clipDepth - 1], clipTop[clipDepth - 1],
+					clipRight[clipDepth - 1], clipBottom[clipDepth - 1]);
 		}
 	}
 }

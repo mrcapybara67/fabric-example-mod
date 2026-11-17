@@ -10,6 +10,8 @@
 		"KeyMappingCategoryMixin",
 		"KeyBindsListMixin",
 		"ClientPacketListenerMixin",
+		"MultiPlayerGameModeMixin",
+		"AbstractContainerScreenMixin",
 		"ClientDisconnectMixin",
 		"ClientCommonPacketListenerAccessor",
 		"ItemInHandRendererMixin",

@@ -1,5 +1,6 @@
 package com.capy.client.mixin;
 
+import com.capy.client.antivanish.VanishPackets;
 import com.capy.client.module.modules.antiadmin.PacketSignals;
 import com.capy.client.module.modules.esp.FinderScanner;
 import com.capy.client.module.modules.esp.MotionFeed;
@@ -12,8 +13,10 @@ import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundCommandSuggestionsPacket;
+import net.minecraft.network.protocol.game.ClientboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket;
+import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelEventPacket;
 import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
@@ -28,6 +31,7 @@ import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerTeamPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
@@ -61,21 +65,25 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handlePlayerInfoUpdate", at = @At("HEAD"))
 	private void capy$onPlayerInfoUpdate(ClientboundPlayerInfoUpdatePacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin player info update", () -> PacketSignals.onPlayerInfoUpdate(packet));
+		Guard.run("anti-vanish player info update", () -> VanishPackets.onPlayerInfoUpdate(packet));
 	}
 
 	@Inject(method = "handlePlayerInfoRemove", at = @At("HEAD"))
 	private void capy$onPlayerInfoRemove(ClientboundPlayerInfoRemovePacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin player info remove", () -> PacketSignals.onPlayerInfoRemove(packet));
+		Guard.run("anti-vanish player info remove", () -> VanishPackets.onPlayerInfoRemove(packet));
 	}
 
 	@Inject(method = "handleCommandSuggestions", at = @At("HEAD"))
 	private void capy$onCommandSuggestions(ClientboundCommandSuggestionsPacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin suggestions", () -> PacketSignals.onSuggestions(packet));
+		Guard.run("anti-vanish suggestions", () -> VanishPackets.onCommandSuggestions(packet));
 	}
 
 	@Inject(method = "handleParticleEvent", at = @At("HEAD"))
 	private void capy$onParticle(ClientboundLevelParticlesPacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin particles", () -> PacketSignals.onParticle(packet));
+		Guard.run("anti-vanish particles", () -> VanishPackets.onParticle(packet));
 	}
 
 	@Inject(method = "handleSoundEvent", at = @At("HEAD"))
@@ -84,11 +92,13 @@ public class ClientPacketListenerMixin {
 		Guard.run("motion sound", () -> MotionFeed.onSound(packet.getX(), packet.getY(), packet.getZ(),
 				packet.getSource()));
 		Guard.run("sound bypass sound", () -> SoundBypassPackets.onSound(packet));
+		Guard.run("anti-vanish sound", () -> VanishPackets.onSound(packet));
 	}
 
 	@Inject(method = "handleSoundEntityEvent", at = @At("HEAD"))
 	private void capy$onSoundEntity(ClientboundSoundEntityPacket packet, CallbackInfo ci) {
 		Guard.run("sound bypass entity sound", () -> SoundBypassPackets.onSoundEntity(Minecraft.getInstance(), packet));
+		Guard.run("anti-vanish entity sound", () -> VanishPackets.onSoundEntity(packet));
 	}
 
 	@Inject(method = "handleAddEntity", at = @At("HEAD"))
@@ -146,6 +156,7 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleBlockUpdate", at = @At("HEAD"))
 	private void capy$onBlockUpdate(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin block update", () -> PacketSignals.onBlockUpdate(packet));
+		Guard.run("anti-vanish block update", () -> VanishPackets.onBlockUpdate(packet.getPos(), packet.getBlockState()));
 		Guard.run("finder block update", () -> FinderScanner.get().onBlockUpdate(packet.getPos()));
 		Guard.run("motion block update", () -> MotionFeed.onBlockUpdate(packet.getPos(), packet.getBlockState()));
 	}
@@ -195,6 +206,7 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleSystemChat", at = @At("HEAD"))
 	private void capy$onSystemChat(ClientboundSystemChatPacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin system chat", () -> PacketSignals.onSystemChat(packet));
+		Guard.run("anti-vanish system chat", () -> VanishPackets.onSystemChat(packet));
 		Guard.run("movement kick chat", () -> {
 			if (packet != null) {
 				com.capy.client.module.modules.movement.MovementKickGuard.onSystemChat(packet.content().getString());
@@ -202,9 +214,15 @@ public class ClientPacketListenerMixin {
 		});
 	}
 
+	@Inject(method = "handleSetEntityData", at = @At("TAIL"))
+	private void capy$onSetEntityData(ClientboundSetEntityDataPacket packet, CallbackInfo ci) {
+		Guard.run("anti-vanish entity data", VanishPackets::onEntityData);
+	}
+
 	@Inject(method = "handleOpenScreen", at = @At("HEAD"))
 	private void capy$onOpenScreen(ClientboundOpenScreenPacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin open screen", () -> PacketSignals.onOpenScreen(packet));
+		Guard.run("anti-vanish container open", () -> VanishPackets.onContainer(true));
 	}
 
 	@Inject(method = "handleOpenSignEditor", at = @At("HEAD"))
@@ -215,6 +233,16 @@ public class ClientPacketListenerMixin {
 	@Inject(method = "handleOpenBook", at = @At("HEAD"))
 	private void capy$onOpenBook(ClientboundOpenBookPacket packet, CallbackInfo ci) {
 		Guard.run("anti-admin open book", () -> PacketSignals.onOpenBook(packet));
+	}
+
+	@Inject(method = "handleContainerClose", at = @At("HEAD"))
+	private void capy$onContainerClose(ClientboundContainerClosePacket packet, CallbackInfo ci) {
+		Guard.run("anti-vanish container close", () -> VanishPackets.onContainer(false));
+	}
+
+	@Inject(method = "handleExplosion", at = @At("HEAD"))
+	private void capy$onExplosion(ClientboundExplodePacket packet, CallbackInfo ci) {
+		Guard.run("anti-vanish explosion", () -> VanishPackets.onExplosion(packet));
 	}
 
 	@Inject(method = "handleContainerSetSlot", at = @At("HEAD"))

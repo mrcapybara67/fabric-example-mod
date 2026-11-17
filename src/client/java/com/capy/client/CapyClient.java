@@ -33,6 +33,7 @@ import com.capy.client.module.modules.SmoothCameraModule;
 import com.capy.client.module.modules.StaffListModule;
 import com.capy.client.module.modules.SwingSpeedModule;
 import com.capy.client.module.modules.WeatherNotifierModule;
+import com.capy.client.module.modules.antivanish.AntiVanishModule;
 import com.capy.client.module.modules.esp.ActivityInspectorModule;
 import com.capy.client.module.modules.esp.AmethystFinderModule;
 import com.capy.client.module.modules.esp.ArtificialLightModule;
@@ -92,6 +93,11 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(new BoatNoclipModule());
 		AntiAdminModule antiAdmin = new AntiAdminModule();
 		modules.register(antiAdmin);
+		// Anti Vanish is a separate passive detector: it reuses the watchlist
+		// type and the Anti Admin category, but not Anti Admin's detectors or
+		// packet queue.
+		AntiVanishModule antiVanish = new AntiVanishModule();
+		modules.register(antiVanish);
 		// The notifier sits beside Anti Admin: both modules answer a question
 		// about the server rather than about the world, and neither owns a
 		// watchlist.
@@ -301,6 +307,12 @@ public class CapyClient implements ClientModInitializer {
 				(graphics, deltaTracker) -> Guard.run("anti-admin alerts",
 						() -> antiAdmin.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight())));
 
+		// Anti Vanish's alert is also a HUD layer. It uses only vanilla fills
+		// and the game's font, so no custom UI asset is required to draw it.
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anti_vanish_alert"),
+				(graphics, deltaTracker) -> Guard.run("anti-vanish alert",
+						() -> antiVanish.onHudRender(graphics, graphics.guiWidth(), graphics.guiHeight())));
+
 		// The anticheat banner sits under the alerts: it is a note about the
 		// server, never a warning about a player.
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("capy", "anticheat_notifier"),
@@ -328,6 +340,7 @@ public class CapyClient implements ClientModInitializer {
 			Guard.run("finder world reset", CapyClient::resetFinders);
 			Guard.run("chunk reload world reset", chunkReload::restoreAndReset);
 			Guard.run("anti-admin reset", antiAdmin::reset);
+			Guard.run("anti-vanish reset", antiVanish::reset);
 			Guard.run("staff-list reset", () -> {
 				if (staffList != null) {
 					staffList.resetSession();
@@ -341,6 +354,7 @@ public class CapyClient implements ClientModInitializer {
 				resetFinders();
 				com.capy.client.module.modules.movement.MovementKickGuard.resetSession();
 			});
+			Guard.run("anti-vanish disconnect", antiVanish::reset);
 			Guard.run("anti-admin disconnect", () -> {
 				antiAdmin.reset();
 				if (staffList != null) {

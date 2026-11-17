@@ -335,6 +335,7 @@ public class ModuleCard {
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
 		hover.to(hovered ? 1f : 0f, delta);
 		on.to(module.isEnabled() ? 1f : 0f, delta);
+		press.to(pressed ? 1f : 0f, delta);
 
 		// Hover lifts by one pixel, a press shrinks by two percent, and the
 		// opening stagger raises each card into place. The hit test uses the
@@ -393,6 +394,8 @@ public class ModuleCard {
 			Ui.surface(c, x, y, w, h, r,
 					Ui.withAlpha(UiTheme.ACCENT, Math.round(22 * onv)),
 					Ui.withAlpha(UiTheme.ACCENT_DEEP, Math.round(7 * onv)));
+			c.fill(x + 1, y + 9, x + 3, y + h - 9,
+					Ui.withAlpha(UiTheme.ACCENT, Math.round(0xD8 * onv)));
 		}
 		// A hairline, not a heavy frame.
 		Ui.surfaceEdge(c, x, y, w, h, r,
@@ -403,6 +406,7 @@ public class ModuleCard {
 		// The name owns the card. Descriptions and the old settings glyph are
 		// deliberately gone: the full module name is the one thing that has to
 		// be readable at a glance, and right-click is the settings affordance.
+		UiText bold = type.bold();
 		UiText medium = type.medium();
 		UiText regular = type.regular();
 		int textX = x + UiTheme.SP_5;
@@ -412,12 +416,13 @@ public class ModuleCard {
 		String info = module.info();
 		int textW = Math.max(0, textRight - textX);
 		String shownTitle = info == null || info.isEmpty() ? title : title + "  " + info;
-		if (medium.width(shownTitle) > textW) {
+		if (bold.width(shownTitle) > textW) {
 			// The name outranks the live count: never lose the last word of the
 			// module name just to show how many flags it has.
 			shownTitle = title;
 		}
-		UiText titleFont = medium.width(shownTitle) <= textW ? medium : regular;
+		UiText titleFont = bold.width(shownTitle) <= textW ? bold
+				: medium.width(shownTitle) <= textW ? medium : regular;
 		titleFont.draw(c, shownTitle, textX, Ui.centerTextY(y, UiTheme.CARD_H, titleFont), nameColor);
 
 		// The switch.

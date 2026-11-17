@@ -112,7 +112,7 @@ public final class ClientConfig {
 		this.guiQuality = value == null ? GuiQuality.BALANCED : value;
 	}
 
-	/** How wide the ClickGUI window opens. */
+	/** How large the whole ClickGUI is drawn, type included. */
 	public GuiSize guiSize() {
 		return guiSize;
 	}

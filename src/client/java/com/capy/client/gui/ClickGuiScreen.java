@@ -78,6 +78,8 @@ public class ClickGuiScreen extends Screen {
 
 	/** When the previous frame was drawn, in {@link System#nanoTime()} units. */
 	private long lastFrameAt;
+	/** The size preset the frame viewport was last laid out for. */
+	private float appliedScale = 1f;
 
 	/** One tick of animation time, in nanoseconds (twenty ticks a second). */
 	private static final float NANOS_PER_TICK = 50_000_000f;
@@ -93,7 +95,7 @@ public class ClickGuiScreen extends Screen {
 	@Override
 	protected void init() {
 		frame.rebuild();
-		frame.resize(this.width, this.height);
+		syncViewport();
 		// Deliberately not resetting the transition here: a resize re-enters the
 		// layout, and it must not restart the intro or cancel an outro that is
 		// already playing - a cancelled outro is a screen that stays open while
@@ -110,7 +112,30 @@ public class ClickGuiScreen extends Screen {
 	@Override
 	public void resize(int width, int height) {
 		super.resize(width, height);
-		frame.resize(width, height);
+		syncViewport();
+	}
+
+	/** The configured uniform scale, applied to geometry and type alike. */
+	private float currentScale() {
+		return ClientConfig.get().guiSize().scale();
+	}
+
+	/**
+	 * Lays the frame out in the virtual viewport that the pose scale turns into
+	 * the physical screen. Input is divided by the same scale, so a hit target
+	 * and its click always agree.
+	 */
+	private void syncViewport() {
+		float scale = currentScale();
+		appliedScale = scale;
+		frame.resize(Math.max(1, Math.round(this.width / scale)),
+				Math.max(1, Math.round(this.height / scale)));
+	}
+
+	private void syncViewportIfNeeded() {
+		if (Math.abs(currentScale() - appliedScale) > 0.0001f) {
+			syncViewport();
+		}
 	}
 
 	/** 0 closed .. 1 open, from wall time, so the timing is frame rate free. */
@@ -152,9 +177,19 @@ public class ClickGuiScreen extends Screen {
 		// run at a different speed on every refresh rate. The wall clock is the
 		// only value that makes the easing frame rate independent, which is what
 		// {@link Anim} and {@link Motion} already assume.
+		syncViewportIfNeeded();
+		float scale = appliedScale;
 		GuiPerf.begin();
-		canvas.bind(g);
-		frame.render(canvas, UI_TYPE, mouseX, mouseY, frameDeltaTicks(), progress);
+		canvas.bind(g).layoutScale(scale);
+		var pose = g.pose();
+		pose.pushMatrix();
+		pose.scale(scale, scale);
+		try {
+			frame.render(canvas, UI_TYPE, Math.round(mouseX / scale), Math.round(mouseY / scale),
+					frameDeltaTicks(), progress);
+		} finally {
+			pose.popMatrix();
+		}
 		GuiPerf.end(canvas.drawCalls());
 		if (ClientConfig.get().guiDebug()) {
 			String line = GuiPerf.line();
@@ -177,7 +212,8 @@ public class ClickGuiScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
-		boolean handled = frame.mouseClicked(event, doubled);
+		float scale = currentScale();
+		boolean handled = frame.mouseClicked(event, event.x() / scale, event.y() / scale);
 		if (frame.closeRequested()) {
 			onClose();
 		}
@@ -186,17 +222,20 @@ public class ClickGuiScreen extends Screen {
 
 	@Override
 	public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-		return frame.mouseDragged(event.x(), event.y());
+		float scale = currentScale();
+		return frame.mouseDragged(event.x() / scale, event.y() / scale);
 	}
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
-		return frame.mouseReleased(event.x(), event.y());
+		float scale = currentScale();
+		return frame.mouseReleased(event.x() / scale, event.y() / scale);
 	}
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double xAmount, double yAmount) {
-		return frame.mouseScrolled(mouseX, mouseY, yAmount);
+		float scale = currentScale();
+		return frame.mouseScrolled(mouseX / scale, mouseY / scale, yAmount);
 	}
 
 	@Override
