@@ -111,11 +111,6 @@ public final class MotionScannerModule extends FinderModule {
 	}
 
 	@Override
-	public String statusLine() {
-		return "activity chunks " + flags.size() + ", very busy " + veryBusy.size();
-	}
-
-	@Override
 	protected void onToggle(boolean state) {
 		super.onToggle(state);
 		if (state) {

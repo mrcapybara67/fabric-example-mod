@@ -98,12 +98,6 @@ public final class SpawnerBeamModule extends FinderModule {
 	}
 
 	@Override
-	public String statusLine() {
-		return "scanned " + FinderScanner.get().scannedCount(this)
-				+ ", spawners " + renderSpawners.size();
-	}
-
-	@Override
 	protected void onChunkUnloaded(long key) {
 		spawnersByChunk.remove(key);
 		rebuildRender();

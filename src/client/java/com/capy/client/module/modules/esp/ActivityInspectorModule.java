@@ -132,11 +132,6 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 	}
 
 	@Override
-	public String statusLine() {
-		return "players " + rows.size() + ", low activity " + lowChunks.size();
-	}
-
-	@Override
 	protected void onToggle(boolean state) {
 		super.onToggle(state);
 		if (state) {

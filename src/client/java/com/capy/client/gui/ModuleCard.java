@@ -413,17 +413,10 @@ public class ModuleCard {
 		int textRight = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W - UiTheme.SP_3;
 		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.8f));
 		nameColor = Ui.fadeAlpha(nameColor, revealAlpha);
-		String info = module.info();
 		int textW = Math.max(0, textRight - textX);
-		String shownTitle = info == null || info.isEmpty() ? title : title + "  " + info;
-		if (bold.width(shownTitle) > textW) {
-			// The name outranks the live count: never lose the last word of the
-			// module name just to show how many flags it has.
-			shownTitle = title;
-		}
-		UiText titleFont = bold.width(shownTitle) <= textW ? bold
-				: medium.width(shownTitle) <= textW ? medium : regular;
-		titleFont.draw(c, shownTitle, textX, Ui.centerTextY(y, UiTheme.CARD_H, titleFont), nameColor);
+		UiText titleFont = bold.width(title) <= textW ? bold
+				: medium.width(title) <= textW ? medium : regular;
+		titleFont.draw(c, title, textX, Ui.centerTextY(y, UiTheme.CARD_H, titleFont), nameColor);
 
 		// The switch.
 		int tx = x + w - UiTheme.SP_4 - UiTheme.TOGGLE_W;

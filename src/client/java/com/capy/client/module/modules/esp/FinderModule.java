@@ -104,31 +104,6 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 		return flags.get(key);
 	}
 
-	public int flagCount() {
-		return flags.size();
-	}
-
-	@Override
-	public String info() {
-		return flags.isEmpty() ? "" : Integer.toString(flags.size());
-	}
-
-	/** Short live status for a finder card and the ClickGUI status panel. */
-	public String statusLine() {
-		int scanned = FinderScanner.get().scannedCount(this);
-		int queued = FinderScanner.get().queueSize();
-		String prefix = "scanned " + scanned + ", queue " + queued;
-		if (!flags.isEmpty()) {
-			return prefix + ", " + flags.size() + (flags.size() == 1 ? " flag" : " flags");
-		}
-		return prefix + ", no flags - " + statusHint();
-	}
-
-	/** What the finder is waiting for, shown only while it has no flags. */
-	protected String statusHint() {
-		return "waiting for loaded chunks";
-	}
-
 	public String displayName() {
 		return CapyText.get(translationKey(), id());
 	}

@@ -93,11 +93,4 @@ public final class ChunkReloadModule extends Module implements Tickable {
 		}
 	}
 
-	@Override
-	public String info() {
-		if (savedDistance >= 0) {
-			return "2";
-		}
-		return "";
-	}
 }

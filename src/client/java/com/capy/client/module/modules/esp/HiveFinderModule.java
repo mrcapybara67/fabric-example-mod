@@ -171,12 +171,6 @@ public final class HiveFinderModule extends FinderModule {
 	}
 
 	@Override
-	protected String statusHint() {
-		return retry.isEmpty() ? "no full hives yet"
-				: "waiting for " + retry.size() + (retry.size() == 1 ? " chunk" : " chunks") + " to settle";
-	}
-
-	@Override
 	protected void onChunkUnloaded(long key) {
 		retry.remove(key);
 		hive.setHit(key, false);

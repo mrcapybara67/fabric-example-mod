@@ -63,19 +63,6 @@ public abstract class ShaftScanModule extends FinderModule {
 		return sourceShafts.values();
 	}
 
-	protected final int shaftCount() {
-		int count = 0;
-		for (List<ShaftFinder.Shaft> shafts : sourceShafts.values()) {
-			count += shafts.size();
-		}
-		return count;
-	}
-
-	@Override
-	public final String statusLine() {
-		return "scanned " + FinderScanner.get().scannedCount(this) + ", shafts " + shaftCount();
-	}
-
 	@Override
 	public void onTick(Minecraft mc) {
 		if (!beginTick(mc)) {

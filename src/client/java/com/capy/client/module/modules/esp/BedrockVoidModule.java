@@ -103,12 +103,6 @@ public final class BedrockVoidModule extends FinderModule {
 		}
 	}
 
-	@Override
-	public String statusLine() {
-		return "scanned " + FinderScanner.get().scannedCount(this)
-				+ ", holes " + holeCount;
-	}
-
 	private void rebuildRender() {
 		List<AABB> all = new ArrayList<>();
 		for (List<AABB> holes : holesByChunk.values()) {

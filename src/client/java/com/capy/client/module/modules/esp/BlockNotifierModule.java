@@ -45,7 +45,6 @@ public final class BlockNotifierModule extends FinderModule {
 	private long scanKey = Long.MIN_VALUE;
 	private int scanSection;
 	private int filterSignature = Integer.MIN_VALUE;
-	private int foundCount;
 
 	public BlockNotifierModule() {
 		super("block_notifier", 0xFFFFC857);
@@ -158,12 +157,9 @@ public final class BlockNotifierModule extends FinderModule {
 
 	private void rebuildRender() {
 		renderBoxes.clear();
-		int count = 0;
 		for (List<AABB> boxes : boxesByChunk.values()) {
 			renderBoxes.addAll(boxes);
-			count += boxes.size();
 		}
-		foundCount = count;
 	}
 
 	private void clearScan() {
@@ -196,11 +192,6 @@ public final class BlockNotifierModule extends FinderModule {
 	}
 
 	@Override
-	public String statusLine() {
-		return "scanned " + FinderScanner.get().scannedCount(this) + ", found " + foundCount;
-	}
-
-	@Override
 	protected void onChunkUnloaded(long key) {
 		boxesByChunk.remove(key);
 		// If the scanner was part-way through this chunk, its section index and
@@ -220,7 +211,6 @@ public final class BlockNotifierModule extends FinderModule {
 		scratch.clear();
 		filter.clear();
 		filterSignature = Integer.MIN_VALUE;
-		foundCount = 0;
 		clearScan();
 	}
 

@@ -20,7 +20,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.TreeSet;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -223,44 +222,8 @@ public final class SoundBypassModule extends FinderModule {
 	}
 
 	@Override
-	public String statusLine() {
-		ChannelStats stats = feed.stats();
-		List<ChannelStats.Channel> observed = new ArrayList<>();
-		for (ChannelStats.Channel channel : ChannelStats.Channel.values()) {
-			if (stats.total(channel) > 0) {
-				observed.add(channel);
-			}
-		}
-		boolean allCulled = !observed.isEmpty();
-		for (ChannelStats.Channel channel : observed) {
-			if (!stats.silentDeep(channel)) {
-				allCulled = false;
-				break;
-			}
-		}
-		if (allCulled) {
-			return "this server sends no underground activity data";
-		}
-		StringBuilder line = new StringBuilder(stats.line());
-		for (ChannelStats.Channel channel : ChannelStats.Channel.values()) {
-			if (stats.silentDeep(channel)) {
-				line.append(" | ").append(channel.name().toLowerCase(Locale.ROOT))
-						.append(" culled underground?");
-			}
-		}
-		line.append(" | deep: ").append(savedDeep.isEmpty() ? "none saved"
-				: String.join(", ", new TreeSet<>(savedDeep)));
-		return line.toString();
-	}
-
-	@Override
 	public String reliability() {
 		return "reads sent packets only";
-	}
-
-	@Override
-	public String info() {
-		return Integer.toString(shown);
 	}
 
 	@Override

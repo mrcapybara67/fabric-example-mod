@@ -67,7 +67,6 @@ public final class FinderScanner {
 	private final List<Consumer> consumers = new CopyOnWriteArrayList<>();
 	private final Set<Consumer> unfinished = new HashSet<>();
 	private final Map<Long, Long> recentUpdates = new HashMap<>();
-	private final Map<Consumer, Integer> scanned = new HashMap<>();
 	private boolean installed;
 	private boolean active;
 	private long activeKey;
@@ -103,7 +102,6 @@ public final class FinderScanner {
 			return;
 		}
 		consumers.add(consumer);
-		scanned.putIfAbsent(consumer, 0);
 		queueAllLoaded();
 	}
 
@@ -112,12 +110,10 @@ public final class FinderScanner {
 			return;
 		}
 		unfinished.remove(consumer);
-		scanned.remove(consumer);
 		if (consumers.isEmpty()) {
 			queue.clear();
 			recentUpdates.clear();
 			unfinished.clear();
-			scanned.clear();
 			active = false;
 		} else if (active && unfinished.isEmpty()) {
 			active = false;
@@ -212,7 +208,6 @@ public final class FinderScanner {
 		queue.clear();
 		recentUpdates.clear();
 		unfinished.clear();
-		scanned.clear();
 		active = false;
 		ticks = 0L;
 		sinceSafety = 0;
@@ -292,7 +287,6 @@ public final class FinderScanner {
 				}
 				if (done) {
 					unfinished.remove(consumer);
-					scanned.merge(consumer, 1, Integer::sum);
 				} else {
 					// A consumer only returns false when it used its slice. Keep the
 					// same chunk active and pick it up on the next client tick.
@@ -310,14 +304,6 @@ public final class FinderScanner {
 
 	int pendingCount() {
 		return queue.size();
-	}
-
-	public int queueSize() {
-		return queue.size();
-	}
-
-	public int scannedCount(Consumer consumer) {
-		return scanned.getOrDefault(consumer, 0);
 	}
 
 	private static long budgetNanos() {

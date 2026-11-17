@@ -146,12 +146,6 @@ public final class ArtificialLightModule extends FinderModule {
 	}
 
 	@Override
-	public String statusLine() {
-		return "scanned " + FinderScanner.get().scannedCount(this)
-				+ ", lit cells " + litCellCount + ", boxes " + published.boxes().size();
-	}
-
-	@Override
 	public List<AABB> boxes() {
 		return renderBoxes;
 	}

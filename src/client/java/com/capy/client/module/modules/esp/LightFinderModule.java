@@ -157,12 +157,6 @@ public final class LightFinderModule extends FinderModule {
 		}
 	}
 
-	@Override
-	public String statusLine() {
-		return "scanned " + FinderScanner.get().scannedCount(this)
-				+ ", lit sections " + sectionCount;
-	}
-
 	private void rebuildRender() {
 		List<AABB> all = new ArrayList<>();
 		int sections = 0;

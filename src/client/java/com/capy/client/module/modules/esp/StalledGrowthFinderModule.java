@@ -477,21 +477,6 @@ public final class StalledGrowthFinderModule extends FinderModule {
 	}
 
 	@Override
-	public String statusLine() {
-		int scanned = FinderScanner.get().scannedCount(this);
-		int stalled = engine == null ? 0 : engine.stalledChunks();
-		int found = flags.size();
-		String prefix = "scanned " + scanned + ", stalled " + stalled + ", flags " + found;
-		if (found > 0) {
-			return prefix;
-		}
-		if (scanned == 0) {
-			return prefix + " - waiting for chunks";
-		}
-		return prefix + " - " + (stalled == 0 ? "no plants found" : "no enclosed area");
-	}
-
-	@Override
 	protected void onChunkUnloaded(long key) {
 		if (engine != null) {
 			engine.forget(key);

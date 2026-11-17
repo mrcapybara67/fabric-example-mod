@@ -216,11 +216,6 @@ public final class DeepslateFinderModule extends FinderModule {
 	}
 
 	@Override
-	protected String statusHint() {
-		return seed == null ? "waiting for a world seed" : "no seeded deepslate cluster";
-	}
-
-	@Override
 	protected void onChunkUnloaded(long key) {
 		if (scanning && scanKey == key) {
 			clearScan();
