@@ -66,6 +66,20 @@ public final class McText implements UiText {
 		if (font == null) {
 			return;
 		}
-		mc.graphics().drawString(font, text, x, y, argb, false);
+		// Snap the origin in device space, then scale the glyphs around that
+		// origin. The old global pose scale put text on fractional pixels and
+		// made every label soft at the small and large presets.
+		float scale = mc.layoutScale();
+		int dx = McCanvas.devicePixel(x, scale);
+		int dy = McCanvas.devicePixel(y, scale);
+		var pose = mc.graphics().pose();
+		pose.pushMatrix();
+		pose.translate(dx, dy);
+		pose.scale(scale, scale);
+		try {
+			mc.graphics().drawString(font, text, 0, 0, argb, false);
+		} finally {
+			pose.popMatrix();
+		}
 	}
 }

@@ -4,8 +4,9 @@ import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
-import com.capy.client.finder.core.FlagStyles;
-import com.capy.client.finder.core.MotionScores;
+import com.capy.client.finder.core.FinderBeams;
+import com.capy.client.finder.core.FinderRules;
+import com.capy.client.finder.core.FlagLook;
 import com.capy.client.gui.McCanvas;
 import com.capy.client.gui.McType;
 import com.capy.client.gui.Ui;
@@ -13,49 +14,43 @@ import com.capy.client.gui.UiCanvas;
 import com.capy.client.gui.UiText;
 import com.capy.client.gui.UiTheme;
 import com.capy.client.gui.UiType;
+import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.ColorSetting;
-import com.capy.client.module.SliderSetting;
+import com.capy.client.module.IntSetting;
+import com.capy.client.module.modules.antiadmin.TabList;
 import com.capy.client.module.modules.hud.HudElementModule;
 import com.capy.client.module.modules.hud.HudPanel;
 import com.google.gson.JsonObject;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
 
 /**
  * Activity Inspector: a compact list of the other players in view and what
- * they appear to be doing, plus markers on chunks with very frequent below-Y-0
- * block activity.
+ * they appear to be doing, plus markers on chunks with underground activity.
  *
- * <p>The rules are deliberately inferential, because the client is never told
- * what another player is doing:
- * <ul>
- *   <li><b>mining</b> - a swing animation while holding a pickaxe, axe, shovel
- *       or hoe;</li>
- *   <li><b>building</b> - a swing animation while holding a block item;</li>
- *   <li><b>moving</b> - a smoothed horizontal speed of at least 0.4 b/s, or a
- *       walk animation that is advancing;</li>
- *   <li><b>idle</b> - none of the above.</li>
- * </ul>
- * The held item is always shown, and the speed is the position change over the
- * last refresh, so the row says why the label was chosen. A row is considered
- * active for colouring when it is mining, building or moving. The panel is
- * hidden while nobody else is visible.</p>
+ * <p>Every row and every marker answers a setting: Players can hide the whole
+ * list, Ignore NPCs drops accounts that are not in the tab list, Remember keeps
+ * a last-seen position for a while, Boxes and Tracers decide how that position
+ * is marked, and the underground half uses Below Y, Min Hits, Window, Own
+ * Radius and Render Y instead of one fixed depth.</p>
  */
 public final class ActivityInspectorModule extends FinderModule implements HudPanel {
 	private static final UiType TYPE = new McType();
@@ -73,15 +68,75 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 	private static final long ROW_REFRESH_MS = 100L;
 	private static final long LOW_REFRESH_MS = 1000L;
 
-	private final ColorSetting highActivityColor = setting(new ColorSetting("high_activity_color", 0xFFFF6B6B));
-	private final SliderSetting anchor = setting(new SliderSetting("anchor", HudElementModule.ANCHOR_TOP_LEFT,
-			HudElementModule.ANCHOR_TOP_LEFT, HudElementModule.ANCHOR_BOTTOM_RIGHT));
-	private final SliderSetting offsetX = setting(new SliderSetting("offset_x", 0, -MAX_NUDGE, MAX_NUDGE));
-	private final SliderSetting offsetY = setting(new SliderSetting("offset_y", 0, -MAX_NUDGE, MAX_NUDGE));
+	private final BooleanSetting players = describe(setting(new BooleanSetting("players", true)),
+			"Show other players in the list and their boxes.");
+	private final BooleanSetting ignoreNpcs = describe(setting(new BooleanSetting("ignore_npcs", true)),
+			"Skip accounts that are not in the tab list.");
+	private final IntSetting remember = describe(setting(new IntSetting("remember", 5, 1, 30, 1)),
+			"Minutes a last-seen position is kept after the player disappears.");
+	private final BooleanSetting boxes = describe(setting(new BooleanSetting("boxes", true)),
+			"Draw a box around every tracked player.");
+	private final BooleanSetting trails = describe(setting(new BooleanSetting("trails", true)),
+			"Draw a trail behind moving players.");
+	private final IntSetting trailLength = describe(setting(new IntSetting("trail_length", 30, 5, 120, 1),
+			() -> trails.value()), "Seconds of movement kept in a trail.");
+	private final BooleanSetting lastSeenBeams = describe(setting(new BooleanSetting("last_seen_beams", true)),
+			"Draw a beam where a remembered player was last seen.");
+	private final BooleanSetting notifyPlayers = describe(setting(new BooleanSetting("notify_players", false)),
+			"Show a toast when a new player comes into view.");
+	private final ColorSetting playerColor = describe(setting(new ColorSetting("player_color", 0xFF5AC8FF)),
+			"The colour of player rows, boxes and trails.");
+	private final ColorSetting approachingColor = describe(setting(new ColorSetting("approaching_color", 0xFFFF5050)),
+			"The colour used when a player is moving towards you.");
+	private final BooleanSetting underground = describe(setting(new BooleanSetting("underground", true)),
+			"Track activity below Below Y.");
+	private final IntSetting belowY = describe(setting(new IntSetting("below_y", 0, -64, 64, 1),
+			() -> underground.value()), "The Y level under which activity is underground.");
+	private final IntSetting minHits = describe(setting(new IntSetting("min_hits", 8, 2, 100, 1)),
+			"Underground sightings a chunk needs before it is marked.");
+	private final IntSetting window = describe(setting(new IntSetting("window", 5, 1, 30, 1)),
+			"Minutes the underground hit count is measured over.");
+	private final IntSetting ownRadius = describe(setting(new IntSetting("own_radius", 2, 0, 6, 1)),
+			"Chunks around you treated as your own area.");
+	private final BooleanSetting ignoreOwnAreas = describe(setting(new BooleanSetting("ignore_own_areas", true)),
+			"Do not mark activity in the chunks around you.");
+	private final BooleanSetting notifyUnderground = describe(setting(new BooleanSetting("notify_underground", false)),
+			"Show a toast when a new underground chunk is marked.");
+	private final BooleanSetting chunkSquares = describe(setting(new BooleanSetting("chunk_squares", true)),
+			"Draw a chunk square at Render Y for each marked chunk.");
+	private final IntSetting renderY = describe(setting(new IntSetting("render_y", 63, -64, 320, 1)),
+			"The Y level the chunk squares are drawn at.");
+	private final BooleanSetting beams = describe(setting(new BooleanSetting("beams", true)),
+			"Draw vertical beams above the busiest underground chunks.");
+	private final IntSetting beamCount = describe(setting(new IntSetting("beam_count", 3, 1, 10, 1),
+			() -> beams.value()), "How many underground beams are drawn at once.");
+	private final ColorSetting lowColor = describe(setting(new ColorSetting("low_color", 0xFF468CFF)),
+			"The colour for a chunk at the hit threshold.");
+	private final ColorSetting highColor = describe(setting(new ColorSetting("high_color", 0xFFFF463C)),
+			"The colour for a chunk far above the hit threshold.");
+	private final BooleanSetting tracer = describe(setting(new BooleanSetting("tracer", true)),
+			"Draw a fading line from the crosshair to every tracked player.");
+
+	private final IntSetting anchor = describe(setting(new IntSetting("anchor", HudElementModule.ANCHOR_TOP_LEFT,
+			HudElementModule.ANCHOR_TOP_LEFT, HudElementModule.ANCHOR_BOTTOM_RIGHT, 1)),
+			"Which corner of the HUD the panel is placed in.");
+	private final IntSetting offsetX = describe(setting(new IntSetting("offset_x", 0, -MAX_NUDGE, MAX_NUDGE, 1)),
+			"Horizontal nudge from the anchor.");
+	private final IntSetting offsetY = describe(setting(new IntSetting("offset_y", 0, -MAX_NUDGE, MAX_NUDGE, 1)),
+			"Vertical nudge from the anchor.");
 
 	private final Map<Integer, Trace> traces = new HashMap<>();
+	private final Map<UUID, Deque<TrailPoint>> trailMap = new HashMap<>();
+	private final Map<UUID, LastSeen> lastSeen = new HashMap<>();
+	private final Map<UUID, double[]> positions = new HashMap<>();
+	private final Map<Long, Deque<Long>> undergroundHits = new HashMap<>();
+	private final Map<Long, Long> lowSince = new HashMap<>();
+	private final Map<AABB, Integer> boxColors = new IdentityHashMap<>();
 	private List<Row> rows = List.of();
+	private List<AABB> playerBoxes = List.of();
 	private Set<Long> lowChunks = Set.of();
+	private Set<Long> previousLow = Set.of();
+	private Set<UUID> visiblePlayers = Set.of();
 	private long lastRowsAt;
 	private long lastLowAt;
 	private Object lastLevel;
@@ -98,75 +153,96 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 			return;
 		}
 		refreshRows(mc);
-		refreshLow();
+		refreshLow(mc);
 	}
 
-	/** The inspector has no block scan of its own; it reads players and the feed. */
+	/** The inspector has no block scan of its own; it reads players and packets. */
 	@Override
-	public boolean scan(ClientLevel level, LevelChunk chunk, long deadlineNanos) {
+	public boolean scan(net.minecraft.client.multiplayer.ClientLevel level,
+			net.minecraft.world.level.chunk.LevelChunk chunk, long deadlineNanos) {
 		return true;
 	}
 
 	@Override
+	public List<AABB> boxes() {
+		return playerBoxes;
+	}
+
+	@Override
+	public boolean fills() {
+		return false;
+	}
+
+	@Override
+	public boolean outlines() {
+		return boxes.value();
+	}
+
+	@Override
+	public boolean tracers() {
+		return tracer.value();
+	}
+
+	@Override
+	public boolean tracerFade() {
+		return tracer.value();
+	}
+
+	@Override
+	public int colorFor(AABB box, double timeSec) {
+		Integer colour = boxColors.get(box);
+		return colour == null ? playerColor.argbAt(timeSec) : colour;
+	}
+
+	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		if (lowChunks.isEmpty() || level == null) {
+		if (players.value() && trails.value()) {
+			for (Deque<TrailPoint> trail : trailMap.values()) {
+				TrailPoint previous = null;
+				for (TrailPoint point : trail) {
+					if (previous != null) {
+						sink.line(previous.x(), previous.y() + 0.1, previous.z(),
+								point.x(), point.y() + 0.1, point.z(), 2.0f,
+								(150 << 24) | (playerColor.argbAt(timeSec) & 0xFFFFFF));
+					}
+					previous = point;
+				}
+			}
+		}
+		if (players.value() && lastSeenBeams.value()) {
+			for (Map.Entry<UUID, LastSeen> entry : lastSeen.entrySet()) {
+				if (visiblePlayers.contains(entry.getKey())) {
+					continue;
+				}
+				LastSeen seen = entry.getValue();
+				emitBeam(sink, seen.x(), seen.z(), seen.y() + 0.05, seen.y() + 50.0, 0.3,
+						(110 << 24) | (playerColor.argbAt(timeSec) & 0xFFFFFF));
+			}
+		}
+		if (!chunkSquares.value() || lowChunks.isEmpty()) {
 			return;
 		}
-		double y = Math.max(level.getMinY(), 0) + 0.05;
-		int rgb = highActivityColor.argbAt(timeSec) & 0xFFFFFF;
+		int low = lowColor.argbAt(timeSec);
+		int high = highColor.argbAt(timeSec);
 		List<Long> ordered = new ArrayList<>(lowChunks);
 		ordered.sort(Comparator.comparingDouble(this::flagDistance));
-		for (long key : ordered) {
-			double distance = flagDistance(key);
-			if (!drawableFlag(distance)) {
-				continue;
-			}
-			if (fullStyle(distance, 90)) {
-				double score = MotionFeed.lowScores().score(key, (long) timeMs);
-				FlagStyles.heatRing(sink, Chunks.x(key) * 16.0 + 8, y, Chunks.z(key) * 16.0 + 8,
-						6.0, rgb, score, timeMs);
-			} else {
-				ChunkStyles.simple(sink, Chunks.x(key), Chunks.z(key), y, rgb, false);
-			}
+		int beamLimit = beams.value() ? Math.min(beamCount.get(), ordered.size()) : 0;
+		List<FlagLook.Flag> look = new ArrayList<>(ordered.size());
+		for (int i = 0; i < ordered.size(); i++) {
+			long key = ordered.get(i);
+			int hits = hits(key);
+			double strength = Math.min(1.0, hits / (double) Math.max(1, minHits.get()));
+			int argb = FinderRules.ramp(low, high, strength);
+			look.add(FlagLook.Flag.chunk(key, terrainOrFlat(key), argb & 0xFFFFFF,
+					flagDistance(key), FlagLook.easeOutCubic(lowSince.getOrDefault(key, 0L), timeMs),
+					tracer.value(), i < beamLimit, 60.0));
 		}
+		FlagLook.drawAll(sink, look, timeMs, quality(), autoSimplified(), tracer.value(), tracerOrigin());
 	}
 
-	@Override
-	protected void onToggle(boolean state) {
-		super.onToggle(state);
-		if (state) {
-			MotionFeed.acquire();
-		} else {
-			MotionFeed.release();
-			rows = List.of();
-			lowChunks = Set.of();
-			traces.clear();
-			rowsFresh = false;
-			lowFresh = false;
-		}
-	}
-
-	@Override
-	protected void onChunkUnloaded(long key) {
-		MotionFeed.forget(key);
-		if (lowChunks.contains(key)) {
-			Set<Long> next = new HashSet<>(lowChunks);
-			next.remove(key);
-			lowChunks = next;
-		}
-	}
-
-	@Override
-	public void resetSession() {
-		super.resetSession();
-		rows = List.of();
-		lowChunks = Set.of();
-		traces.clear();
-		rowsFresh = false;
-		lowFresh = false;
-		lastLevel = null;
-		lastRowsAt = 0L;
-		lastLowAt = 0L;
+	private int hits(long key) {
+		Deque<Long> times = undergroundHits.get(key);
+		return times == null ? 0 : times.size();
 	}
 
 	private void refreshRows(Minecraft mc) {
@@ -177,16 +253,30 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 		rowsFresh = true;
 		lastRowsAt = now;
 		lastLevel = mc == null ? null : mc.level;
-		if (mc == null || mc.player == null || mc.level == null) {
+		if (mc == null || mc.player == null || mc.level == null || !players.value()) {
 			rows = List.of();
-			traces.clear();
+			playerBoxes = List.of();
+			boxColors.clear();
+			positions.clear();
+			trailMap.clear();
+			visiblePlayers = Set.of();
 			return;
 		}
 		Frustum frustum = mc.levelRenderer.getCapturedFrustum();
-		Set<Integer> seen = new HashSet<>();
+		Set<UUID> listed = ignoreNpcs.value() ? TabList.listed(mc) : null;
+		Set<UUID> seen = new HashSet<>();
+		Set<UUID> visible = new HashSet<>();
 		List<Row> found = new ArrayList<>();
+		List<AABB> nextBoxes = new ArrayList<>();
+		Map<AABB, Integer> nextColors = new IdentityHashMap<>();
+		Map<UUID, double[]> nextPositions = new HashMap<>();
+		boolean announced = false;
 		for (AbstractClientPlayer player : mc.level.players()) {
 			if (player == mc.player || player.isSpectator()) {
+				continue;
+			}
+			UUID uuid = player.getUUID();
+			if (listed != null && !listed.contains(uuid)) {
 				continue;
 			}
 			double distanceSq = player.distanceToSqr(mc.player);
@@ -204,10 +294,14 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 				trace.primed = true;
 				dx = 0;
 				dz = 0;
+				trace.lastDistance = distanceSq;
 			}
 			trace.speed = trace.speed * 0.65 + Math.hypot(dx, dz) * 20.0 * 0.35;
 			trace.x = player.getX();
 			trace.z = player.getZ();
+			double distance = Math.sqrt(distanceSq);
+			boolean approaching = FinderRules.approaching(Math.sqrt(trace.lastDistance), distance, trace.speed);
+			trace.lastDistance = distanceSq;
 
 			ItemStack held = player.getMainHandItem();
 			String item = held.isEmpty() ? "empty" : held.getHoverName().getString();
@@ -215,29 +309,166 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 			boolean building = player.swinging && held.getItem() instanceof BlockItem;
 			boolean moving = trace.speed >= 0.4 || player.walkAnimation.speed() > 0.04;
 			String action = mining ? "mining" : building ? "building" : moving ? "moving" : "idle";
-			found.add(new Row(player.getScoreboardName(), action, item, trace.speed,
-					Math.sqrt(distanceSq), mining || building || moving));
-			seen.add(player.getId());
+			found.add(new Row(player.getScoreboardName(), action, item, trace.speed, distance, approaching, uuid));
+			AABB box = player.getBoundingBox().inflate(0.12);
+			nextBoxes.add(box);
+			nextColors.put(box, approaching ? approachingColor.argbAt(now / 1000.0)
+					: playerColor.argbAt(now / 1000.0));
+			nextPositions.put(uuid, new double[]{player.getX(), player.getY(), player.getZ()});
+			seen.add(uuid);
+			visible.add(uuid);
+			lastSeen.put(uuid, new LastSeen(player.getScoreboardName(), player.getX(),
+					player.getY(), player.getZ(), now));
+			if (trails.value()) {
+				Deque<TrailPoint> trail = trailMap.computeIfAbsent(uuid, ignored -> new ArrayDeque<>());
+				trail.addLast(new TrailPoint(player.getX(), player.getY(), player.getZ(), now));
+				long keep = Math.max(1, trailLength.get()) * 1000L;
+				while (!trail.isEmpty() && now - trail.peekFirst().time() > keep) {
+					trail.pollFirst();
+				}
+				while (trail.size() > 400) {
+					trail.pollFirst();
+				}
+			}
+			if (!visiblePlayers.contains(uuid) && notifyPlayers.value() && !announced) {
+				announced = true;
+				notify.toast(mc, "Activity Inspector", player.getScoreboardName() + " is in view");
+			}
 		}
-		traces.keySet().retainAll(seen);
+		// The trace map is keyed by entity id, not UUID; prune by the ids seen.
+		Set<Integer> ids = new HashSet<>();
+		for (AbstractClientPlayer player : mc.level.players()) {
+			if (seen.contains(player.getUUID())) {
+				ids.add(player.getId());
+			}
+		}
+		traces.keySet().retainAll(ids);
+		long rememberMs = Math.max(1, remember.get()) * 60_000L;
+		lastSeen.entrySet().removeIf(entry -> now - entry.getValue().time() > rememberMs);
+		trailMap.keySet().retainAll(seen);
+		positions.clear();
+		positions.putAll(nextPositions);
+		visiblePlayers = visible;
 		found.sort(Comparator.comparingDouble(Row::distance).thenComparing(Row::name));
 		rows = found.size() > MAX_ROWS ? List.copyOf(found.subList(0, MAX_ROWS)) : List.copyOf(found);
+		playerBoxes = List.copyOf(nextBoxes);
+		boxColors.clear();
+		boxColors.putAll(nextColors);
 	}
 
-	private void refreshLow() {
+	private void refreshLow(Minecraft mc) {
 		long now = System.currentTimeMillis();
 		if (lowFresh && now - lastLowAt < LOW_REFRESH_MS) {
 			return;
 		}
 		lowFresh = true;
 		lastLowAt = now;
-		Set<Long> next = new HashSet<>();
-		for (Map.Entry<Long, MotionScores.Level> entry : MotionFeed.lowScores().busy(now, 5.0).entrySet()) {
-			if (entry.getValue() == MotionScores.Level.VERY_BUSY) {
-				next.add(entry.getKey());
+		if (!underground.value() || mc == null || mc.player == null) {
+			lowChunks = Set.of();
+			undergroundHits.clear();
+			lowSince.clear();
+			return;
+		}
+		int threshold = belowY.get();
+		for (Map.Entry<UUID, double[]> entry : positions.entrySet()) {
+			double[] position = entry.getValue();
+			if (position[1] > threshold) {
+				continue;
+			}
+			long key = Chunks.key((int) Math.floor(position[0]) >> 4, (int) Math.floor(position[2]) >> 4);
+			Deque<Long> times = undergroundHits.computeIfAbsent(key, ignored -> new ArrayDeque<>());
+			times.addLast(now);
+			long windowMs = Math.max(1, window.get()) * 60_000L;
+			while (!times.isEmpty() && now - times.peekFirst() > windowMs) {
+				times.pollFirst();
 			}
 		}
+		Set<Long> next = new HashSet<>();
+		int playerChunkX = mc.player.blockPosition().getX() >> 4;
+		int playerChunkZ = mc.player.blockPosition().getZ() >> 4;
+		undergroundHits.entrySet().removeIf(entry -> {
+			long key = entry.getKey();
+			Deque<Long> times = entry.getValue();
+			long windowMs = Math.max(1, window.get()) * 60_000L;
+			while (!times.isEmpty() && now - times.peekFirst() > windowMs) {
+				times.pollFirst();
+			}
+			if (times.isEmpty()) {
+				return true;
+			}
+			if (times.size() < minHits.get()) {
+				return false;
+			}
+			if (ignoreOwnAreas.value() && ownRadius.get() > 0
+					&& Math.abs(Chunks.x(key) - playerChunkX) <= ownRadius.get()
+					&& Math.abs(Chunks.z(key) - playerChunkZ) <= ownRadius.get()) {
+				return false;
+			}
+			next.add(key);
+			return false;
+		});
+		for (long key : next) {
+			lowSince.putIfAbsent(key, now);
+		}
+		lowSince.keySet().retainAll(next);
 		lowChunks = next;
+		refreshTerrain(next);
+		if (notifyUnderground.value()) {
+			for (long key : next) {
+				if (!previousLow.contains(key)) {
+					notify.toast(mc, "Activity Inspector", "Underground activity near "
+							+ (Chunks.x(key) * 16 + 8) + ", " + (Chunks.z(key) * 16 + 8));
+					break;
+				}
+			}
+		}
+		previousLow = next;
+	}
+
+	@Override
+	protected void onToggle(boolean state) {
+		super.onToggle(state);
+		if (!state) {
+			rows = List.of();
+			playerBoxes = List.of();
+			boxColors.clear();
+			lowChunks = Set.of();
+			lowSince.clear();
+			trailMap.clear();
+			lastSeen.clear();
+			positions.clear();
+			undergroundHits.clear();
+			rowsFresh = false;
+			lowFresh = false;
+		}
+	}
+
+	@Override
+	protected void onChunkUnloaded(long key) {
+		lowChunks = new HashSet<>(lowChunks);
+		lowChunks.remove(key);
+		undergroundHits.remove(key);
+	}
+
+	@Override
+	public void resetSession() {
+		super.resetSession();
+		rows = List.of();
+		playerBoxes = List.of();
+		boxColors.clear();
+		lowChunks = Set.of();
+		previousLow = Set.of();
+		visiblePlayers = Set.of();
+		traces.clear();
+		trailMap.clear();
+		lastSeen.clear();
+		positions.clear();
+		undergroundHits.clear();
+		rowsFresh = false;
+		lowFresh = false;
+		lastLevel = null;
+		lastRowsAt = 0L;
+		lastLowAt = 0L;
 	}
 
 	private static boolean isTool(ItemStack stack) {
@@ -346,24 +577,24 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 			int rowY = rowTop + i * ROW_H;
 			int dotX = x + PAD + DOT;
 			int dotY = rowY + ROW_H / 2 - 1;
-			Ui.circle(c, dotX, dotY, DOT, colorArgb(seconds));
+			int rowColor = row.approaching() ? approachingColor.argbAt(seconds) : playerColor.argbAt(seconds);
+			Ui.circle(c, dotX, dotY, DOT, rowColor);
 
 			int textX = x + PAD + DOT * 2 + 6;
 			int nameRoom = x + w - PAD - textX;
 			int nameWidth = medium.width(row.name());
 			if (nameWidth > nameRoom) {
 				Ui.drawEllipsized(c, medium, row.name(), textX,
-						rowY + (ROW_H - medium.lineHeight()) / 2, nameRoom, colorArgb(seconds));
+						rowY + (ROW_H - medium.lineHeight()) / 2, nameRoom, rowColor);
 				continue;
 			}
-			medium.draw(c, row.name(), textX, rowY + (ROW_H - medium.lineHeight()) / 2,
-					colorArgb(seconds));
+			medium.draw(c, row.name(), textX, rowY + (ROW_H - medium.lineHeight()) / 2, rowColor);
 			int restX = textX + nameWidth + 7;
 			int restRoom = x + w - PAD - restX;
 			if (restRoom > 0) {
 				Ui.drawEllipsized(c, regular, rest(row), restX,
 						rowY + (ROW_H - regular.lineHeight()) / 2, restRoom,
-						row.active() ? highActivityColor.argbAt(seconds) : UiTheme.TEXT_3);
+						row.approaching() ? approachingColor.argbAt(seconds) : UiTheme.TEXT_3);
 			}
 		}
 	}
@@ -380,7 +611,6 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
-		highActivityColor.load(json, "high_activity_color");
 		anchor.set(ConfigValues.intValue(json, "anchor", HudElementModule.ANCHOR_TOP_LEFT));
 		offsetX.set(ConfigValues.intValue(json, "offset_x", 0));
 		offsetY.set(ConfigValues.intValue(json, "offset_y", 0));
@@ -391,7 +621,6 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
-		highActivityColor.save(json, "high_activity_color");
 		json.addProperty("anchor", anchor());
 		json.addProperty("offset_x", offsetX());
 		json.addProperty("offset_y", offsetY());
@@ -402,13 +631,20 @@ public final class ActivityInspectorModule extends FinderModule implements HudPa
 	}
 
 	private record Row(String name, String action, String held, double speed, double distance,
-			boolean active) {
+			boolean approaching, UUID uuid) {
+	}
+
+	private record TrailPoint(double x, double y, double z, long time) {
+	}
+
+	private record LastSeen(String name, double x, double y, double z, long time) {
 	}
 
 	private static final class Trace {
 		double x;
 		double z;
 		double speed;
+		double lastDistance;
 		boolean primed;
 	}
 }

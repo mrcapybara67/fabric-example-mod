@@ -248,7 +248,9 @@ public final class EspRenderer {
 				if (boxes == null || boxes.isEmpty()) {
 					continue;
 				}
-				VertexConsumer fills = batches.getBuffer(EspRenderTypes.quads());
+				// Each module chooses its own wall rule: through-walls modules keep
+				// the see-through pipeline, the rest use vanilla's depth-tested one.
+				VertexConsumer fills = batches.getBuffer(EspRenderTypes.quadsFor(module.throughWalls()));
 				boolean finder = module instanceof FinderModule;
 				for (AABB box : boxes) {
 					if (finder && distanceSqr(box) > 160.0 * 160.0) {
@@ -274,7 +276,7 @@ public final class EspRenderer {
 				if (boxes == null || boxes.isEmpty()) {
 					continue;
 				}
-				VertexConsumer lines = batches.getBuffer(EspRenderTypes.lines());
+				VertexConsumer lines = batches.getBuffer(EspRenderTypes.linesFor(module.throughWalls()));
 				// Widths are per module and per layer: a box edge and a tracer are
 				// different marks on the screen, and a long diagonal tracer needs a
 				// different width than a short vertical edge to read the same.
@@ -287,6 +289,9 @@ public final class EspRenderer {
 					// information, the line is the pointer to it.
 					for (AABB box : boxes) {
 						int colour = module.colorFor(box, seconds);
+						if (module.tracerFade()) {
+							colour = fadeWithDistance(colour, distanceSqr(box));
+						}
 						int glowColor = halo(colour);
 						tracer(lines, pose, box, glowColor, tracerGlow);
 						tracer(lines, pose, box, colour, tracerCrisp);
@@ -343,6 +348,18 @@ public final class EspRenderer {
 			batch = MultiBufferSource.immediate(buffer);
 		}
 		return batch;
+	}
+
+	/**
+	 * A tracer's alpha at its far end: full strength at the camera, a quarter
+	 * at the end of a long overlay. The line still points the same way; only
+	 * its weight changes, so a bundle of fifty tracers does not become a wall.
+	 */
+	static int fadeWithDistance(int argb, double distanceSqr) {
+		double distance = Math.sqrt(Math.max(0.0, distanceSqr));
+		float fade = (float) Math.max(0.25, Math.min(1.0, 1.0 - distance / 256.0));
+		int alpha = Math.round(((argb >>> 24) & 0xFF) * fade);
+		return (Math.max(0, Math.min(255, alpha)) << 24) | (argb & 0xFFFFFF);
 	}
 
 	/** The same hue at a fixed fraction of the outline alpha. */

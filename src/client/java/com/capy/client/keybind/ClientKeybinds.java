@@ -30,12 +30,16 @@ public final class ClientKeybinds {
 	/** Category shown in the vanilla Controls screen. */
 	private static final Identifier CATEGORY_ID = Identifier.fromNamespaceAndPath("capy", "keybind");
 
-	/** Translation key of the binding. */
-	private static final String OPEN_GUI_KEY = "key.capy.open_gui";
-	private static final String INSPECT_KEY = "key.capy.inspect_knife";
-	private static final String HUD_EDITOR_KEY = "key.capy.hud_editor";
-	private static final String FREECAM_KEY = "key.capy.freecam";
-	private static final String FREELOOK_KEY = "key.capy.freelook";
+	/*
+	 * The binding names are literal display text, not translation keys. The
+	 * vanilla key-bind list resolves an unknown key to the key itself, so these
+	 * stay readable without a language file and without a mixin into that list.
+	 */
+	private static final String OPEN_GUI_KEY = "Capy: Open GUI";
+	private static final String INSPECT_KEY = "Capy: Inspect Item";
+	private static final String HUD_EDITOR_KEY = "Capy: HUD Editor";
+	private static final String FREECAM_KEY = "Capy: Toggle Freecam";
+	private static final String FREELOOK_KEY = "Capy: Toggle Freelook";
 
 	private static KeyMapping openClickGui;
 	private static KeyMapping inspectKnife;

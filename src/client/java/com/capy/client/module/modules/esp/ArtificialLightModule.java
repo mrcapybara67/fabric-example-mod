@@ -2,8 +2,11 @@ package com.capy.client.module.modules.esp;
 
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagLook;
 import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.LightRegions;
+import com.capy.client.module.BooleanSetting;
+import com.capy.client.module.IntSetting;
 import com.capy.client.util.Guard;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,10 +37,15 @@ import net.minecraft.world.phys.AABB;
  * thread that owns the light engine.</p>
  */
 public final class ArtificialLightModule extends FinderModule {
-	private static final int MIN_LIGHT = 5;
 	private static final int MAX_BOXES = 2000;
-	private static final int CHUNK_RADIUS = 8;
 	private static final long UNION_INTERVAL_NANOS = 1_000_000_000L;
+
+	private final IntSetting renderRadius = describe(setting(new IntSetting("render_radius", 8, 1, 16, 1)),
+			"How many chunks around you are read for block light.");
+	private final IntSetting minLight = describe(setting(new IntSetting("min_light", 5, 1, 15, 1)),
+			"The faintest block light that counts as a lit area.");
+	private final BooleanSetting denoise = describe(setting(new BooleanSetting("denoise", true)),
+			"Drop one-block light specks that are too small to be a base or tunnel.");
 
 	private final Map<Long, Map<Long, Integer>> cellsByChunk = new HashMap<>();
 	private final Map<Long, Integer> scratch = new HashMap<>();
@@ -68,7 +76,11 @@ public final class ArtificialLightModule extends FinderModule {
 		if (!beginTick(mc)) {
 			return;
 		}
+		if (settingsChanged()) {
+			applySettings();
+		}
 		applyPublished();
+		refreshTerrain(flags.keySet());
 		long now = System.nanoTime();
 		if (working || now - lastRunNanos < UNION_INTERVAL_NANOS) {
 			return;
@@ -116,7 +128,7 @@ public final class ArtificialLightModule extends FinderModule {
 				for (int z = 0; z < 16; z++) {
 					for (int x = 0; x < 16; x++) {
 						int light = data.get(x, y, z);
-						if (light >= MIN_LIGHT) {
+						if (light >= minLight.get()) {
 							scratch.put(Chunks.block(baseX + x, worldY, baseZ + z), light);
 						}
 					}
@@ -157,16 +169,29 @@ public final class ArtificialLightModule extends FinderModule {
 
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		for (AABB box : boxesNearestFirst()) {
-			double distance = boxDistance(box);
-			if (!drawableFlag(distance)) {
-				continue;
-			}
-			if (fullStyle(distance, 150)) {
-				FlagStyles.bloom(sink, (box.minX + box.maxX) * 0.5, box.maxY + 0.06,
-						(box.minZ + box.maxZ) * 0.5, colorFor(box, timeSec) & 0xFFFFFF, timeMs);
+		if (flags.isEmpty()) {
+			return;
+		}
+		List<FlagLook.Flag> look = new ArrayList<>(flags.size());
+		int rgb = colorArgb(timeSec) & 0xFFFFFF;
+		for (long key : flagsNearestFirst()) {
+			AABB core = brightestBox(key);
+			double x = core == null ? Chunks.x(key) * 16.0 + 8.0 : (core.minX + core.maxX) * 0.5;
+			double z = core == null ? Chunks.z(key) * 16.0 + 8.0 : (core.minZ + core.maxZ) * 0.5;
+			look.add(FlagLook.Flag.at(key, x, z, terrainOrFlat(key), rgb, flagDistance(key),
+					appearEase(key, timeMs), true, true));
+		}
+		FlagLook.drawAll(sink, look, timeMs, quality(), autoSimplified(), true, tracerOrigin());
+	}
+
+	private AABB brightestBox(long key) {
+		AABB best = null;
+		for (AABB box : boxesByFlag.getOrDefault(key, List.of())) {
+			if (best == null || box.maxY > best.maxY) {
+				best = box;
 			}
 		}
+		return best;
 	}
 
 	private void publishUnion(Minecraft mc) {
@@ -179,8 +204,9 @@ public final class ArtificialLightModule extends FinderModule {
 		List<Map<Long, Integer>> snapshot = new ArrayList<>();
 		for (Map.Entry<Long, Map<Long, Integer>> entry : cellsByChunk.entrySet()) {
 			long key = entry.getKey();
-			if (Math.abs(Chunks.x(key) - playerX) <= CHUNK_RADIUS
-					&& Math.abs(Chunks.z(key) - playerZ) <= CHUNK_RADIUS) {
+			int radius = renderRadius.get();
+			if (Math.abs(Chunks.x(key) - playerX) <= radius
+					&& Math.abs(Chunks.z(key) - playerZ) <= radius) {
 				// The per-chunk maps are immutable, so the worker can read them
 				// while the client thread rescans a chunk and replaces its map.
 				snapshot.add(entry.getValue());
@@ -195,7 +221,7 @@ public final class ArtificialLightModule extends FinderModule {
 					for (Map<Long, Integer> cells : snapshot) {
 						union.putAll(cells);
 					}
-					List<LightRegions.Box> boxes = LightRegions.group(union, MIN_LIGHT, MAX_BOXES);
+					List<LightRegions.Box> boxes = LightRegions.group(union, minLight.get(), MAX_BOXES);
 					if (gen == generation) {
 						published = new Snapshot(gen, List.copyOf(boxes));
 					}
@@ -230,6 +256,13 @@ public final class ArtificialLightModule extends FinderModule {
 		Map<Long, Integer> peaks = new HashMap<>();
 		List<AABB> all = new ArrayList<>(next.boxes().size());
 		for (LightRegions.Box found : next.boxes()) {
+			// Denoise drops a lit area that spans fewer than three blocks in
+			// total: a single torch on a wall is light, not a place.
+			int extent = (found.maxX() - found.minX()) + (found.maxY() - found.minY())
+					+ (found.maxZ() - found.minZ());
+			if (denoise.value() && extent < 3) {
+				continue;
+			}
 			AABB box = new AABB(found.minX(), found.minY(), found.minZ(),
 					found.maxX(), found.maxY(), found.maxZ());
 			int cx = Math.floorDiv(found.minX() + found.maxX() - 1, 2) >> 4;
@@ -243,7 +276,7 @@ public final class ArtificialLightModule extends FinderModule {
 		clearFlags();
 		for (Map.Entry<Long, List<AABB>> entry : byChunk.entrySet()) {
 			long key = entry.getKey();
-			int peak = peaks.getOrDefault(key, MIN_LIGHT);
+			int peak = peaks.getOrDefault(key, minLight.get());
 			markFlag(key, "lit area, light " + peak, peak, entry.getValue());
 		}
 		renderBoxes = List.copyOf(all);
@@ -251,6 +284,34 @@ public final class ArtificialLightModule extends FinderModule {
 
 	private static boolean underground(int sectionY, int surfaceY) {
 		return sectionY + 16 <= surfaceY;
+	}
+
+	private int appliedMinLight = -1;
+	private int appliedRadius = -1;
+	private boolean appliedDenoise;
+
+	private boolean settingsChanged() {
+		return appliedMinLight != minLight.get() || appliedRadius != renderRadius.get()
+				|| appliedDenoise != denoise.value();
+	}
+
+	/** A different threshold makes every cached cell a claim about another rule. */
+	private void applySettings() {
+		appliedMinLight = minLight.get();
+		appliedRadius = renderRadius.get();
+		appliedDenoise = denoise.value();
+		generation++;
+		cellsByChunk.clear();
+		scratch.clear();
+		litCellCount = 0;
+		scanning = false;
+		scanKey = Long.MIN_VALUE;
+		scanSection = 0;
+		lastRunNanos = 0L;
+		applied = null;
+		renderBoxes = List.of();
+		published = new Snapshot(generation, List.of());
+		com.capy.client.module.modules.esp.FinderScanner.get().queueAllLoaded();
 	}
 
 	@Override

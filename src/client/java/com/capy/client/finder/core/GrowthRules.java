@@ -82,6 +82,19 @@ public final class GrowthRules {
 		return waterAbove && column < 3;
 	}
 
+	/**
+	 * A snow layer in strong block light: vanilla melts snow at light 12 and
+	 * above, so an un-melted layer under a lamp is a tick the chunk owes.
+	 */
+	public static boolean snow(int light, int layers) {
+		return layers > 0 && layers < 8 && light >= 12;
+	}
+
+	/** Ice in strong block light is in the same position: it should have melted. */
+	public static boolean ice(int light) {
+		return light >= 12;
+	}
+
 	/** Eyeblossoms: open from day tick 12600 to 23400, closed otherwise. TRUE open, FALSE closed, null = too soon to judge. */
 	public static Boolean eyeblossomsShouldBeOpen(long dayTime) {
 		int time = (int) Math.floorMod(dayTime, 24000L);

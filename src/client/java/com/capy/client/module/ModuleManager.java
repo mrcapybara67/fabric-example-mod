@@ -1,7 +1,9 @@
 package com.capy.client.module;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Central module registry. Mixins and events read modules from here.
@@ -10,6 +12,8 @@ public final class ModuleManager {
 	private static final ModuleManager INSTANCE = new ModuleManager();
 
 	private final List<Module> modules = new ArrayList<>();
+	/** Final state per module, applied on the next client tick. */
+	private final Map<Module, Boolean> pendingToggles = new LinkedHashMap<>();
 
 	private ModuleManager() {
 	}
@@ -20,6 +24,38 @@ public final class ModuleManager {
 
 	public void register(Module module) {
 		modules.add(module);
+	}
+
+	/** Removes a module; used by tests and by hot-reload tooling. */
+	public void unregister(Module module) {
+		modules.remove(module);
+		pendingToggles.remove(module);
+	}
+
+	/** Queues the feature hook for the next tick; repeated toggles coalesce. */
+	void queueToggle(Module module, boolean state) {
+		pendingToggles.put(module, state);
+	}
+
+	/**
+	 * Runs every deferred toggle once. This is called at the start of the client
+	 * tick, not from a screen's mouse handler, so heavy module setup stays off
+	 * the render path.
+	 */
+	public void flushPendingToggles() {
+		if (pendingToggles.isEmpty()) {
+			return;
+		}
+		List<Map.Entry<Module, Boolean>> batch = new ArrayList<>(pendingToggles.entrySet());
+		pendingToggles.clear();
+		for (Map.Entry<Module, Boolean> entry : batch) {
+			entry.getKey().applyToggleState(entry.getValue());
+		}
+	}
+
+	/** Number of hooks waiting for the next tick. */
+	int pendingToggleCount() {
+		return pendingToggles.size();
 	}
 
 	public List<Module> modules() {

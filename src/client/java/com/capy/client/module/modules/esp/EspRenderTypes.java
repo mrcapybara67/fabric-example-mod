@@ -74,6 +74,16 @@ public final class EspRenderTypes {
 		return unavailable;
 	}
 
+	/** Picks the outline pipeline for a module's wall rule. */
+	public static RenderType linesFor(boolean throughWalls) {
+		return throughWalls ? lines() : RenderTypes.lines();
+	}
+
+	/** Picks the fill pipeline for a module's wall rule. */
+	public static RenderType quadsFor(boolean throughWalls) {
+		return throughWalls ? quads() : RenderTypes.debugQuads();
+	}
+
 	/** Outline lines, always without a depth test. */
 	public static RenderType lines() {
 		if (unavailable) {

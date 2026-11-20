@@ -1,18 +1,26 @@
 package com.capy.client.module.modules.esp;
 
 import com.capy.client.config.ConfigValues;
+import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.ColorSetting;
+import com.capy.client.module.IntSetting;
 import com.capy.client.module.Setting;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.Container;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -59,6 +67,16 @@ public final class StorageEspModule extends EspModule {
 	private final Predicate<BlockState> isPiston =
 			state -> state.is(Blocks.PISTON) || state.is(Blocks.STICKY_PISTON);
 
+	private final IntSetting maxY = describe(setting(new IntSetting("max_y", 319, -64, 319, 1)),
+			"Ignore containers above this Y level.");
+	private final IntSetting highlightAlpha = describe(setting(new IntSetting("highlight_alpha", 200, 0, 255, 1)),
+			"The alpha of every storage box, 0 to 255.");
+	private final BooleanSetting hideOpened = describe(setting(new BooleanSetting("hide_opened", false)),
+			"Skip containers you have already opened this session.");
+	private final Map<StorageKind, BooleanSetting> enabled = new EnumMap<>(StorageKind.class);
+	private final Set<Long> opened = new HashSet<>();
+	private net.minecraft.world.level.Level openedLevel;
+
 	private final List<AABB> boxes = new ArrayList<>();
 	private final List<AABB> scratch = new ArrayList<>();
 	/** One colour row per kind, in enum order so the card is stable. */
@@ -71,22 +89,47 @@ public final class StorageEspModule extends EspModule {
 	private int lastRange = -1;
 
 	public StorageEspModule() {
-		// The whole view distance by default. The container walk is one map read
-		// per loaded chunk, and the piston walk is palette driven, so distance
-		// costs almost nothing here.
-		super("storage_esp", MAX_RANGE, false);
+		// Storage reads a tighter band than the other overlays: a container a
+		// hundred blocks away is still useful, a piston door on the horizon is
+		// not.
+		super("storage_esp", 128, false, 16, 256);
 		for (StorageKind kind : StorageKind.values()) {
 			if (!kind.hasColorRow()) {
 				// A fallback kind is not a kind the player picks a colour for: it
 				// would be one more row for the container that matched nothing.
 				continue;
 			}
-			colors.put(kind, setting(new ColorSetting(kind.settingKey(), kind.defaultColor())));
+			colors.put(kind, describe(setting(new ColorSetting(kind.settingKey(), kind.defaultColor())),
+					"The colour for " + kind.name().toLowerCase(Locale.ROOT).replace('_', ' ') + " boxes."));
 		}
 		// The colour rows belong at the top of the card, where every other
 		// overlay keeps its colour: they are the settings this module is
 		// opened for, and the core rows below them are shared with the other
 		// two overlays anyway.
+		// One on/off beside each colour, so a kind can be muted without losing
+		// the hue that was tuned for it.
+		for (StorageKind kind : colors.keySet()) {
+			enabled.put(kind, describe(setting(new BooleanSetting(
+					"show_" + kind.name().toLowerCase(Locale.ROOT), true)),
+					"Show " + kind.name().toLowerCase(Locale.ROOT).replace('_', ' ') + " containers."));
+		}
+		UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
+			if (player == null || hit == null || player != Minecraft.getInstance().player) {
+				return InteractionResult.PASS;
+			}
+			if (!hideOpened.value() || level == null) {
+				return InteractionResult.PASS;
+			}
+			StorageKind kind = StorageKind.of(level.getBlockState(hit.getBlockPos()));
+			if (kind != StorageKind.OTHER) {
+				if (openedLevel != level) {
+					opened.clear();
+					openedLevel = level;
+				}
+				opened.add(hit.getBlockPos().asLong());
+			}
+			return InteractionResult.PASS;
+		});
 		List<Setting<?>> settings = settings();
 		List<Setting<?>> colours = new ArrayList<>(colors.values());
 		settings.removeAll(colours);
@@ -123,7 +166,8 @@ public final class StorageEspModule extends EspModule {
 		// Anything without a row of its own - the fallback kind - is drawn in
 		// the overlay's own colour, so it is still highlighted and still one
 		// colour rather than an unset one.
-		return setting == null ? super.colorFor(box, timeSec) : setting.argbAt(timeSec);
+		int base = setting == null ? super.colorFor(box, timeSec) : setting.argbAt(timeSec);
+		return (highlightAlpha.get() << 24) | (base & 0xFFFFFF);
 	}
 
 	@Override
@@ -173,12 +217,16 @@ public final class StorageEspModule extends EspModule {
 					continue;
 				}
 				BlockPos pos = entity.getBlockPos();
-				if (EspScanner.distanceSqr(pos, cx, cy, cz) > limitSq) {
+				if (pos.getY() > maxY.get() || EspScanner.distanceSqr(pos, cx, cy, cz) > limitSq) {
+					continue;
+				}
+				StorageKind kind = StorageKind.of(entity.getBlockState());
+				if (!shows(kind) || hidden(pos)) {
 					continue;
 				}
 				AABB box = new AABB(pos).inflate(INFLATE);
 				scratch.add(box);
-				scratchKinds.put(box, StorageKind.of(entity.getBlockState()));
+				scratchKinds.put(box, kind);
 				if (scratch.size() >= MAX_BOXES) {
 					return false;
 				}
@@ -229,7 +277,7 @@ public final class StorageEspModule extends EspModule {
 				}
 				for (int y = 0; y < 16; y++) {
 					int worldY = sectionY + y;
-					if (worldY < lowY || worldY > highY) {
+					if (worldY < lowY || worldY > highY || worldY > maxY.get()) {
 						continue;
 					}
 					int dy = worldY - centerY;
@@ -241,7 +289,13 @@ public final class StorageEspModule extends EspModule {
 							if (kind != StorageKind.PISTON && kind != StorageKind.STICKY_PISTON) {
 								continue;
 							}
+							if (!shows(kind)) {
+								continue;
+							}
 							int worldX = baseX + x;
+							if (hidden(new BlockPos(worldX, worldY, worldZ))) {
+								continue;
+							}
 							int dx = worldX - centerX;
 							if ((double) dx * dx + (double) dy * dy + (double) dz * dz > limitSq) {
 								continue;
@@ -269,6 +323,16 @@ public final class StorageEspModule extends EspModule {
 		kinds.putAll(scratchKinds);
 	}
 
+	/** True unless the user muted this container kind. */
+	private boolean shows(StorageKind kind) {
+		BooleanSetting row = enabled.get(kind);
+		return row == null || row.value();
+	}
+
+	private boolean hidden(BlockPos pos) {
+		return hideOpened.value() && openedLevel == level && opened.contains(pos.asLong());
+	}
+
 	private static boolean isStorage(BlockEntity entity) {
 		// The ender chest holds its items in the player, so its block entity is
 		// not a Container even though it is unmistakably storage. A spawner is
@@ -293,6 +357,8 @@ public final class StorageEspModule extends EspModule {
 		scratch.clear();
 		kinds.clear();
 		scratchKinds.clear();
+		opened.clear();
+		openedLevel = null;
 		level = null;
 		cooldown = 0;
 		lastRange = -1;

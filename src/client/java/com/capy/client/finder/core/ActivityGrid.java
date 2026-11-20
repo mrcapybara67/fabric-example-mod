@@ -37,7 +37,12 @@ public final class ActivityGrid {
 	private final Map<Long, Long> lastSeen = new HashMap<>();
 
 	private static double decay(long now, long last) {
-		return Math.pow(0.5, (now - last) / HALF_LIFE_MS);
+		return decay(now, last, HALF_LIFE_MS);
+	}
+
+	private static double decay(long now, long last, double halfLifeMs) {
+		double life = halfLifeMs <= 1.0 ? 1.0 : halfLifeMs;
+		return Math.pow(0.5, (now - last) / life);
 	}
 
 	/** Returns false when the event was a duplicate (same kind and block within 300 ms) and was ignored. */
@@ -93,10 +98,15 @@ public final class ActivityGrid {
 	}
 
 	public synchronized List<Cell> top(long nowMs, double minScore, int max) {
+		return top(nowMs, minScore, max, HALF_LIFE_MS);
+	}
+
+	/** The same top list, decayed over the module's Memory window. */
+	public synchronized List<Cell> top(long nowMs, double minScore, int max, double halfLifeMs) {
 		List<Cell> out = new ArrayList<>();
 		for (Map.Entry<Long, Acc> e : cells.entrySet()) {
 			Acc a = e.getValue();
-			double f = decay(nowMs, a.last), score = a.score * f;
+			double f = decay(nowMs, a.last, halfLifeMs), score = a.score * f;
 			if (score < minScore) {
 				continue;
 			}

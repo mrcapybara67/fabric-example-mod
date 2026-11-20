@@ -194,6 +194,11 @@ public final class SoundBypassFeed {
 		return grid.top(now, minScore, max);
 	}
 
+	/** Top cells using the module's Memory window for decay. */
+	public synchronized List<ActivityGrid.Cell> top(long now, double minScore, int max, double halfLifeMs) {
+		return grid.top(now, minScore, max, halfLifeMs);
+	}
+
 	public synchronized ChannelStats stats() {
 		return stats;
 	}

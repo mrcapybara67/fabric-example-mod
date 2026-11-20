@@ -38,6 +38,28 @@ public final class ChunkStyles {
 		s.line(xa, y + 0.02, za, xb, y + 0.02, zb, 2.0F, argb(a * 235 / 255, rgb));
 	}
 
+	/**
+	 * The same exposed-edge geometry as {@link #fillContour}, without the fill
+	 * quad and at exactly the caller's height. Used by the shared beacon look so
+	 * the plate and its rim have independent, testable lifts.
+	 */
+	public static void rim(DrawSink s, Set<Long> chunks, double y, int rgb, int alpha) {
+		for (long key : chunks) {
+			int cx = Chunks.x(key), cz = Chunks.z(key);
+			double x0 = cx * 16.0, z0 = cz * 16.0, x1 = x0 + 16, z1 = z0 + 16;
+			if (!chunks.contains(Chunks.key(cx, cz - 1))) edge(s, x0, z0, x1, z0, y, rgb, alpha);
+			if (!chunks.contains(Chunks.key(cx, cz + 1))) edge(s, x0, z1, x1, z1, y, rgb, alpha);
+			if (!chunks.contains(Chunks.key(cx - 1, cz))) edge(s, x0, z0, x0, z1, y, rgb, alpha);
+			if (!chunks.contains(Chunks.key(cx + 1, cz))) edge(s, x1, z0, x1, z1, y, rgb, alpha);
+		}
+	}
+
+	private static void edge(DrawSink s, double xa, double za, double xb, double zb, double y,
+			int rgb, int alpha) {
+		s.line(xa, y, za, xb, y, zb, 5.0F, argb(alpha * 55 / 255, rgb));
+		s.line(xa, y, za, xb, y, zb, 2.2F, argb(alpha, rgb));
+	}
+
 	/** MARKER: faint chunk, pulsing radial glow, corner brackets, two counter-rotating hexagons, optional beam. ease is 0..1. */
 	public static void marker(DrawSink s, int cx, int cz, double y, int rgb, double ease, double timeMs, boolean beam) {
 		double x0 = cx * 16.0, z0 = cz * 16.0, x1 = x0 + 16, z1 = z0 + 16, mx = x0 + 8, mz = z0 + 8;

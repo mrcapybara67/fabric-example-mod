@@ -3,8 +3,10 @@ package com.capy.client.module.modules.esp;
 import com.capy.client.config.ConfigValues;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FlagLook;
 import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.module.ColorSetting;
+import com.capy.client.module.IntSetting;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,18 +26,31 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 
 /**
- * Light Finder: one box per underground section that holds any block light.
- * Sections below light eight use the dim colour, sections at eight or above
- * use the bright colour.
+ * Light Finder: one box per underground section that holds block light at or
+ * above the minimum. Sections below light eight use the dim colour, sections
+ * at eight or above use the bright colour.
  *
- * <p>Each section's light layer is read once; the section is the resumable
- * unit, so a large view distance is scanned over several client ticks without
- * ever touching the world or sending a packet.</p>
+ * <p>Every limit in the card is applied to what is drawn: Max Y stops the walk
+ * at the requested height, Range trims boxes outside that many chunks, Max
+ * Blocks is a hard cap after trimming, and Update Interval sets how often the
+ * published set is refreshed from the scanned sections.</p>
  */
 public final class LightFinderModule extends FinderModule {
 	private static final int BRIGHT_LIGHT = 8;
 
-	private final ColorSetting colorBright = setting(new ColorSetting("color_bright", 0xFFFFE066));
+	private final IntSetting maxY = describe(setting(new IntSetting("max_y", 0, -64, 320, 1)),
+			"Do not read or draw light above this Y level.");
+	private final IntSetting minLight = describe(setting(new IntSetting("min_light", 1, 1, 15, 1)),
+			"The faintest block light that still gets a box.");
+	private final IntSetting rangeChunks = describe(setting(new IntSetting("range", 8, 1, 32, 1)),
+			"Only draw sections within this many chunks of you.");
+	private final IntSetting maxBlocks = describe(setting(new IntSetting("max_blocks", 20000, 100, 100000, 100)),
+			"Hard cap on the number of boxes drawn at once.");
+	private final IntSetting updateInterval = describe(setting(new IntSetting("update_interval", 20, 1, 200, 1)),
+			"Ticks between two light scan passes.");
+	private final ColorSetting colorBright = describe(setting(new ColorSetting("color_bright", 0x78FFFF32)),
+			"The colour used for sections at light eight or above.");
+
 	private final Map<Long, List<AABB>> boxesBySection = new HashMap<>();
 	private final Map<Long, List<AABB>> brightByChunk = new HashMap<>();
 	private final Set<AABB> bright = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -48,14 +63,25 @@ public final class LightFinderModule extends FinderModule {
 	private int scanSurface;
 	private int scanMax;
 	private int sectionCount;
+	private long lastPublishTick = Long.MIN_VALUE;
 
 	public LightFinderModule() {
-		super("light_finder", 0x995A8CFF);
+		super("light_finder", 0x50282832);
+		useShape("lines");
 	}
 
 	@Override
 	public void onTick(Minecraft mc) {
-		beginTick(mc);
+		if (!beginTick(mc)) {
+			return;
+		}
+		long tick = level.getGameTime();
+		if (lastPublishTick == Long.MIN_VALUE || tick - lastPublishTick >= updateInterval.get()) {
+			lastPublishTick = tick;
+			rebuildRender();
+			FinderScanner.get().queueAllLoaded();
+		}
+		refreshTerrain(flags.keySet());
 	}
 
 	@Override
@@ -73,6 +99,8 @@ public final class LightFinderModule extends FinderModule {
 					chunk.getPos().getMiddleBlockX(), chunk.getPos().getMiddleBlockZ());
 		}
 
+		int ceiling = maxY.get();
+		int threshold = minLight.get();
 		LevelChunkSection[] sections = chunk.getSections();
 		int minY = chunk.getMinY();
 		int baseX = chunk.getPos().getMinBlockX();
@@ -84,7 +112,7 @@ public final class LightFinderModule extends FinderModule {
 			}
 			scanSection = index + 1;
 			int sectionY = minY + (index << 4);
-			if (!underground(sectionY, scanSurface)) {
+			if (sectionY + 15 > ceiling || !underground(sectionY, scanSurface)) {
 				continue;
 			}
 			DataLayer data = level.getLightEngine().getLayerListener(LightLayer.BLOCK)
@@ -100,7 +128,7 @@ public final class LightFinderModule extends FinderModule {
 					}
 				}
 			}
-			if (max < 1) {
+			if (max < threshold) {
 				continue;
 			}
 			AABB box = new AABB(baseX, sectionY, baseZ,
@@ -121,11 +149,22 @@ public final class LightFinderModule extends FinderModule {
 			brightByChunk.put(key, List.copyOf(scratchBright));
 			markFlag(key, "section light " + scanMax, scanMax, scratch);
 		}
-		rebuildRender();
+		publishIfDue();
 		scanning = false;
 		scratch.clear();
 		scratchBright.clear();
 		return true;
+	}
+
+	private void publishIfDue() {
+		if (level == null) {
+			return;
+		}
+		long tick = level.getGameTime();
+		if (lastPublishTick == Long.MIN_VALUE || tick - lastPublishTick >= updateInterval.get()) {
+			lastPublishTick = tick;
+			rebuildRender();
+		}
 	}
 
 	@Override
@@ -135,7 +174,7 @@ public final class LightFinderModule extends FinderModule {
 
 	@Override
 	public int colorFor(AABB box, double timeSec) {
-		return bright.contains(box) ? colorBright.argbAt(timeSec) : color.argbAt(timeSec);
+		return bright.contains(box) ? colorBright.argbAt(timeSec) : colorArgb(timeSec);
 	}
 
 	@Override
@@ -145,33 +184,70 @@ public final class LightFinderModule extends FinderModule {
 
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		for (AABB box : boxesNearestFirst()) {
-			double distance = boxDistance(box);
-			if (!drawableFlag(distance)) {
-				continue;
-			}
-			if (fullStyle(distance, 150)) {
-				FlagStyles.bloom(sink, (box.minX + box.maxX) * 0.5, box.maxY + 0.06,
-						(box.minZ + box.maxZ) * 0.5, colorFor(box, timeSec) & 0xFFFFFF, timeMs);
+		if (flags.isEmpty()) {
+			return;
+		}
+		List<FlagLook.Flag> look = new ArrayList<>(flags.size());
+		for (long key : flagsNearestFirst()) {
+			AABB core = brightestBox(key);
+			double x = core == null ? Chunks.x(key) * 16.0 + 8.0 : (core.minX + core.maxX) * 0.5;
+			double z = core == null ? Chunks.z(key) * 16.0 + 8.0 : (core.minZ + core.maxZ) * 0.5;
+			int argb = core != null && bright.contains(core) ? colorBright.argbAt(timeSec) : colorArgb(timeSec);
+			look.add(FlagLook.Flag.at(key, x, z, terrainOrFlat(key), argb & 0xFFFFFF,
+					flagDistance(key), appearEase(key, timeMs), true, true));
+		}
+		FlagLook.drawAll(sink, look, timeMs, quality(), autoSimplified(), true, tracerOrigin());
+	}
+
+	private AABB brightestBox(long key) {
+		AABB best = null;
+		for (AABB box : boxesByFlag.getOrDefault(key, List.of())) {
+			if (best == null || box.maxY > best.maxY) {
+				best = box;
 			}
 		}
+		return best;
 	}
 
 	private void rebuildRender() {
+		Minecraft mc = Minecraft.getInstance();
+		boolean trim = mc != null && mc.player != null;
+		int playerChunkX = trim ? mc.player.blockPosition().getX() >> 4 : 0;
+		int playerChunkZ = trim ? mc.player.blockPosition().getZ() >> 4 : 0;
+		int range = rangeChunks.get();
+		int cap = maxBlocks.get();
+		Set<AABB> included = Collections.newSetFromMap(new IdentityHashMap<>());
 		List<AABB> all = new ArrayList<>();
-		int sections = 0;
-		for (List<AABB> boxes : boxesBySection.values()) {
-			all.addAll(boxes);
-			sections += boxes.size();
+		for (Map.Entry<Long, List<AABB>> entry : boxesBySection.entrySet()) {
+			long key = entry.getKey();
+			if (trim && (Math.abs(Chunks.x(key) - playerChunkX) > range
+					|| Math.abs(Chunks.z(key) - playerChunkZ) > range)) {
+				continue;
+			}
+			for (AABB box : entry.getValue()) {
+				if (all.size() >= cap) {
+					break;
+				}
+				all.add(box);
+				included.add(box);
+			}
+			if (all.size() >= cap) {
+				break;
+			}
 		}
 		renderBoxes = List.copyOf(all);
-		sectionCount = sections;
+		sectionCount = all.size();
 		bright.clear();
 		for (List<AABB> boxes : brightByChunk.values()) {
-			bright.addAll(boxes);
+			for (AABB box : boxes) {
+				if (included.contains(box)) {
+					bright.add(box);
+				}
+			}
 		}
 	}
 
+	/** True when the section is fully below the surface. */
 	private static boolean underground(int sectionY, int surfaceY) {
 		return sectionY + 16 <= surfaceY;
 	}
@@ -205,6 +281,7 @@ public final class LightFinderModule extends FinderModule {
 		scratchBright.clear();
 		renderBoxes = List.of();
 		sectionCount = 0;
+		lastPublishTick = Long.MIN_VALUE;
 		clearScan();
 	}
 
@@ -212,6 +289,9 @@ public final class LightFinderModule extends FinderModule {
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
 		colorBright.load(json, "color_bright");
+		// An old config may hold a range below the new minimum; the generic
+		// setting pass has already clamped it, this only records the fact.
+		ConfigValues.intValue(json, "range", rangeChunks.get());
 	}
 
 	@Override

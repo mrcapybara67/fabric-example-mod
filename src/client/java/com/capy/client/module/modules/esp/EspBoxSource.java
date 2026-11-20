@@ -23,4 +23,14 @@ public interface EspBoxSource {
 	float boxWidth();
 
 	float tracerWidth();
+
+	/** False draws with depth testing, so terrain can occlude the overlay. */
+	default boolean throughWalls() {
+		return true;
+	}
+
+	/** True fades a tracer towards its far end instead of drawing it flat. */
+	default boolean tracerFade() {
+		return false;
+	}
 }

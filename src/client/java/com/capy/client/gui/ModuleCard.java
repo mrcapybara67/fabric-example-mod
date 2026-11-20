@@ -12,6 +12,7 @@ import com.capy.client.module.SliderSetting;
 import com.capy.client.module.StringSetting;
 import com.capy.client.module.WatchlistSetting;
 import com.capy.client.module.modules.esp.EspModule;
+import com.capy.client.util.Guard;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
@@ -81,6 +82,10 @@ public class ModuleCard {
 	// Display strings are static per module — resolved once, not per frame.
 	private final String title;
 	private final Map<SliderSetting, String> sliderLabels = new IdentityHashMap<>();
+	/** Set during the last settings frame when the pointer is over a row. */
+	private String hoverTip = "";
+	private int hoverTipX;
+	private int hoverTipY;
 
 	// Geometry of the most recent frame (for hit-testing)
 	private int x;
@@ -265,6 +270,8 @@ public class ModuleCard {
 		for (Setting<?> s : module.settings()) {
 			total += settingHeight(s);
 		}
+		// Rows hidden by a dependency do not reserve space: the page must shrink
+		// in the same frame the parent switch changed, or a hole is left behind.
 		// Padding above *and* below the rows. With only the top padding the
 		// last row sat flush against the bottom of the well, so the toggle that
 		// ends the list looked clipped by the card.
@@ -272,6 +279,9 @@ public class ModuleCard {
 	}
 
 	private int settingHeight(Setting<?> s) {
+		if (!s.visible()) {
+			return 0;
+		}
 		if (s instanceof SliderSetting) {
 			return ROW_SLIDER;
 		}
@@ -330,7 +340,7 @@ public class ModuleCard {
 
 	// ---------------------------------------------------------------- render
 
-	public void render(UiCanvas c, UiType type, int x, int y, int w, int mouseX, int mouseY, float delta) {
+	public void render(UiCanvas c, UiType type, int x, int y, int w, float mouseX, float mouseY, float delta) {
 		int h = UiTheme.CARD_H;
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
 		hover.to(hovered ? 1f : 0f, delta);
@@ -445,18 +455,74 @@ public class ModuleCard {
 	 * so the view and its hit targets always agree.
 	 */
 	public void renderSettingsContent(UiCanvas c, UiType type, int x, int y, int w,
-			int scroll, int mouseX, int mouseY, float delta) {
+			int scroll, float mouseX, float mouseY, float delta) {
+		hoverTip = "";
 		int cy = y + PAD - scroll;
 		for (Setting<?> s : module.settings()) {
+			if (!s.visible()) {
+				continue;
+			}
 			cy += renderSetting(c, type, s, x, w, cy, mouseX, mouseY, delta);
 		}
 	}
 
+	/** Tooltip text for the row under the pointer, or empty. */
+	public String hoveredTip() {
+		return hoverTip;
+	}
+
+	public int hoveredTipX() {
+		return hoverTipX;
+	}
+
+	public int hoveredTipY() {
+		return hoverTipY;
+	}
+
+	/** Number of rows the page actually shows, used by its header. */
+	public int visibleSettingCount() {
+		int count = 0;
+		for (Setting<?> s : module.settings()) {
+			if (s.visible()) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	/** Short explanation for a row: a lang override, else the setting's own. */
+	private String settingTip(Setting<?> s) {
+		String key = "capy.module." + module.id() + "." + s.key() + ".tip";
+		String translated = UiLabels.translate(key, null);
+		if (translated != null) {
+			return translated;
+		}
+		if (s.tip() != null && !s.tip().isBlank()) {
+			return s.tip();
+		}
+		// Every row explains itself, even a legacy row written before tips
+		// were part of the setting model.
+		return "Changes " + UiLabels.humanize(s.key()) + ".";
+	}
+
 	/** Renders one setting row and returns the height it consumed. */
-	private int renderSetting(UiCanvas c, UiType type, Setting<?> s, int x, int w, int rowY, int mouseX, int mouseY, float delta) {
+	private int renderSetting(UiCanvas c, UiType type, Setting<?> s, int x, int w, int rowY, float mouseX, float mouseY, float delta) {
+		if (!s.visible()) {
+			return 0;
+		}
 		UiText regular = type.regular();
 		int contentX = x + UiTheme.SP_6;
 		int contentW = w - UiTheme.SP_6 * 2;
+		int rowHeight = settingHeight(s);
+		if (mouseX >= contentX && mouseX < x + w - UiTheme.SP_6
+				&& mouseY >= rowY && mouseY < rowY + rowHeight) {
+			String tip = settingTip(s);
+			if (!tip.isEmpty()) {
+				hoverTip = tip;
+				hoverTipX = (int) mouseX + 10;
+				hoverTipY = (int) mouseY;
+			}
+		}
 
 		if (s instanceof SliderSetting slider) {
 			UiSlider ui = sliders.get(slider);
@@ -725,8 +791,15 @@ public class ModuleCard {
 		rippleX = (int) Math.round(mx);
 		rippleY = (int) Math.round(my);
 		ripple.snap(1f);
-		module.toggle();
-		GuiSounds.toggle(module.isEnabled());
+		GuiPerf.beginToggle(module.id());
+		try {
+			module.toggle();
+		} finally {
+			GuiPerf.endToggle();
+		}
+		// A missing audio context must never turn a successful click into a
+		// crash; the module has already changed state at this point.
+		Guard.run("card toggle sound", () -> GuiSounds.toggle(module.isEnabled()));
 		return true;
 	}
 
@@ -753,6 +826,9 @@ public class ModuleCard {
 			}
 		}
 		for (Map.Entry<SliderSetting, int[]> entry : sliderBounds.entrySet()) {
+			if (!entry.getKey().visible()) {
+				continue;
+			}
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
 				sliders.get(entry.getKey()).pressed(mx);
@@ -760,6 +836,9 @@ public class ModuleCard {
 			}
 		}
 		for (Map.Entry<BooleanSetting, int[]> entry : switchBounds.entrySet()) {
+			if (!entry.getKey().visible()) {
+				continue;
+			}
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
 				entry.getKey().toggle();
@@ -768,6 +847,9 @@ public class ModuleCard {
 			}
 		}
 		for (Map.Entry<ActionSetting, int[]> entry : actionBounds.entrySet()) {
+			if (!entry.getKey().visible()) {
+				continue;
+			}
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
 				entry.getKey().run();
@@ -776,6 +858,9 @@ public class ModuleCard {
 			}
 		}
 		for (Map.Entry<ChoiceSetting, int[]> entry : choiceBounds.entrySet()) {
+			if (!entry.getKey().visible()) {
+				continue;
+			}
 			int[] b = entry.getValue();
 			if (mx >= b[0] && mx < b[1] && my >= b[2] && my < b[3]) {
 				// The leading arrow steps back, the value and the trailing arrow
@@ -785,18 +870,18 @@ public class ModuleCard {
 				return true;
 			}
 		}
-		for (UiWatchlist ui : watchlists.values()) {
-			if (ui.mouseClicked(mx, my)) {
+		for (Map.Entry<WatchlistSetting, UiWatchlist> entry : watchlists.entrySet()) {
+			if (entry.getKey().visible() && entry.getValue().mouseClicked(mx, my)) {
 				return true;
 			}
 		}
-		for (UiWatchlist ui : blockLists.values()) {
-			if (ui.mouseClicked(mx, my)) {
+		for (Map.Entry<BlockListSetting, UiWatchlist> entry : blockLists.entrySet()) {
+			if (entry.getKey().visible() && entry.getValue().mouseClicked(mx, my)) {
 				return true;
 			}
 		}
-		for (UiColorPicker picker : pickers.values()) {
-			if (picker.mouseClicked(mx, my)) {
+		for (Map.Entry<ColorSetting, UiColorPicker> entry : pickers.entrySet()) {
+			if (entry.getKey().visible() && entry.getValue().mouseClicked(mx, my)) {
 				return true;
 			}
 		}

@@ -6,11 +6,16 @@ import com.capy.client.finder.core.ChannelRecord;
 import com.capy.client.finder.core.ChannelStats;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FinderBeams;
+import com.capy.client.finder.core.FinderRules;
+import com.capy.client.finder.core.FlagLook;
 import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.SoundBypassFeed;
 import com.capy.client.finder.core.SoundKinds;
 import com.capy.client.finder.core.TerrainPlate;
 import com.capy.client.module.BooleanSetting;
+import com.capy.client.module.ColorSetting;
+import com.capy.client.module.IntSetting;
 import com.google.gson.JsonObject;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,6 +24,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
@@ -27,6 +33,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.AABB;
 
 /**
  * Sound Bypass: marks player or machine activity from packets the server has
@@ -35,15 +42,36 @@ import net.minecraft.world.level.chunk.LevelChunk;
  */
 public final class SoundBypassModule extends FinderModule {
 	private static final double MAX_DISTANCE = 192.0;
-	private static final double MIN_SCORE = 6.0;
 	private static final int MAX_CELLS = 8;
 	private static final int MAX_DRAWN = 6;
 	private static final long REFRESH_MS = 500L;
 	private static final long SNAPSHOT_TICKS = 5L;
 
-	private final BooleanSetting colorByType = setting(new BooleanSetting("color_by_type", true));
+	private final BooleanSetting colorByType = describe(setting(new BooleanSetting("color_by_type", false)),
+			"Use a colour per sound kind instead of the overlay colour.");
+	private final IntSetting sensitivity = describe(setting(new IntSetting("sensitivity", 12, 2, 80, 1)),
+			"The activity score a cell must reach to be marked.");
+	private final IntSetting memory = describe(setting(new IntSetting("memory", 60, 10, 600, 1)),
+			"How long activity is remembered, in seconds.");
+	private final IntSetting ignoreNearMe = describe(setting(new IntSetting("ignore_near_me", 24, 0, 96, 1)),
+			"Drop activity closer than this many blocks to you.");
+	private final BooleanSetting notifications = describe(setting(new BooleanSetting("notify", false)),
+			"Show a toast when a new activity cell appears.");
+	private final IntSetting cooldown = describe(setting(new IntSetting("cooldown", 120, 10, 900, 1),
+			() -> notifications.value()), "Seconds between two activity toasts.");
+	private final BooleanSetting chatMessage = describe(setting(new BooleanSetting("chat_message", false),
+			() -> notifications.value()), "Write one chat line per new activity cell.");
+	private final BooleanSetting beams = describe(setting(new BooleanSetting("beams", true)),
+			"Draw a vertical beam above active cells.");
+	private final BooleanSetting tracer = describe(setting(new BooleanSetting("tracers", false)),
+			"Draw a fading line from the crosshair to every active cell.");
+	private final ColorSetting colorBusy = describe(setting(new ColorSetting("color_busy", 0xE6FF5078)),
+			"The colour for cells with twice the threshold score.");
+	private long lastNotifyMs = Long.MIN_VALUE / 2;
+	private List<AABB> tracerBoxes = List.of();
 	private final SoundBypassFeed feed = SoundBypassFeed.get();
 	private final List<CellView> active = new ArrayList<>();
+	private final Map<Long, Long> activeSince = new java.util.HashMap<>();
 	private final Set<String> savedDeep = new HashSet<>();
 
 	private record CellView(ActivityGrid.Cell cell, long chunkKey, String reason) {
@@ -57,7 +85,42 @@ public final class SoundBypassModule extends FinderModule {
 	private String savedServer;
 
 	public SoundBypassModule() {
-		super("sound_bypass", 0xFFFFB347);
+		super("sound_bypass", 0xC878C8FF);
+	}
+
+	@Override
+	public boolean fills() {
+		return false;
+	}
+
+	@Override
+	public boolean outlines() {
+		return false;
+	}
+
+	@Override
+	public boolean tracers() {
+		return false;
+	}
+
+	@Override
+	protected boolean flagTracers() {
+		return tracer.value();
+	}
+
+	@Override
+	public boolean tracerFade() {
+		return tracer.value();
+	}
+
+	@Override
+	public List<AABB> boxes() {
+		return tracerBoxes;
+	}
+
+	@Override
+	public int colorFor(AABB box, double timeSec) {
+		return colorArgb(timeSec);
 	}
 
 	/** Packet driven; the chunk scanner is deliberately not used. */
@@ -90,46 +153,38 @@ public final class SoundBypassModule extends FinderModule {
 		if (active.isEmpty() || level == null) {
 			return;
 		}
-		Set<Long> plates = new HashSet<>();
 		List<CellView> ordered = new ArrayList<>(active.subList(0, shown));
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.player != null) {
 			ordered.sort(Comparator.comparingDouble(view -> mc.player.distanceToSqr(
 					view.cell().x(), view.cell().y(), view.cell().z())));
 		}
+		Set<Long> drawn = new HashSet<>();
+		List<FlagLook.Flag> look = new ArrayList<>();
 		for (CellView view : ordered) {
+			long key = view.chunkKey();
+			if (!drawn.add(key)) {
+				continue;
+			}
 			ActivityGrid.Cell cell = view.cell();
-			double distance = flagDistance(view.chunkKey());
+			double distance = flagDistance(key);
 			if (!drawableFlag(distance)) {
 				continue;
 			}
-			double fade = clamp((cell.score() - MIN_SCORE) / MIN_SCORE);
+			double fade = FinderRules.scoreFade(cell.score(), sensitivity.get());
 			if (fade <= 0.01) {
 				continue;
 			}
-			int base = colorByType.value() ? kindColor(cell.dominant()) : colorArgb(timeSec);
-			int alpha = (int) Math.round(((base >>> 24) & 0xFF) * fade);
-			if (alpha <= 1) {
+			int base = cell.score() >= sensitivity.get() * 2.0 ? colorBusy.argbAt(timeSec)
+					: colorByType.value() ? kindColor(cell.dominant()) : colorArgb(timeSec);
+			if (((base >>> 24) & 0xFF) * fade <= 1.0) {
 				continue;
 			}
-			int plateColor = withAlpha(base, Math.min(80, alpha / 3));
-			int[] heights = cachedTerrain(view.chunkKey());
-			if (heights != null && plates.add(view.chunkKey())) {
-				TerrainPlate.emit(sink, cell.sx(), cell.sz(), heights, plateColor, 0.04);
-			}
-			if (fullStyle(distance, 240)) {
-				long period = cell.farm() ? 900L : 1500L;
-				FlagStyles.sonar(sink, cell.x(), cell.y() + 0.03, cell.z(), base & 0xFFFFFF,
-						4.4, timeMs, period);
-				if (heights != null) {
-					double surface = TerrainPlate.average(heights);
-					if (!Double.isNaN(surface)) {
-						FlagStyles.depthGauge(sink, cell.x(), cell.z(), surface + 0.06, cell.y(),
-								base & 0xFFFFFF, timeMs);
-					}
-				}
-			}
+			double ease = FlagLook.easeOutCubic(activeSince.getOrDefault(key, 0L), timeMs);
+			look.add(FlagLook.Flag.at(key, cell.x(), cell.z(), terrainOrFlat(key),
+					base & 0xFFFFFF, distance, ease, tracer.value(), beams.value()));
 		}
+		FlagLook.drawAll(sink, look, timeMs, quality(), autoSimplified(), tracer.value(), tracerOrigin());
 	}
 
 	private void refreshSnapshot(Minecraft mc) {
@@ -161,9 +216,14 @@ public final class SoundBypassModule extends FinderModule {
 	}
 
 	private void refreshCells(Minecraft mc, long now) {
-		List<ActivityGrid.Cell> top = feed.top(now, MIN_SCORE, MAX_CELLS);
+		double halfLife = FinderRules.halfLifeForWindowSeconds(memory.get());
+		List<ActivityGrid.Cell> top = feed.top(now, sensitivity.get(), MAX_CELLS, halfLife);
 		List<CellView> next = new ArrayList<>();
 		Set<Long> keys = new LinkedHashSet<>();
+		Set<Long> before = new HashSet<>();
+		for (CellView view : active) {
+			before.add(view.chunkKey());
+		}
 		double px = mc.player == null ? 0 : mc.player.getX();
 		double py = mc.player == null ? 0 : mc.player.getY();
 		double pz = mc.player == null ? 0 : mc.player.getZ();
@@ -175,12 +235,42 @@ public final class SoundBypassModule extends FinderModule {
 				continue;
 			}
 			long key = Chunks.key(cell.sx(), cell.sz());
+			if (FinderRules.withinBlocks(Chunks.x(key), Chunks.z(key), px, pz, ignoreNearMe.get())) {
+				continue;
+			}
 			next.add(new CellView(cell, key, reason(cell)));
 			keys.add(key);
 		}
+		boolean announced = false;
+		for (CellView view : next) {
+			if (before.contains(view.chunkKey())) {
+				continue;
+			}
+			if (chatMessage.value()) {
+				notify.chat(mc, "Sound Bypass: " + view.reason());
+			}
+			if (notifications.value() && !announced
+					&& now - lastNotifyMs >= cooldown.get() * 1000L) {
+				announced = true;
+				if (notify.toast(mc, "Sound Bypass", view.reason())) {
+					lastNotifyMs = now;
+				}
+			}
+		}
+		for (long key : keys) {
+			activeSince.putIfAbsent(key, now);
+		}
+		activeSince.keySet().retainAll(keys);
 		active.clear();
 		active.addAll(next);
 		shown = Math.min(MAX_DRAWN, active.size());
+		List<AABB> boxes = new ArrayList<>(next.size());
+		for (CellView view : next) {
+			ActivityGrid.Cell cell = view.cell();
+			boxes.add(new AABB(cell.x() - 0.5, cell.y() - 0.5, cell.z() - 0.5,
+					cell.x() + 0.5, cell.y() + 0.5, cell.z() + 0.5));
+		}
+		tracerBoxes = List.copyOf(boxes);
 		refreshTerrain(keys);
 		retainTerrain(keys);
 	}
@@ -252,6 +342,8 @@ public final class SoundBypassModule extends FinderModule {
 	public void resetSession() {
 		super.resetSession();
 		active.clear();
+		activeSince.clear();
+		tracerBoxes = List.of();
 		shown = 0;
 		lastRefreshMs = -1L;
 		lastSnapshotTick = Long.MIN_VALUE;
@@ -261,13 +353,15 @@ public final class SoundBypassModule extends FinderModule {
 	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
-		colorByType.set(ConfigValues.boolValue(json, "color_by_type", true));
+		colorByType.set(ConfigValues.boolValue(json, "color_by_type", false));
+		colorBusy.load(json, "color_busy");
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
 		json.addProperty("color_by_type", colorByType.value());
+		colorBusy.save(json, "color_busy");
 	}
 
 	private void flushChannels() {

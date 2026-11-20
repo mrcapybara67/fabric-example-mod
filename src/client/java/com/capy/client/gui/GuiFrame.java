@@ -113,6 +113,8 @@ public final class GuiFrame {
 	private int layoutSelected = -1;
 	private String layoutQuery = "";
 	private boolean layoutDirty = true;
+	/** Cards that survived the last render's viewport culling. */
+	private int lastVisibleCards;
 
 	private int selected;
 	private int lastSelected = -1;
@@ -420,7 +422,7 @@ public final class GuiFrame {
 	 *
 	 * @param open 0..1, drives the opening and closing transition
 	 */
-	public void render(UiCanvas c, UiType type, int mouseX, int mouseY, float delta, float open) {
+	public void render(UiCanvas c, UiType type, float mouseX, float mouseY, float delta, float open) {
 		float fade = Motion.clamp01(open);
 		if (fade <= 0.02f) {
 			return;
@@ -510,10 +512,11 @@ public final class GuiFrame {
 		renderSidebar(c, type, wx, wy, ww, wh, mouseX, mouseY, delta, (1f - ease) * 22f);
 		renderContent(c, type, mouseX, mouseY, delta, (1f - contentEase) * 26f, contentEase);
 
-		tooltip.render(c, type.regular());
 		if (guiSettingsOpen) {
 			renderGuiSettings(c, type, mouseX, mouseY, delta);
 		}
+		// Last, so a tooltip floats above the settings page it belongs to.
+		tooltip.render(c, type.regular());
 	}
 
 	/** Slow drift of the specular band, so the window never looks static. */
@@ -522,7 +525,7 @@ public final class GuiFrame {
 		return (float) (0.5 + 0.5 * Math.sin(t * Math.PI * 2.0));
 	}
 
-	private void renderHeader(UiCanvas c, UiType type, int wx, int wy, int ww, int mouseX, int mouseY, float delta) {
+	private void renderHeader(UiCanvas c, UiType type, int wx, int wy, int ww, float mouseX, float mouseY, float delta) {
 		// Two custom weights lead the band: a small uppercase wordmark above
 		// the large page title. It gives the header a typographic hierarchy
 		// without adding another panel or another icon.
@@ -640,7 +643,7 @@ public final class GuiFrame {
 
 	/** The settings button: plain text, no branding mark. */
 	private void renderSettingsButton(UiCanvas c, UiType type, int wx, int wy, int ww,
-			int mouseX, int mouseY) {
+			float mouseX, float mouseY) {
 		int x = settingsX(wx, ww);
 		int y = wy + (UiTheme.HEADER_H - UiTheme.SEARCH_H) / 2;
 		int w = settingsButtonWidth();
@@ -659,7 +662,7 @@ public final class GuiFrame {
 				Ui.centerTextY(y, h, regular), ink);
 	}
 
-	private void renderGuiSettings(UiCanvas c, UiType type, int mouseX, int mouseY, float delta) {
+	private void renderGuiSettings(UiCanvas c, UiType type, float mouseX, float mouseY, float delta) {
 		ClientConfig config = ClientConfig.get();
 		int w = Math.min(SETTINGS_PANEL_W, width - 24);
 		int h = SETTINGS_PANEL_H;
@@ -734,7 +737,7 @@ public final class GuiFrame {
 
 	private void drawSettingToggle(UiCanvas c, UiText font, String label, UiToggle toggle,
 			boolean value, int rowX, int rowY, int rowW, int toggleX,
-			int mouseX, int mouseY, float delta) {
+			float mouseX, float mouseY, float delta) {
 		boolean hovered = mouseX >= rowX && mouseX < rowX + rowW
 				&& mouseY >= rowY && mouseY < rowY + UiTheme.TOGGLE_H + 6;
 		toggle.update(value, hovered, delta);
@@ -755,7 +758,7 @@ public final class GuiFrame {
 
 	/** One label plus a click-to-cycle control, using the same blocky radius. */
 	private void drawSettingsStepper(UiCanvas c, UiText font, String label, String value,
-			int labelX, int rowY, int x, int w, int mouseX, int mouseY) {
+			int labelX, int rowY, int x, int w, float mouseX, float mouseY) {
 		font.draw(c, label, labelX, Ui.centerTextY(rowY, 22, font), UiTheme.TEXT_2);
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= rowY && mouseY < rowY + 22;
 		Ui.surface(c, x, rowY, w, 22, 3,
@@ -765,7 +768,7 @@ public final class GuiFrame {
 		Ui.drawCentered(c, font, value, x + w / 2, Ui.centerTextY(rowY, 22, font),
 				hovered ? UiTheme.TEXT : UiTheme.ACCENT_2);
 	}
-	private void renderSidebar(UiCanvas c, UiType type, int wx, int wy, int ww, int wh, int mouseX, int mouseY,
+	private void renderSidebar(UiCanvas c, UiType type, int wx, int wy, int ww, int wh, float mouseX, float mouseY,
 			float delta, float slide) {
 		int px = sidebarX() - Math.round(slide);
 		int py = sidebarY();
@@ -870,7 +873,7 @@ public final class GuiFrame {
 		}
 	}
 
-	private void renderContent(UiCanvas c, UiType type, int mouseX, int mouseY, float delta, float slide,
+	private void renderContent(UiCanvas c, UiType type, float mouseX, float mouseY, float delta, float slide,
 			float reveal) {
 		int cx = contentX();
 		int top = contentTop() + Math.round(slide);
@@ -938,6 +941,7 @@ public final class GuiFrame {
 		// used by the layout and the window-height calculation.
 		int columns = cardColumns();
 		int colW = Math.max(80, (cw - UiTheme.CARD_GAP * (columns - 1)) / columns);
+		int drawn = 0;
 		for (int i = 0; i < list.size(); i++) {
 			ModuleCard card = list.get(i);
 			int y = listY + layoutTops[i];
@@ -945,16 +949,35 @@ public final class GuiFrame {
 				int cardX = cx + (i % columns) * (colW + UiTheme.CARD_GAP);
 				card.setReveal(Motion.clamp01(reveal * 1.35f - Math.min(i / columns, 10) * 0.035f));
 				card.render(c, type, cardX, y, colW, mouseX, mouseY, delta);
+				GuiPerf.cardDrawn();
+				drawn++;
 			}
 		}
+		lastVisibleCards = drawn;
 		c.popClip();
 
 		scrollbar.render(c);
 	}
 
+	/** Test hook: the exact list object the next frame will render. */
+	List<ModuleCard> visibleCardsForTest() {
+		return visibleCards();
+	}
+
+	/** Test hook: a copy of the retained card rows. */
+	int[] layoutTopsForTest() {
+		ensureCardLayout(visibleCards());
+		return layoutTops.clone();
+	}
+
+	/** Test hook: cards that survived the last frame's culling. */
+	int visibleCardCountForTest() {
+		return lastVisibleCards;
+	}
+
 	/** A full-workspace settings page, replacing the card grid instead of floating over it. */
 	private void renderSettingsPage(UiCanvas c, UiType type, int x, int y, int w, int bottom,
-			int mouseX, int mouseY, float delta) {
+			float mouseX, float mouseY, float delta) {
 		int h = Math.max(0, bottom - y);
 		Ui.shadow(c, x, y, w, h, UiTheme.RADIUS_LG);
 		Ui.surface(c, x, y, w, h, UiTheme.RADIUS_LG, UiTheme.WELL_TOP, UiTheme.WELL_BOTTOM);
@@ -989,7 +1012,7 @@ public final class GuiFrame {
 		}
 		int titleY = settingsBackY + settingsBackH + UiTheme.SP_3;
 		titleFont.draw(c, title, x + pad, titleY, UiTheme.TEXT);
-		int count = settingsCard.module().settings().size();
+		int count = settingsCard.visibleSettingCount();
 		Ui.drawRightAligned(c, type.regular(), count + (count == 1 ? " option" : " options"),
 				x + w - pad, titleY + (titleFont.lineHeight() - type.regular().lineHeight()) / 2,
 				UiTheme.TEXT_3);
@@ -1009,6 +1032,10 @@ public final class GuiFrame {
 		settingsCard.renderSettingsContent(c, type, x + pad, settingsBodyY, contentW,
 				(int) Math.round(settingsScrollbar.scroll()), mouseX, mouseY, delta);
 		c.popClip();
+		String rowTip = settingsCard.hoveredTip();
+		if (rowTip != null && !rowTip.isEmpty()) {
+			tooltip.show(rowTip, settingsCard.hoveredTipX(), settingsCard.hoveredTipY());
+		}
 		settingsScrollbar.render(c);
 	}
 

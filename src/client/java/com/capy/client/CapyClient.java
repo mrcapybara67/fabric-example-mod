@@ -43,6 +43,7 @@ import com.capy.client.module.modules.esp.BlockNotifierModule;
 import com.capy.client.module.modules.esp.ChunkRenderPass;
 import com.capy.client.module.modules.esp.ChunkScannerModule;
 import com.capy.client.module.modules.esp.DeepslateFinderModule;
+import com.capy.client.module.modules.esp.SuspiciousEspModule;
 import com.capy.client.module.modules.esp.EspRenderer;
 import com.capy.client.module.modules.esp.FinderScanner;
 import com.capy.client.module.modules.esp.HiveFinderModule;
@@ -120,6 +121,7 @@ public class CapyClient implements ClientModInitializer {
 		modules.register(new ChunkScannerModule());
 		modules.register(new HiveFinderModule());
 		modules.register(new DeepslateFinderModule());
+		modules.register(new SuspiciousEspModule());
 		// Light is the one signal an anti-xray cannot hide, so the artificial
 		// light finder reads the light layer rather than the blocks. The light
 		// finder is its section-level companion; the bedrock finder looks for
@@ -184,6 +186,10 @@ public class CapyClient implements ClientModInitializer {
 		// inside vanilla's tick loop, where an escaped exception is a crash
 		// rather than a skipped feature.
 		ClientTickEvents.END_CLIENT_TICK.register(client -> Guard.run("tick", () -> {
+			// Apply module hooks queued by a click on the previous frame. This is
+			// deliberately before the module ticks: the hook sees the tick that
+			// follows the click, not the click's render frame.
+			Guard.run("pending module toggles", modules::flushPendingToggles);
 			// Build the bundled faces outside a frame. The lazy path would
 			// otherwise upload a font texture in the middle of the first GUI or
 			// HUD draw, which is the worst possible moment for it.

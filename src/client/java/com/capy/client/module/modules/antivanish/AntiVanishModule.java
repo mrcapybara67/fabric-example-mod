@@ -2,13 +2,14 @@ package com.capy.client.module.modules.antivanish;
 
 import com.capy.client.antivanish.VanishPackets;
 import com.capy.client.antivanish.VanishProbe;
-import com.capy.client.antivanish.core.AlertTimeline;
 import com.capy.client.antivanish.core.DepartureTracker;
 import com.capy.client.antivanish.core.GhostMemory;
 import com.capy.client.antivanish.core.SoundGate;
 import com.capy.client.antivanish.core.VanishEngine;
 import com.capy.client.antivanish.core.VanishText;
 import com.capy.client.config.ConfigValues;
+import com.capy.client.gui.McCanvas;
+import com.capy.client.gui.UiLabels;
 import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
 import com.capy.client.module.Configurable;
@@ -18,6 +19,9 @@ import com.capy.client.module.Tickable;
 import com.capy.client.module.WatchlistSetting;
 import com.capy.client.module.modules.hud.HudElementModule;
 import com.capy.client.module.modules.hud.HudPanel;
+import com.capy.client.module.modules.antiadmin.AdminAlert;
+import com.capy.client.module.modules.antiadmin.AdminDetector;
+import com.capy.client.module.modules.antiadmin.AlertRenderer;
 import com.capy.client.module.modules.antiadmin.PacketSignals;
 import com.capy.client.module.modules.antiadmin.TabList;
 import com.capy.client.util.Guard;
@@ -40,6 +44,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.GameType;
@@ -71,28 +76,40 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 
 	private static final int INVISIBLE_SCAN_INTERVAL = 5;
 	private static final int HUD_ROWS = 4;
-	private static final long ALERT_MS = Math.round(AlertTimeline.TOTAL * 1000.0);
 	private static final long PROBE_LEAVE_GRACE_MS = 8_000L;
+	private static final long DEATH_GRACE_MS = 12_000L;
 	private static final double INVISIBLE_RANGE = 64.0;
 	private static final int VANISH_WEIGHT = 100;
 	private static final int INVISIBLE_WEIGHT = 35;
 	private static final long VANISH_COOLDOWN_MS = 3_000L;
 	private static final long INVISIBLE_COOLDOWN_MS = 5_000L;
 	private static final int SPECTATOR = GameType.SPECTATOR.getId();
+	private static final String WATCH_LINE = UiLabels.translate("capy.alert.anti_vanish_watching",
+			"Someone I typed in settings/admin is Watching you");
+	private static final String SAFE_LINE = UiLabels.translate("capy.alert.anti_vanish_stay_safe",
+			"Be Careful Capy Client User");
 
-	private final WatchlistSetting watchlist = setting(new WatchlistSetting("watchlist"));
-	private final BooleanSetting chatLog = setting(new BooleanSetting("chat_log", false));
-	private final BooleanSetting probe = setting(new BooleanSetting("probe", false));
-	private final SliderSetting anchor = setting(new SliderSetting("anchor", HudElementModule.ANCHOR_TOP_RIGHT,
-			HudElementModule.ANCHOR_TOP_LEFT, HudElementModule.ANCHOR_BOTTOM_RIGHT));
-	private final SliderSetting offsetX = setting(new SliderSetting("offset_x", 0,
-			-HudElementModule.MAX_NUDGE, HudElementModule.MAX_NUDGE));
-	private final SliderSetting offsetY = setting(new SliderSetting("offset_y", 0,
-			-HudElementModule.MAX_NUDGE, HudElementModule.MAX_NUDGE));
+	private final WatchlistSetting watchlist = describe(setting(new WatchlistSetting("watchlist")),
+			"Accounts to watch for vanish clues.");
+	private final BooleanSetting chatLog = describe(setting(new BooleanSetting("chat_log", false)),
+			"Write new vanish findings to chat.");
+	private final BooleanSetting probe = describe(setting(new BooleanSetting("probe", false)),
+			"Send tab-completion probes for watched names. Off by default.");
+	private final SliderSetting anchor = describe(setting(new SliderSetting("anchor", HudElementModule.ANCHOR_TOP_RIGHT,
+			HudElementModule.ANCHOR_TOP_LEFT, HudElementModule.ANCHOR_BOTTOM_RIGHT)),
+			"Which corner of the HUD the panel is placed in.");
+	private final SliderSetting offsetX = describe(setting(new SliderSetting("offset_x", 0,
+			-HudElementModule.MAX_NUDGE, HudElementModule.MAX_NUDGE)),
+			"Horizontal nudge from the anchor.");
+	private final SliderSetting offsetY = describe(setting(new SliderSetting("offset_y", 0,
+			-HudElementModule.MAX_NUDGE, HudElementModule.MAX_NUDGE)),
+			"Vertical nudge from the anchor.");
 	private final VanishProbe probeClient = new VanishProbe();
 	private final Map<String, Long> leaveAt = new HashMap<>();
 	private final Map<UUID, Subject> subjects = new HashMap<>();
 	private final Map<UUID, Integer> gameModes = new HashMap<>();
+	private final Map<UUID, Long> deaths = new HashMap<>();
+	private final Set<UUID> spectatorSwitches = new HashSet<>();
 	private final VanishEngine engine = new VanishEngine();
 	private final DepartureTracker tracker = new DepartureTracker();
 	private final GhostMemory ghost = new GhostMemory();
@@ -135,6 +152,7 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 			seed(mc);
 		}
 		long now = System.currentTimeMillis();
+		rememberDeaths(mc, now);
 		boolean bodyData = false;
 		for (VanishPackets.Event event : VanishPackets.drain()) {
 			if (event instanceof VanishPackets.InfoBatch batch) {
@@ -169,17 +187,16 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 			scanInvisibleBodies(mc, now);
 		}
 		processDue(mc, now);
-		if (activeAlert != null && now - activeAlert.startedAt() > ALERT_MS) {
+		if (activeAlert != null && activeAlert.guardian().finished(now)) {
 			activeAlert = null;
 		}
-		VanishEngine.Critical critical = engine.evaluate(now);
+		VanishEngine.Critical critical = activeAlert == null
+				? engine.evaluate(now, candidate -> isNearVanish(candidate, now))
+				: null;
 		if (critical != null) {
 			lastCritical = critical;
-			if (activeAlert == null) {
-				int distance = critical.proof() == null ? -1 : critical.proof().distance();
-				activeAlert = new ActiveAlert(critical.name(), distance, now);
-				playAlertSound();
-			}
+			activeAlert = new ActiveAlert(critical.name(), guardianAlert(critical, now));
+			playAlertSound();
 		}
 		VanishEngine.Cluster cluster = engine.evaluateCluster(now);
 		if (cluster != null) {
@@ -210,7 +227,7 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 			String name = update.name() == null ? nameOf(id) : update.name();
 			if (update.gameMode() != null) {
 				boolean credibleBefore = credible(id, name, batch.timeMs());
-				applyGameMode(id, name, update.gameMode(), credibleBefore, bodyDistance(mc, id), batch.timeMs());
+				applyGameMode(id, name, update.gameMode(), credibleBefore, batch.timeMs());
 			}
 			if (update.listed() != null) {
 				processListed(id, name, update.listed(), batch.entries(), batch.timeMs());
@@ -228,8 +245,14 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 			return;
 		}
 		String resolved = name == null ? nameOf(uuid) : name;
+		spectatorSwitches.remove(uuid);
+		gameModes.remove(uuid);
 		if (entries >= 4) {
 			forgetSubject(uuid);
+			return;
+		}
+		if (recentlyDied(uuid, now)) {
+			observeListed(uuid, resolved, false, now);
 			return;
 		}
 		if (resolved != null && credible(uuid, resolved, now)) {
@@ -248,7 +271,7 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		}
 		String resolved = name == null ? nameOf(uuid) : name;
 		boolean credibleBefore = credible(uuid, resolved, now);
-		if (!listed && entries < 4 && credibleBefore && resolved != null) {
+		if (!listed && entries < 4 && credibleBefore && resolved != null && !recentlyDied(uuid, now)) {
 			DepartureTracker.Finding finding = tracker.hiddenFromTab(uuid.toString(), resolved, now);
 			if (finding != null) {
 				addVanish(finding, now);
@@ -257,30 +280,41 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		observeListed(uuid, resolved, listed, now);
 	}
 
-	private void applyGameMode(UUID uuid, String name, int mode, boolean credibleBefore, int bodyDistance, long now) {
+	private void applyGameMode(UUID uuid, String name, int mode, boolean credibleBefore, long now) {
 		Integer previous = gameModes.put(uuid, mode);
 		if (name == null) {
 			return;
 		}
+		if (recentlyDied(uuid, now)) {
+			spectatorSwitches.remove(uuid);
+			engine.forgetVanish(name);
+			return;
+		}
 		if (mode == SPECTATOR) {
-			if (credibleBefore) {
-				VanishEngine.Proof proof = bodyDistance >= 0
-						? new VanishEngine.Proof(uuid.toString(), bodyDistance) : null;
-				engine.add(VanishEngine.Type.VANISH, name, proof,
-						"Vanish Event: switched to spectator", VANISH_WEIGHT, VANISH_COOLDOWN_MS, now);
+			// Spectator is not a vanish. Dead players are commonly put in
+			// spectator mode by the server, so the mode alone is never a clue.
+			// A real switch only becomes evidence once a live, invisible body
+			// is seen nearby by the scanner.
+			if (credibleBefore && previous != null && previous != SPECTATOR) {
+				spectatorSwitches.add(uuid);
+			} else {
+				spectatorSwitches.remove(uuid);
 			}
-		} else if (previous != null && previous == SPECTATOR) {
+			return;
+		}
+		spectatorSwitches.remove(uuid);
+		if (previous != null && previous == SPECTATOR) {
 			engine.forgetVanish(name);
 		}
 	}
 
 	/** Handles a game-mode update without requiring a live Minecraft instance. */
-	public void observeGameMode(UUID uuid, String name, int mode, int bodyDistance, long now) {
+	public void observeGameMode(UUID uuid, String name, int mode, long now) {
 		if (uuid == null) {
 			return;
 		}
 		String resolved = name == null ? nameOf(uuid) : name;
-		applyGameMode(uuid, resolved, mode, credible(uuid, resolved, now), bodyDistance, now);
+		applyGameMode(uuid, resolved, mode, credible(uuid, resolved, now), now);
 	}
 
 	private void processChat(PacketSignals.SystemChat line) {
@@ -335,7 +369,9 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 	/** Runs the departure delay against a caller-supplied view. */
 	public void processDue(long now, DepartureTracker.View view) {
 		for (DepartureTracker.Finding finding : tracker.due(now, view)) {
-			addVanish(finding, now);
+			if (!recentlyDied(parseUuid(finding.uuid()), now)) {
+				addVanish(finding, now);
+			}
 		}
 	}
 
@@ -365,7 +401,8 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 			return;
 		}
 		Entity entity = mc.level.getEntity(sound.entityId());
-		if (!(entity instanceof AbstractClientPlayer player) || player == mc.player || !player.isInvisible()) {
+		if (!(entity instanceof AbstractClientPlayer player) || player == mc.player || !player.isInvisible()
+				|| player.isDeadOrDying()) {
 			return;
 		}
 		double distanceSqr = player.distanceToSqr(mc.player);
@@ -453,7 +490,10 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		}
 		double rangeSqr = INVISIBLE_RANGE * INVISIBLE_RANGE;
 		for (AbstractClientPlayer player : mc.level.players()) {
-			if (player == null || player == mc.player || player.isRemoved() || !player.isInvisible()) {
+			boolean spectator = player != null && player.isSpectator();
+			if (player == null || player == mc.player || player.isRemoved()
+					|| (!player.isInvisible() && !spectator)
+					|| player.isDeadOrDying() || recentlyDied(player.getUUID(), now)) {
 				continue;
 			}
 			double distanceSqr = player.distanceToSqr(mc.player);
@@ -462,35 +502,79 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 			}
 			String name = player.getGameProfile() == null ? nameOf(player.getUUID())
 					: player.getGameProfile().name();
-			if (name == null || !credible(player.getUUID(), name, now)) {
+			if (name == null || (!credible(player.getUUID(), name, now) && !hasActiveVanish(name, now))) {
 				continue;
 			}
 			int distance = (int) Math.round(Math.sqrt(distanceSqr));
-			observeInvisibleBody(player.getUUID(), name, distance, now);
+			if (spectator && spectatorSwitches.contains(player.getUUID())) {
+				observeSpectatorBody(player.getUUID(), name, distance, now);
+			} else if (player.isInvisible() || (spectator && hasActiveVanish(name, now))) {
+				observeInvisibleBody(player.getUUID(), name, distance, now);
+			}
 		}
+	}
+
+	/**
+	 * Records a live spectator whose body is still being sent nearby.
+	 * This is the only path from a game-mode switch, and it requires both the
+	 * switch and the body so an ordinary death cannot qualify.
+	 */
+	public void observeSpectatorBody(UUID uuid, String name, int distance, long now) {
+		if (uuid == null || name == null || distance < 0 || distance > INVISIBLE_RANGE
+				|| recentlyDied(uuid, now)) {
+			return;
+		}
+		if (!credible(uuid, name, now) && !hasActiveVanish(name, now)) {
+			return;
+		}
+		engine.add(VanishEngine.Type.VANISH, name, new VanishEngine.Proof(uuid.toString(), distance),
+				"Vanish Event: spectator body", VANISH_WEIGHT, VANISH_COOLDOWN_MS, now);
+		observeInvisibleBody(uuid, name, distance, now);
+	}
+
+	/** Marks a watched player as dead so their departure cannot look like a vanish. */
+	public void observeDeath(UUID uuid, String name, long now) {
+		if (uuid == null) {
+			return;
+		}
+		deaths.put(uuid, now);
+		spectatorSwitches.remove(uuid);
+		engine.forgetSubject(name);
+		if (name != null && activeAlert != null && name.equalsIgnoreCase(activeAlert.name())) {
+			activeAlert = null;
+		}
+	}
+
+	private void rememberDeaths(Minecraft mc, long now) {
+		if (mc == null || mc.level == null) {
+			return;
+		}
+		for (AbstractClientPlayer player : mc.level.players()) {
+			if (player != null && player.isDeadOrDying()) {
+				String name = player.getGameProfile() == null ? nameOf(player.getUUID())
+						: player.getGameProfile().name();
+				observeDeath(player.getUUID(), name, now);
+			}
+		}
+		deaths.values().removeIf(at -> now - at > DEATH_GRACE_MS);
+	}
+
+	private boolean recentlyDied(UUID uuid, long now) {
+		Long at = uuid == null ? null : deaths.get(uuid);
+		return at != null && now - at <= DEATH_GRACE_MS;
 	}
 
 	/** Adds an invisible-body clue when the account is credible and in range. */
 	public void observeInvisibleBody(UUID uuid, String name, int distance, long now) {
-		if (uuid == null || name == null || distance < 0 || distance > INVISIBLE_RANGE) {
+		if (uuid == null || name == null || distance < 0 || distance > INVISIBLE_RANGE
+				|| recentlyDied(uuid, now)) {
 			return;
 		}
-		if (!credible(uuid, name, now)) {
+		if (!credible(uuid, name, now) && !hasActiveVanish(name, now)) {
 			return;
 		}
 		engine.add(VanishEngine.Type.INVISIBLE, name, new VanishEngine.Proof(uuid.toString(), distance),
 				"Invisible Entity: metadata flag", INVISIBLE_WEIGHT, INVISIBLE_COOLDOWN_MS, now);
-	}
-
-	private int bodyDistance(Minecraft mc, UUID uuid) {
-		if (mc == null || mc.level == null || mc.player == null || uuid == null) {
-			return -1;
-		}
-		Entity entity = mc.level.getPlayerByUUID(uuid);
-		if (entity == null || entity.isRemoved()) {
-			return -1;
-		}
-		return (int) Math.round(Math.sqrt(entity.distanceToSqr(mc.player)));
 	}
 
 	private static final class MinecraftView implements DepartureTracker.View {
@@ -513,7 +597,8 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 				return -1;
 			}
 			Entity entity = mc.level.getPlayerByUUID(id);
-			if (entity == null || entity.isRemoved()) {
+			if (entity == null || entity.isRemoved()
+					|| (entity instanceof LivingEntity living && living.isDeadOrDying())) {
 				return -1;
 			}
 			return (int) Math.round(Math.sqrt(entity.distanceToSqr(mc.player)));
@@ -545,6 +630,8 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		tracker.clear();
 		ghost.clear();
 		gameModes.clear();
+		deaths.clear();
+		spectatorSwitches.clear();
 		lastCritical = null;
 		lastClusterDetection = null;
 		lastClusterX = 0.0;
@@ -683,22 +770,50 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		if (activeAlert == null) {
 			return;
 		}
-		double elapsed = (System.currentTimeMillis() - activeAlert.startedAt()) / 1000.0;
-		double[] frame = AlertTimeline.frame(elapsed);
-		if (frame == null) {
+		long now = System.currentTimeMillis();
+		if (activeAlert.guardian().finished(now)) {
 			activeAlert = null;
 			return;
 		}
 		try {
-			AntiVanishHudRenderer.renderAlert(graphics, screenW, screenH, activeAlert.name(),
-					activeAlert.distance(), frame);
+			AlertRenderer.renderFaceAlert(McCanvas.of(graphics), graphics, screenW, screenH,
+					activeAlert.guardian(), WATCH_LINE, SAFE_LINE);
 		} catch (Throwable failure) {
 			Guard.report("anti-vanish alert draw", failure);
 			try {
-				AntiVanishHudRenderer.renderFallback(graphics, screenW, screenH, activeAlert.name(), frame[0]);
+				AntiVanishHudRenderer.renderFallback(graphics, screenW, screenH, WATCH_LINE,
+						activeAlert.guardian().alpha(now));
 			} catch (Throwable fallbackFailure) {
 				Guard.report("anti-vanish alert fallback", fallbackFailure);
 			}
+		}
+	}
+
+	private boolean isNearVanish(VanishEngine.Critical critical, long now) {
+		if (critical == null || critical.name() == null || critical.proof() == null) {
+			return false;
+		}
+		int distance = critical.proof().distance();
+		return distance >= 0 && distance <= INVISIBLE_RANGE && hasActiveVanish(critical.name(), now);
+	}
+
+	private static AdminAlert guardianAlert(VanishEngine.Critical critical, long now) {
+		int distance = critical.proof() == null ? -1 : critical.proof().distance();
+		UUID uuid = parseUuid(critical.proof() == null ? null : critical.proof().key());
+		String name = critical.name() == null || critical.name().isBlank() ? "Someone" : critical.name();
+		AdminDetector.Match match = new AdminDetector.Match(uuid, name, name, distance, 0L,
+				AdminDetector.skinOf(Minecraft.getInstance(), uuid));
+		return new AdminAlert(match, AdminAlert.Kind.NEARBY, now);
+	}
+
+	private static UUID parseUuid(String value) {
+		if (value == null) {
+			return null;
+		}
+		try {
+			return UUID.fromString(value);
+		} catch (IllegalArgumentException ignored) {
+			return null;
 		}
 	}
 
@@ -778,7 +893,7 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 	public record Row(String name, String reason) {
 	}
 
-	private record ActiveAlert(String name, int distance, long startedAt) {
+	private record ActiveAlert(String name, AdminAlert guardian) {
 	}
 
 	// --------------------------------------------------------------- subjects
@@ -843,8 +958,14 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 	/** Drops an account whose player-info entry the server removed. */
 	public void forgetSubject(UUID uuid) {
 		if (uuid != null) {
-			subjects.remove(uuid);
+			Subject removed = subjects.remove(uuid);
 			gameModes.remove(uuid);
+			spectatorSwitches.remove(uuid);
+			deaths.remove(uuid);
+			if (removed != null && activeAlert != null
+					&& removed.name().equalsIgnoreCase(activeAlert.name())) {
+				activeAlert = null;
+			}
 		}
 	}
 
@@ -886,6 +1007,9 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 			}
 			Subject previous = subjects.get(id);
 			boolean listed = listedNow.contains(id);
+			if (info.getGameMode() != null) {
+				gameModes.putIfAbsent(id, info.getGameMode().getId());
+			}
 			if (previous == null) {
 				subjects.put(id, new Subject(name, now, listed));
 			} else if (previous.listed() != listed || !name.equals(previous.name())) {
@@ -925,8 +1049,9 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		AABB box = new AABB(x - 4.0, y - 4.0, z - 4.0, x + 4.0, y + 4.0, z + 4.0);
 		return !mc.level.getEntities(mc.player, box, entity -> entity != mc.player
 				&& entity.distanceToSqr(x, y, z) <= 16.0
-				&& ((entity instanceof AbstractClientPlayer player && !player.isInvisible())
-				|| entity instanceof Projectile)).isEmpty();
+				&& ((entity instanceof AbstractClientPlayer player && !player.isInvisible()
+						&& !player.isSpectator() && !player.isDeadOrDying())
+						|| entity instanceof Projectile)).isEmpty();
 	}
 
 	private boolean villagerNear(Minecraft mc, double x, double y, double z) {

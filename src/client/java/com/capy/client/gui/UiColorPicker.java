@@ -130,7 +130,7 @@ public class UiColorPicker {
 		this.label = label == null || label.isBlank() ? "Colour" : label;
 	}
 
-	public void render(UiCanvas c, UiText font, int mouseX, int mouseY, float delta) {
+	public void render(UiCanvas c, UiText font, float mouseX, float mouseY, float delta) {
 		double seconds = System.nanoTime() / 1.0e9;
 		boolean rowHovered = inside(mouseX, mouseY, x, y, w, ROW_H);
 		hover.to(rowHovered ? 1f : 0f, delta);

@@ -117,7 +117,7 @@ public class UiTextField {
 		return false;
 	}
 
-	public void render(UiCanvas c, UiText font, int mouseX, int mouseY, float delta) {
+	public void render(UiCanvas c, UiText font, float mouseX, float mouseY, float delta) {
 		focus.to(focused ? 1f : 0f, delta);
 		boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
 		hover.to(hovered ? 1f : 0f, delta);

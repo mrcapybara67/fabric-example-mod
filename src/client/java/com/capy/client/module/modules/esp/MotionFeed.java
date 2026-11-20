@@ -35,6 +35,19 @@ public final class MotionFeed {
 	private static final MotionScores LOW_SCORES = new MotionScores();
 	private static final AtomicInteger USERS = new AtomicInteger();
 
+	/**
+	 * The sources the motion modules currently accept. A disabled source stops
+	 * feeding the score at all, so it cannot arrive through a path the module
+	 * forgot to filter.
+	 */
+	private static volatile boolean containers = true;
+	private static volatile boolean doors = true;
+	private static volatile boolean furnaces = true;
+	private static volatile boolean building = true;
+	private static volatile boolean redstone = true;
+	private static volatile boolean itemsAndCarts = true;
+	private static volatile boolean sounds = true;
+
 	/** Last open state of a door/trapdoor/gate, by block position. */
 	private static final Map<Long, Boolean> DOOR_OPEN = new HashMap<>();
 	/** Last lit state of a furnace, by block position. */
@@ -66,9 +79,58 @@ public final class MotionFeed {
 		return LOW_SCORES;
 	}
 
+	/** Replaces the accepted source set; called from the modules' tick. */
+	public static void configure(boolean includeContainers, boolean includeDoors, boolean includeFurnaces,
+			boolean includeBuilding, boolean includeRedstone, boolean includeItems, boolean includeSounds) {
+		containers = includeContainers;
+		doors = includeDoors;
+		furnaces = includeFurnaces;
+		building = includeBuilding;
+		redstone = includeRedstone;
+		itemsAndCarts = includeItems;
+		sounds = includeSounds;
+	}
+
+	/** Classification used by the filter above, exposed for its test. */
+	public enum Source { CONTAINER, DOOR, FURNACE, REDSTONE, BUILDING }
+
+	public static Source classify(Block block, BlockState state) {
+		if (block instanceof DoorBlock || block instanceof TrapDoorBlock || block instanceof FenceGateBlock) {
+			return Source.DOOR;
+		}
+		if (block instanceof AbstractFurnaceBlock) {
+			return Source.FURNACE;
+		}
+		if (block instanceof AbstractChestBlock<?> || block instanceof BarrelBlock || block instanceof ShulkerBoxBlock) {
+			return Source.CONTAINER;
+		}
+		String path = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block).getPath();
+		if (path.contains("redstone") || path.contains("piston") || path.contains("observer")
+				|| path.contains("repeater") || path.contains("comparator") || path.contains("lever")
+				|| path.contains("button") || path.contains("pressure_plate") || path.contains("tripwire")
+				|| path.contains("daylight_detector") || path.contains("target")) {
+			return Source.REDSTONE;
+		}
+		return Source.BUILDING;
+	}
+
+	/** True when the source that owns this block is enabled. */
+	public static boolean accepts(Block block, BlockState state) {
+		return switch (classify(block, state)) {
+			case CONTAINER -> containers;
+			case DOOR -> doors;
+			case FURNACE -> furnaces;
+			case REDSTONE -> redstone;
+			case BUILDING -> building;
+		};
+	}
+
 	/** A block update. Doors and gates score 3 when they open or close; furnaces score 2 when lit changes. */
 	public static synchronized void onBlockUpdate(BlockPos pos, BlockState state) {
 		if (!active() || pos == null || state == null) {
+			return;
+		}
+		if (!accepts(state.getBlock(), state)) {
 			return;
 		}
 		long stateKey = Chunks.block(pos.getX(), pos.getY(), pos.getZ());
@@ -103,12 +165,24 @@ public final class MotionFeed {
 		if (!active() || pos == null) {
 			return;
 		}
+		boolean container = block instanceof AbstractChestBlock<?> || block instanceof BarrelBlock
+				|| block instanceof ShulkerBoxBlock;
+		boolean door = block instanceof DoorBlock || block instanceof TrapDoorBlock || block instanceof FenceGateBlock;
+		if (container && !containers) {
+			return;
+		}
+		if (door && !doors) {
+			return;
+		}
+		if (!container && !door && !building) {
+			return;
+		}
 		add(chunk(pos), containerOrDoor(block) ? 3.0 : 1.0, pos.getY());
 	}
 
 	/** A block sound; only the blocks source counts. */
 	public static void onSound(double x, double y, double z, SoundSource source) {
-		if (source != SoundSource.BLOCKS) {
+		if (source != SoundSource.BLOCKS || !sounds) {
 			return;
 		}
 		addAt(x, y, z, 0.5);
@@ -116,7 +190,7 @@ public final class MotionFeed {
 
 	/** Item entities and minecarts moving under their own power. */
 	public static void onEntityMoved(Entity entity) {
-		if (entity == null || entity.isRemoved()) {
+		if (entity == null || entity.isRemoved() || !itemsAndCarts) {
 			return;
 		}
 		if (entity instanceof ItemEntity || entity instanceof AbstractMinecart) {

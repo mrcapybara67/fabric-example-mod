@@ -80,6 +80,8 @@ public class ClickGuiScreen extends Screen {
 	private long lastFrameAt;
 	/** The size preset the frame viewport was last laid out for. */
 	private float appliedScale = 1f;
+	private int appliedViewportW = -1;
+	private int appliedViewportH = -1;
 
 	/** One tick of animation time, in nanoseconds (twenty ticks a second). */
 	private static final float NANOS_PER_TICK = 50_000_000f;
@@ -121,21 +123,34 @@ public class ClickGuiScreen extends Screen {
 	}
 
 	/**
-	 * Lays the frame out in the virtual viewport that the pose scale turns into
-	 * the physical screen. Input is divided by the same scale, so a hit target
-	 * and its click always agree.
+	 * Lays the frame out in the logical viewport at the current size preset.
+	 * The canvas converts those logical pixels to device pixels; input is
+	 * divided by the same scale, so a hover and its click can never disagree.
+	 *
+	 * <p>The guard makes a resize or a settings change layout exactly once, even
+	 * though both {@link #resize(int, int)} and the next render ask for it.</p>
 	 */
 	private void syncViewport() {
 		float scale = currentScale();
+		int viewportW = Math.max(1, Math.round(this.width / scale));
+		int viewportH = Math.max(1, Math.round(this.height / scale));
+		if (Math.abs(scale - appliedScale) <= 0.0001f
+				&& viewportW == appliedViewportW && viewportH == appliedViewportH) {
+			return;
+		}
 		appliedScale = scale;
-		frame.resize(Math.max(1, Math.round(this.width / scale)),
-				Math.max(1, Math.round(this.height / scale)));
+		appliedViewportW = viewportW;
+		appliedViewportH = viewportH;
+		frame.resize(viewportW, viewportH);
 	}
 
 	private void syncViewportIfNeeded() {
-		if (Math.abs(currentScale() - appliedScale) > 0.0001f) {
-			syncViewport();
-		}
+		syncViewport();
+	}
+
+	/** The one mapping shared by hover, clicks, drags, releases and scrolling. */
+	static float guiMouse(double raw, float scale) {
+		return (float) (raw / (scale > 0f ? scale : 1f));
 	}
 
 	/** 0 closed .. 1 open, from wall time, so the timing is frame rate free. */
@@ -181,15 +196,8 @@ public class ClickGuiScreen extends Screen {
 		float scale = appliedScale;
 		GuiPerf.begin();
 		canvas.bind(g).layoutScale(scale);
-		var pose = g.pose();
-		pose.pushMatrix();
-		pose.scale(scale, scale);
-		try {
-			frame.render(canvas, UI_TYPE, Math.round(mouseX / scale), Math.round(mouseY / scale),
-					frameDeltaTicks(), progress);
-		} finally {
-			pose.popMatrix();
-		}
+		frame.render(canvas, UI_TYPE, guiMouse(mouseX, scale), guiMouse(mouseY, scale),
+				frameDeltaTicks(), progress);
 		GuiPerf.end(canvas.drawCalls());
 		if (ClientConfig.get().guiDebug()) {
 			String line = GuiPerf.line();
@@ -213,7 +221,7 @@ public class ClickGuiScreen extends Screen {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
 		float scale = currentScale();
-		boolean handled = frame.mouseClicked(event, event.x() / scale, event.y() / scale);
+		boolean handled = frame.mouseClicked(event, guiMouse(event.x(), scale), guiMouse(event.y(), scale));
 		if (frame.closeRequested()) {
 			onClose();
 		}
@@ -223,19 +231,19 @@ public class ClickGuiScreen extends Screen {
 	@Override
 	public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
 		float scale = currentScale();
-		return frame.mouseDragged(event.x() / scale, event.y() / scale);
+		return frame.mouseDragged(guiMouse(event.x(), scale), guiMouse(event.y(), scale));
 	}
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
 		float scale = currentScale();
-		return frame.mouseReleased(event.x() / scale, event.y() / scale);
+		return frame.mouseReleased(guiMouse(event.x(), scale), guiMouse(event.y(), scale));
 	}
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double xAmount, double yAmount) {
 		float scale = currentScale();
-		return frame.mouseScrolled(mouseX / scale, mouseY / scale, yAmount);
+		return frame.mouseScrolled(guiMouse(mouseX, scale), guiMouse(mouseY, scale), yAmount);
 	}
 
 	@Override

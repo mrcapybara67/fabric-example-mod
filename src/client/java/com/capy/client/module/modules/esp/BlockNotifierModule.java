@@ -5,6 +5,8 @@ import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.module.BlockListSetting;
+import com.capy.client.module.BooleanSetting;
+import com.capy.client.module.IntSetting;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ import java.util.Set;
 import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -35,7 +38,17 @@ import net.minecraft.world.phys.AABB;
 public final class BlockNotifierModule extends FinderModule {
 	private static final double INFLATE = 0.003;
 
-	private final BlockListSetting blocks = setting(new BlockListSetting("blocks"));
+	private final BlockListSetting blocks = describe(setting(new BlockListSetting("blocks")),
+			"The blocks to look for. A block id can be typed or pasted here.");
+	private final IntSetting minCount = describe(setting(new IntSetting("min_count", 1, 1, 64, 1)),
+			"How many of one block a chunk needs before it is flagged.");
+	private final BooleanSetting placedBlocks = describe(setting(new BooleanSetting("placed_blocks", true)),
+			"Notify when a listed block is placed near you.");
+	private final BooleanSetting chatMessage = describe(setting(new BooleanSetting("chat_message", false)),
+			"Write one chat line when a new block flag appears.");
+	private int appliedMinCount = -1;
+	private long lastPlacedScanTick = Long.MIN_VALUE;
+	private final Set<Long> placedSeen = new HashSet<>();
 	private final Set<Block> filter = new HashSet<>();
 	private final Predicate<BlockState> matcher = state -> filter.contains(state.getBlock());
 	private final Map<Long, List<AABB>> boxesByChunk = new HashMap<>();
@@ -66,6 +79,55 @@ public final class BlockNotifierModule extends FinderModule {
 			rebuildRender();
 			FinderScanner.get().queueAllLoaded();
 		}
+		if (appliedMinCount != minCount.get()) {
+			appliedMinCount = minCount.get();
+			clearFlags();
+			boxesByChunk.clear();
+			rebuildRender();
+			FinderScanner.get().queueAllLoaded();
+		}
+		if (placedBlocks.value()) {
+			scanPlaced(mc);
+		} else {
+			placedSeen.clear();
+			lastPlacedScanTick = Long.MIN_VALUE;
+		}
+	}
+
+	/** Watches the eight-block cube around the player for a newly placed listed block. */
+	private void scanPlaced(Minecraft mc) {
+		if (level == null || mc.player == null || filter.isEmpty()) {
+			return;
+		}
+		long tick = level.getGameTime();
+		if (lastPlacedScanTick != Long.MIN_VALUE && tick - lastPlacedScanTick < 20L) {
+			return;
+		}
+		boolean first = lastPlacedScanTick == Long.MIN_VALUE;
+		lastPlacedScanTick = tick;
+		BlockPos center = mc.player.blockPosition();
+		Set<Long> current = new HashSet<>();
+		for (BlockPos pos : BlockPos.betweenClosed(center.offset(-8, -8, -8), center.offset(8, 8, 8))) {
+			if (filter.contains(level.getBlockState(pos).getBlock())) {
+				current.add(pos.asLong());
+			}
+		}
+		if (!first) {
+			for (long packed : current) {
+				if (placedSeen.contains(packed)) {
+					continue;
+				}
+				BlockPos pos = BlockPos.of(packed);
+				String name = level.getBlockState(pos).getBlock().getName().getString();
+				notify.toast(mc, "Block placed", name + " near you");
+				if (chatMessage.value()) {
+					notify.chat(mc, "Block Notifier: " + name + " was placed near you");
+				}
+				break;
+			}
+		}
+		placedSeen.clear();
+		placedSeen.addAll(current);
 	}
 
 	@Override
@@ -111,32 +173,48 @@ public final class BlockNotifierModule extends FinderModule {
 						int worldZ = baseZ + z;
 						AABB box = new AABB(worldX, worldY, worldZ,
 								worldX + 1.0, worldY + 1.0, worldZ + 1.0).inflate(INFLATE);
-						scratch.add(new Found(Chunks.block(worldX, worldY, worldZ), box,
-								state.getBlock().getName().getString()));
+						scratch.add(new Found(box, state.getBlock().getName().getString(), state.getBlock()));
 					}
 				}
 			}
 		}
 
-		List<AABB> boxes = new ArrayList<>(scratch.size());
+		// Min Count is per block type inside this chunk, not per position: two
+		// diamond ore blocks close together are two, not one flag each.
+		Map<Block, Integer> counts = new HashMap<>();
 		for (Found foundBlock : scratch) {
-			boxes.add(foundBlock.box());
+			counts.merge(foundBlock.block(), 1, Integer::sum);
 		}
-		replaceChunk(key, boxes, new ArrayList<>(scratch));
+		List<AABB> boxes = new ArrayList<>(scratch.size());
+		List<Found> kept = new ArrayList<>(scratch.size());
+		int needed = minCount.get();
+		for (Found foundBlock : scratch) {
+			if (counts.get(foundBlock.block()) < needed) {
+				continue;
+			}
+			boxes.add(foundBlock.box());
+			kept.add(foundBlock);
+		}
+		replaceChunk(key, boxes, kept);
 		rebuildRender();
 		clearScan();
 		return true;
 	}
 
 	private void replaceChunk(long key, List<AABB> boxes, List<Found> found) {
-		if (boxes.isEmpty()) {
+		if (boxes.isEmpty() || found.isEmpty()) {
 			boxesByChunk.remove(key);
 			unmarkFlag(key);
 			rebuildRender();
 			return;
 		}
+		boolean had = flags.containsKey(key);
 		boxesByChunk.put(key, List.copyOf(boxes));
 		markFlag(key, "found " + found.get(0).name(), boxes.size(), boxes);
+		if (!had && chatMessage.value()) {
+			notify.chat(Minecraft.getInstance(), "Block Notifier: " + boxes.size() + " x "
+					+ found.get(0).name() + " in chunk " + Chunks.x(key) + ", " + Chunks.z(key));
+		}
 	}
 
 	private boolean refreshFilter() {
@@ -211,6 +289,9 @@ public final class BlockNotifierModule extends FinderModule {
 		scratch.clear();
 		filter.clear();
 		filterSignature = Integer.MIN_VALUE;
+		appliedMinCount = -1;
+		placedSeen.clear();
+		lastPlacedScanTick = Long.MIN_VALUE;
 		clearScan();
 	}
 
@@ -257,6 +338,6 @@ public final class BlockNotifierModule extends FinderModule {
 				"minecraft:black_shulker_box");
 	}
 
-	private record Found(long key, AABB box, String name) {
+	private record Found(AABB box, String name, Block block) {
 	}
 }

@@ -111,15 +111,60 @@ class AntiVanishModuleTest {
 	}
 
 	@Test
-	void spectatorSwitchBecomesAVanishClueAndSwitchingBackClearsIt() {
-		module.observeGameMode(STEVE, "Steve", GameType.SPECTATOR.getId(), 5, 2_000);
+	void spectatorSwitchAloneIsNotAVanishClue() {
+		module.observeGameMode(STEVE, "Steve", GameType.SURVIVAL.getId(), 1_000);
+		module.observeGameMode(STEVE, "Steve", GameType.SPECTATOR.getId(), 2_000);
 
-		VanishEngine.Signal signal = onlySignal(VanishEngine.Type.VANISH, 2_000);
-		assertEquals("Vanish Event: switched to spectator", signal.reason());
-		assertNotNull(signal.proof());
-		assertEquals(5, signal.proof().distance());
+		assertTrue(module.engine().signals(2_000).isEmpty());
+	}
 
-		module.observeGameMode(STEVE, "Steve", GameType.SURVIVAL.getId(), 5, 3_000);
+	@Test
+	void liveSpectatorBodyNearBecomesVanishAndInvisibleClues() {
+		module.observeGameMode(STEVE, "Steve", GameType.SURVIVAL.getId(), 1_000);
+		module.observeGameMode(STEVE, "Steve", GameType.SPECTATOR.getId(), 2_000);
+		module.observeSpectatorBody(STEVE, "Steve", 5, 2_000);
+
+		VanishEngine.Signal vanish = onlySignal(VanishEngine.Type.VANISH, 2_000);
+		assertEquals("Vanish Event: spectator body", vanish.reason());
+		assertNotNull(vanish.proof());
+		assertEquals(5, vanish.proof().distance());
+		assertNotNull(module.engine().signals(2_000).stream()
+				.filter(signal -> signal.type() == VanishEngine.Type.INVISIBLE)
+				.findFirst().orElse(null));
+
+		module.observeGameMode(STEVE, "Steve", GameType.SURVIVAL.getId(), 3_000);
+
+		assertFalse(module.hasActiveVanish("Steve", 3_000));
+	}
+
+	@Test
+	void deadSpectatorBodyIsNotAVanishClue() {
+		module.observeGameMode(STEVE, "Steve", GameType.SURVIVAL.getId(), 1_000);
+		module.observeGameMode(STEVE, "Steve", GameType.SPECTATOR.getId(), 2_000);
+		module.observeDeath(STEVE, "Steve", 2_000);
+		module.observeSpectatorBody(STEVE, "Steve", 5, 2_000);
+
+		assertTrue(module.engine().signals(2_000).isEmpty());
+	}
+
+	@Test
+	void deathClearsLeftoverInvisibleBodyClues() {
+		module.observeInvisibleBody(STEVE, "Steve", 5, 2_000);
+		assertFalse(module.engine().signals(2_000).isEmpty());
+
+		module.observeDeath(STEVE, "Steve", 2_100);
+
+		assertTrue(module.engine().signals(2_100).isEmpty());
+	}
+
+	@Test
+	void deathSuppressesTabRemoval() {
+		module.observeDeath(STEVE, "Steve", 2_000);
+		module.processRemove(STEVE, "Steve", 1, 2_000);
+		view.listed = false;
+		view.distance = 5;
+
+		module.processDue(3_000, view);
 
 		assertTrue(module.engine().signals(3_000).isEmpty());
 	}

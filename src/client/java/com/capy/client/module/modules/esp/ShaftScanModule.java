@@ -63,6 +63,17 @@ public abstract class ShaftScanModule extends FinderModule {
 		return sourceShafts.values();
 	}
 
+	/**
+	 * Throws away every gathered shaft and asks the shared scanner to walk the
+	 * loaded chunks again. A filter toggle changes which shafts are valid, so
+	 * the old lists cannot simply be redrawn.
+	 */
+	protected final void rescanAll() {
+		sourceShafts.clear();
+		shaftsChanged();
+		FinderScanner.get().queueAllLoaded();
+	}
+
 	@Override
 	public void onTick(Minecraft mc) {
 		if (!beginTick(mc)) {

@@ -125,17 +125,16 @@ public final class AntiVanishHudRenderer {
 		pose.popMatrix();
 	}
 
-	public static void renderFallback(GuiGraphics graphics, int screenW, int screenH, String name, double fade) {
+	public static void renderFallback(GuiGraphics graphics, int screenW, int screenH, String text, double fade) {
 		Minecraft mc = Minecraft.getInstance();
-		if (graphics == null || mc == null || mc.font == null) {
+		if (graphics == null || mc == null || mc.font == null || text == null || text.isBlank()) {
 			return;
 		}
-		String person = name == null || name.isBlank() ? "SOMEONE" : name;
-		String text = person + " IS WATCHING YOU";
 		int alpha = Math.round(255 * (float) clamp(fade));
-		int x = Math.max(4, (screenW - mc.font.width(text)) / 2);
+		String fitted = fit(mc.font, text, Math.max(40, screenW - 48));
+		int x = Math.max(4, (screenW - mc.font.width(fitted)) / 2);
 		int y = screenH / 2;
-		graphics.drawString(mc.font, text, x, y, withAlpha(RED, alpha), true);
+		graphics.drawString(mc.font, fitted, x, y, withAlpha(RED, alpha), true);
 	}
 
 	private static void drawVignette(GuiGraphics graphics, int w, int h, double fade, double pulse) {

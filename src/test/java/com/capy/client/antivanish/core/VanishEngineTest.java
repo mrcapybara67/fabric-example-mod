@@ -43,6 +43,72 @@ class VanishEngineTest {
 	}
 
 	@Test
+	void filterFindsANearCandidateWithoutBurningTheCooldownOnAFarOne() {
+		VanishEngine.Proof far = new VanishEngine.Proof("uuid-far", 200);
+		engine.add(VanishEngine.Type.VANISH, "Far", far, "Vanish Event: hidden from TAB", 100, 0, 1_000);
+		engine.add(VanishEngine.Type.INVISIBLE, "Far", far, "Invisible Entity: metadata flag", 35, 0, 1_000);
+
+		assertNull(engine.evaluate(1_000, critical -> critical.proof().distance() <= 64));
+
+		VanishEngine.Proof near = new VanishEngine.Proof("uuid-near", 5);
+		engine.add(VanishEngine.Type.VANISH, "Near", near, "Vanish Event: spectator body", 100, 0, 1_000);
+		engine.add(VanishEngine.Type.INVISIBLE, "Near", near, "Invisible Entity: metadata flag", 35, 0, 1_000);
+
+		VanishEngine.Critical critical = engine.evaluate(1_000, candidate -> candidate.proof().distance() <= 64);
+		assertNotNull(critical);
+		assertEquals("Near", critical.name());
+		assertEquals(5, critical.proof().distance());
+	}
+
+	@Test
+	void forgetSubjectClearsEveryClueAndCooldownForThatAccount() {
+		VanishEngine.Proof proof = new VanishEngine.Proof("uuid-steve", 5);
+		engine.add(VanishEngine.Type.VANISH, "Steve", proof, "Vanish Event: hidden from TAB", 100, 60_000, 1_000);
+		engine.add(VanishEngine.Type.INVISIBLE, "Steve", proof, "Invisible Entity: metadata flag", 35, 60_000, 1_000);
+
+		engine.forgetSubject("steve");
+
+		assertNull(engine.evaluate(1_000));
+		assertTrue(engine.detections(1_000, 10).isEmpty());
+		assertTrue(engine.add(VanishEngine.Type.VANISH, "Steve", proof,
+				"Vanish Event: spectator body", 100, 60_000, 1_000));
+	}
+
+	@Test
+	void forgettingASubjectReleasesTheGlobalCriticalGate() {
+		VanishEngine.Proof far = new VanishEngine.Proof("uuid-far", 200);
+		engine.add(VanishEngine.Type.VANISH, "Far", far, "Vanish Event: hidden from TAB", 100, 0, 1_000);
+		engine.add(VanishEngine.Type.INVISIBLE, "Far", far, "Invisible Entity: metadata flag", 35, 0, 1_000);
+		assertNotNull(engine.evaluate(1_000));
+
+		engine.forgetSubject("Far");
+
+		VanishEngine.Proof near = new VanishEngine.Proof("uuid-near", 5);
+		engine.add(VanishEngine.Type.VANISH, "Near", near, "Vanish Event: spectator body", 100, 0, 1_000);
+		engine.add(VanishEngine.Type.INVISIBLE, "Near", near, "Invisible Entity: metadata flag", 35, 0, 1_000);
+
+		VanishEngine.Critical critical = engine.evaluate(1_000);
+		assertNotNull(critical);
+		assertEquals("Near", critical.name());
+	}
+
+	@Test
+	void forgettingAnUnrelatedSubjectDoesNotReleaseTheCriticalGate() {
+		VanishEngine.Proof far = new VanishEngine.Proof("uuid-far", 200);
+		engine.add(VanishEngine.Type.VANISH, "Far", far, "Vanish Event: hidden from TAB", 100, 0, 1_000);
+		engine.add(VanishEngine.Type.INVISIBLE, "Far", far, "Invisible Entity: metadata flag", 35, 0, 1_000);
+		assertNotNull(engine.evaluate(1_000));
+
+		engine.forgetSubject("Other");
+
+		VanishEngine.Proof near = new VanishEngine.Proof("uuid-near", 5);
+		engine.add(VanishEngine.Type.VANISH, "Near", near, "Vanish Event: spectator body", 100, 0, 1_000);
+		engine.add(VanishEngine.Type.INVISIBLE, "Near", near, "Invisible Entity: metadata flag", 35, 0, 1_000);
+
+		assertNull(engine.evaluate(1_000));
+	}
+
+	@Test
 	void noCriticalWithoutProof() {
 		engine.add(VanishEngine.Type.VANISH, "Steve", null, "Vanish Event: hidden from TAB", 100, 0, 1_000);
 		engine.add(VanishEngine.Type.INVISIBLE, "Steve", null, "Invisible Entity: metadata flag", 35, 0, 1_000);

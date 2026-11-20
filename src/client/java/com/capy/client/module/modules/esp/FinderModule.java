@@ -6,17 +6,22 @@ import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.FlagCost;
 import com.capy.client.finder.core.FlagMemory;
 import com.capy.client.finder.core.FlagQuality;
+import com.capy.client.finder.core.FinderBeams;
+import com.capy.client.finder.core.FlagLook;
 import com.capy.client.finder.core.FlagRender;
+import com.capy.client.finder.core.TerrainPlate;
 import com.capy.client.module.Category;
 import com.capy.client.module.ChoiceSetting;
 import com.capy.client.module.ColorSetting;
 import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
+import com.capy.client.module.ShapeSetting;
 import com.capy.client.module.Tickable;
 import com.capy.client.stealth.CapyText;
 import com.google.gson.JsonObject;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -56,9 +61,15 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 	private static final FlagCost FLAG_COST = new FlagCost();
 
 	protected final ColorSetting color;
-	protected final ChoiceSetting flagQuality = setting(new ChoiceSetting("flag_quality", 0,
-			"high", "balanced", "low"));
+	/** Set by a subclass that offers a Shape Mode row; null keeps the old look. */
+	protected ShapeSetting shapeMode;
+	/** Rate-limited toast / chat helper shared by every finder. */
+	protected final FinderNotify notify;
+	protected final ChoiceSetting flagQuality = describe(setting(new ChoiceSetting("flag_quality", 0,
+			"high", "balanced", "low")), "How much animated detail the flags are drawn with.");
 	protected final Map<Long, Flag> flags = new LinkedHashMap<>();
+	/** Wall-clock time a flag was first added; kept across rescans, absent after a restore. */
+	private final Map<Long, Long> appearedAt = new LinkedHashMap<>();
 	protected final Map<Long, List<AABB>> boxesByFlag = new LinkedHashMap<>();
 	protected final List<AABB> boxes = new ArrayList<>();
 	protected final TerrainHeights terrain = new TerrainHeights();
@@ -76,8 +87,71 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 	private static boolean showEliminationMap;
 
 	protected FinderModule(String id, int defaultColor) {
+		this(id, Integer.valueOf(defaultColor));
+	}
+
+	/** A finder whose colours belong to individual finds, not to one row. */
+	protected FinderModule(String id) {
+		this(id, null);
+	}
+
+	private FinderModule(String id, Integer defaultColor) {
 		super(Category.BASE_FINDER, id);
-		this.color = setting(new ColorSetting("color", defaultColor));
+		this.color = defaultColor == null ? null : describe(setting(new ColorSetting("color", defaultColor)),
+				"The colour of this finder's flags.");
+		this.notify = new FinderNotify();
+	}
+
+	/**
+	 * Registers a Shape Mode row and returns it. Call from a subclass
+	 * constructor after {@code super(...)}.
+	 */
+	protected ShapeSetting useShape(String defaultMode) {
+		ShapeSetting shape = describe(setting(new ShapeSetting("shape", defaultMode)),
+				"How the box is drawn: outline, fill, or both.");
+		shape.tip("How boxes are drawn: outline only, filled faces only, or both.");
+		this.shapeMode = shape;
+		return shape;
+	}
+
+	/** A vertical beam above every distinct cluster of flags. */
+	protected void drawFlagBeams(DrawSink sink, double height, double width, int argb) {
+		int spread = 8;
+		for (long key : FinderBeams.coalesce(flagsNearestFirst(), spread)) {
+			int[] heights = cachedTerrain(key);
+			double bottom = heights == null ? surfaceY(key) + 0.05 : TerrainPlate.average(heights) + 0.05;
+			double x = Chunks.x(key) * 16.0 + 8.0;
+			double z = Chunks.z(key) * 16.0 + 8.0;
+			emitBeam(sink, x, z, bottom, bottom + height, width, argb);
+		}
+	}
+
+	/**
+	 * One beam with a real footprint: thin widths use the classic cross, wider
+	 * ones draw a square column so the width setting is visible from above.
+	 */
+	protected static void emitBeam(DrawSink sink, double x, double z, double bottom, double top,
+			double width, int argb) {
+		double w = Math.max(0.05, Math.min(1.0, width));
+		if (w <= 0.15) {
+			com.capy.client.finder.core.ChunkStyles.beam(sink, x, z, bottom, top, argb);
+			return;
+		}
+		double half = w / 2.0;
+		sink.line(x - half, bottom, z - half, x - half, top, z - half, 2.0f, argb);
+		sink.line(x + half, bottom, z - half, x + half, top, z - half, 2.0f, argb);
+		sink.line(x - half, bottom, z + half, x - half, top, z + half, 2.0f, argb);
+		sink.line(x + half, bottom, z + half, x + half, top, z + half, 2.0f, argb);
+		sink.line(x - half, top, z - half, x + half, top, z - half, 2.0f, argb);
+		sink.line(x - half, top, z + half, x + half, top, z + half, 2.0f, argb);
+		sink.line(x - half, top, z - half, x - half, top, z + half, 2.0f, argb);
+		sink.line(x + half, top, z - half, x + half, top, z + half, 2.0f, argb);
+	}
+
+	/** A hue that cycles once every six seconds, keeping the caller's alpha. */
+	protected static int rainbowArgb(double timeSec, int alpha) {
+		float hue = (float) ((timeSec * 60.0) % 360.0);
+		return ColorSetting.toArgb(hue, 1.0f, 1.0f, alpha);
 	}
 
 	/** Live, read-only view; callers on the render thread must not mutate it. */
@@ -117,12 +191,83 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
 	}
 
+	/** One standard chunk flag with the shared beacon look. */
+	protected void drawSharedChunkFlags(DrawSink sink, double timeSec, double timeMs) {
+		boolean tracer = flagTracers();
+		List<FlagLook.Flag> look = new ArrayList<>(flags.size());
+		for (long key : flagsNearestFirst()) {
+			FlagLook.Flag flag = lookFlag(key, sharedFlagColor(key, timeSec), timeMs, tracer);
+			if (flag != null) {
+				look.add(flag);
+			}
+		}
+		FlagLook.drawAll(sink, look, timeMs, quality(), autoSimplified(), tracer, tracerOrigin());
+	}
+
+	protected FlagLook.Flag lookFlag(long key, int argb, double timeMs, boolean tracer) {
+		return FlagLook.Flag.chunk(key, terrainOrFlat(key), argb & 0xFFFFFF, flagDistance(key),
+				appearEase(key, timeMs), tracer, sharedFlagBeam(), sharedFlagBeamHeight());
+	}
+
+	/** Cached terrain, with a flat surface fallback for the first frame after a find. */
+	protected int[] terrainOrFlat(long key) {
+		int[] heights = cachedTerrain(key);
+		if (heights != null) {
+			return heights;
+		}
+		int[] flat = new int[TerrainPlate.CELLS * TerrainPlate.CELLS];
+		Arrays.fill(flat, surfaceY(key));
+		return flat;
+	}
+
+	/** A module with its own ideas about the flag colour can override this. */
+	protected int sharedFlagColor(long key, double timeSec) {
+		return colorArgb(timeSec);
+	}
+
+	/** Modules without a Tracers row draw the shared tracers unconditionally. */
+	protected boolean flagTracers() {
+		return true;
+	}
+
+	/** A module with a Beam row can suppress the beam inside the shared core. */
+	protected boolean sharedFlagBeam() {
+		return true;
+	}
+
+	/** A module with a Beam Height row can size the shared core's beam. */
+	protected double sharedFlagBeamHeight() {
+		return 60.0;
+	}
+
+	/** Ease-out-cubic from the first time this flag was seen; restored flags are fully open. */
+	protected double appearEase(long key, double timeMs) {
+		Long since = appearedAt.get(key);
+		return since == null ? 1.0 : FlagLook.easeOutCubic(since, timeMs);
+	}
+
+	/** A point just below the crosshair, or null when there is no client player. */
+	protected double[] tracerOrigin() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc == null || mc.player == null) {
+			return null;
+		}
+		var eye = mc.player.getEyePosition();
+		return new double[]{eye.x, eye.y - 0.1, eye.z};
+	}
+
 	public FlagQuality quality() {
 		return FlagQuality.parse(flagQuality.option());
 	}
 
 	public double drawCostMs() {
 		return FLAG_COST.moduleMs(id());
+	}
+
+	/** Finder Status text: the reliability label plus any automatic lowering. */
+	public String statusLabel() {
+		String base = reliability();
+		return autoSimplified() ? base + " · auto-low" : base;
 	}
 
 	public static boolean autoSimplified() {
@@ -206,6 +351,9 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 
 	@Override
 	public int colorFor(AABB box, double timeSec) {
+		if (color == null) {
+			return 0xFFFFFFFF;
+		}
 		int argb = color.argbAt(timeSec);
 		if (!staleBoxes.contains(box)) {
 			return argb;
@@ -214,21 +362,21 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 	}
 
 	public int colorArgb() {
-		return color.argbAt(System.nanoTime() / 1.0e9);
+		return colorArgb(System.nanoTime() / 1.0e9);
 	}
 
 	public int colorArgb(double timeSec) {
-		return color.argbAt(timeSec);
+		return color == null ? 0xFFFFFFFF : color.argbAt(timeSec);
 	}
 
 	@Override
 	public boolean fills() {
-		return false;
+		return shapeMode != null && shapeMode.fills();
 	}
 
 	@Override
 	public boolean outlines() {
-		return true;
+		return shapeMode == null || shapeMode.outlines();
 	}
 
 	@Override
@@ -288,6 +436,9 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 		Flag next = new Flag(key, safeReason, score);
 		boolean added = !flags.containsKey(key);
 		flags.put(key, next);
+		if (added) {
+			appearedAt.put(key, System.currentTimeMillis());
+		}
 		if (newBoxes != null) {
 			removeStaleBoxes(key);
 			boxesByFlag.put(key, List.copyOf(newBoxes));
@@ -299,6 +450,7 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 				long eldest = flags.keySet().iterator().next();
 				flags.remove(eldest);
 				boxesByFlag.remove(eldest);
+				appearedAt.remove(eldest);
 			}
 		}
 		if (bulkDepth == 0) {
@@ -346,6 +498,7 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 	protected void unmarkFlag(long key) {
 		if (flags.remove(key) != null) {
 			boxesByFlag.remove(key);
+			appearedAt.remove(key);
 			stale.remove(key);
 			removeStaleBoxes(key);
 			revision++;
@@ -356,6 +509,7 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 	/** Drops every flag and its presentation state. */
 	protected void clearFlags() {
 		flags.clear();
+		appearedAt.clear();
 		boxesByFlag.clear();
 		boxes.clear();
 		stale.clear();
@@ -375,6 +529,7 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 			flags.remove(key);
 			boxesByFlag.remove(key);
 			stale.remove(key);
+			appearedAt.remove(key);
 			removeStaleBoxes(key);
 		}
 		for (Map.Entry<Long, List<AABB>> entry : next.entrySet()) {
@@ -384,6 +539,9 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 			Flag flag = new Flag(key, reason == null || reason.isBlank() ? "signal" : reason,
 					list == null ? 0 : list.size());
 			flags.put(key, flag);
+			if (added) {
+				appearedAt.put(key, System.currentTimeMillis());
+			}
 			boxesByFlag.put(key, list == null ? List.of() : List.copyOf(list));
 			stale.remove(key);
 			removeStaleBoxes(key);
@@ -392,6 +550,7 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 			long eldest = flags.keySet().iterator().next();
 			flags.remove(eldest);
 			boxesByFlag.remove(eldest);
+			appearedAt.remove(eldest);
 		}
 		revision++;
 		rebuildBoxes();
@@ -588,13 +747,17 @@ public abstract class FinderModule extends Module implements Tickable, Configura
 
 	@Override
 	public void loadConfig(JsonObject json) {
-		color.load(json, "color");
+		if (color != null) {
+			color.load(json, "color");
+		}
 		flagQuality.select(ConfigValues.stringValue(json, "flag_quality", "high"));
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
-		color.save(json, "color");
+		if (color != null) {
+			color.save(json, "color");
+		}
 		json.addProperty("flag_quality", flagQuality.option());
 	}
 }

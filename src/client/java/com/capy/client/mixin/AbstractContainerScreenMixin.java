@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(AbstractContainerScreen.class)
 public class AbstractContainerScreenMixin {
-	@Inject(method = "render", at = @At("TAIL"))
+	@Inject(method = "render", at = @At("TAIL"), require = 0)
 	private void capy$antiVanishOverInventory(GuiGraphics graphics, int mouseX, int mouseY, float partialTick,
 			CallbackInfo ci) {
 		Guard.run("anti-vanish inventory alert", () -> {

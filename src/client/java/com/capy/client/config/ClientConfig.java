@@ -218,6 +218,14 @@ public final class ClientConfig {
 	private void applyToModules() {
 		for (Module module : ModuleManager.get().modules()) {
 			JsonObject data = moduleData(module.id());
+			// Generic pass first: every card row is restored even in a module
+			// that never wrote its own loader. A module-specific loader runs
+			// afterwards to translate old keys and may override a value.
+			try {
+				module.loadSettings(data);
+			} catch (RuntimeException e) {
+				LOGGER.warn("Capy: module '{}' rejected a stored setting ({}).", module.id(), e.toString());
+			}
 			if (module instanceof Configurable configurable) {
 				try {
 					configurable.loadConfig(data);
@@ -249,6 +257,11 @@ public final class ClientConfig {
 		JsonObject modules = new JsonObject();
 		for (Module module : ModuleManager.get().modules()) {
 			JsonObject data = new JsonObject();
+			try {
+				module.saveSettings(data);
+			} catch (RuntimeException e) {
+				LOGGER.warn("Capy: module '{}' failed to save a setting ({}).", module.id(), e.toString());
+			}
 			if (module instanceof Configurable configurable) {
 				try {
 					configurable.saveConfig(data);

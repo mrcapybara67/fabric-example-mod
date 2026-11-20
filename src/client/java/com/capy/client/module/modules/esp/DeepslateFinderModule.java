@@ -6,6 +6,8 @@ import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.SeedDeepslate;
+import com.capy.client.module.BooleanSetting;
+import com.capy.client.module.IntSetting;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.StringSetting;
 import com.google.gson.JsonObject;
@@ -24,21 +26,30 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Read-only deepslate finder. It sends no packets and never changes the world.
+ * Seed Chunk Finder: read-only deepslate finder.
  *
  * <p>The overworld's natural deepslate near bedrock follows a seeded gradient.
  * Deepslate in that band which the gradient says should not be natural is
  * evidence of player building. The world seed is not sent by a multiplayer
- * server, so the finder uses the integrated server's seed in singleplayer and
- * accepts an optional seed in the module settings; without either it stays
- * idle and says so once in the log. This is an assumption forced by the
- * protocol, not a guess about the world.</p>
+ * server, so the finder uses the Server Seed setting, then an older saved
+ * world_seed, then the integrated server's seed in singleplayer. Without any
+ * seed it stays idle and says so once in the log.</p>
+ *
+ * <p>Render Y is where the flag plate is drawn: a base at Y 40 can be reviewed
+ * at eye level instead of at the bottom of the world.</p>
  */
 public final class DeepslateFinderModule extends FinderModule {
 	private static final Logger LOGGER = LoggerFactory.getLogger(DeepslateFinderModule.class);
 
-	private final StringSetting worldSeed = setting(new StringSetting("world_seed", ""));
-	private final SliderSetting minimum = setting(new SliderSetting("minimum", 4, 1, 32));
+	private final StringSetting serverSeed = describe(setting(new StringSetting("server_seed", "")),
+			"The server's world seed, used to judge natural deepslate.");
+	private final BooleanSetting notifications = describe(setting(new BooleanSetting("notify", false)),
+			"Show a short toast when a new suspect chunk is found.");
+	private final IntSetting renderY = describe(setting(new IntSetting("render_y", 63, -64, 320, 1)),
+			"The Y level the flag plates are drawn at.");
+	private final SliderSetting minimum = describe(setting(new SliderSetting("minimum", 4, 1, 32)),
+			"How many suspicious deepslate blocks a chunk needs to be flagged.");
+	private String legacySeed = "";
 	private SeedDeepslate seed;
 	private long appliedSeed = Long.MIN_VALUE;
 	private int appliedMinimum = 4;
@@ -49,7 +60,8 @@ public final class DeepslateFinderModule extends FinderModule {
 	private int scanSuspicious;
 
 	public DeepslateFinderModule() {
-		super("deepslate_finder", 0xFF6FA8DC);
+		super("deepslate_finder", 0x9600FF00);
+		useShape("both");
 	}
 
 	@Override
@@ -62,8 +74,6 @@ public final class DeepslateFinderModule extends FinderModule {
 		}
 		long before = appliedSeed;
 		if (!resolveSeed()) {
-			// Removing or invalidating the seed makes every old flag a claim about
-			// a different seed. Drop both the flags and any half-finished scan.
 			if (before != Long.MIN_VALUE || !flags.isEmpty()) {
 				resetSeedView();
 			}
@@ -75,12 +85,11 @@ public final class DeepslateFinderModule extends FinderModule {
 		}
 		int minimumValue = minimum.get();
 		if (minimumValue != appliedMinimum) {
-			// The threshold is part of the result, not just of the next scan.
-			// Re-evaluate the loaded chunks immediately when it moves.
 			appliedMinimum = minimumValue;
 			resetSeedView();
 			FinderScanner.get().queueAllLoaded();
 		}
+		refreshTerrain(flags.keySet());
 	}
 
 	@Override
@@ -99,6 +108,7 @@ public final class DeepslateFinderModule extends FinderModule {
 			return true;
 		}
 		long key = Chunks.key(chunk.getPos().x, chunk.getPos().z);
+		boolean hadFlag = flags.containsKey(key);
 		int minY = chunk.getMinY();
 		int firstSection = (1 - minY) >> 4;
 		if (!scanning || scanKey != key) {
@@ -141,8 +151,14 @@ public final class DeepslateFinderModule extends FinderModule {
 			}
 		}
 		if (scanSuspicious >= minimum.get()) {
-			markFlag(key, "suspicious deepslate", scanSuspicious, List.of(new AABB(baseX, 0.05, baseZ,
-					baseX + 16.0, 8.0, baseZ + 16.0)));
+			int plateY = renderY.get();
+			markFlag(key, "suspicious deepslate", scanSuspicious,
+					List.of(new AABB(baseX, plateY, baseZ, baseX + 16.0, plateY + 0.1, baseZ + 16.0)));
+			if (!hadFlag && notifications.value()) {
+				notify.toast(Minecraft.getInstance(), "Seed chunk finder",
+						scanSuspicious + " suspicious deepslate near " + (Chunks.x(key) * 16 + 8)
+								+ ", " + (Chunks.z(key) * 16 + 8));
+			}
 		} else {
 			unmarkFlag(key);
 		}
@@ -151,17 +167,20 @@ public final class DeepslateFinderModule extends FinderModule {
 	}
 
 	private boolean resolveSeed() {
-		String text = worldSeed.value();
+		String text = serverSeed.value();
+		if (text.isBlank()) {
+			text = legacySeed;
+		}
 		long source = 0L;
 		boolean found = false;
 		if (!text.isBlank()) {
 			try {
-				source = Long.parseLong(text);
+				source = Long.parseLong(text.trim());
 				found = true;
 			} catch (NumberFormatException e) {
 				if (!warnedNoSeed) {
 					warnedNoSeed = true;
-					LOGGER.warn("Capy: deepslate finder seed '{}' is not a signed integer; the finder is idle.", text);
+					LOGGER.warn("Capy: seed chunk finder seed '{}' is not a signed integer; the finder is idle.", text);
 				}
 				seed = null;
 				appliedSeed = Long.MIN_VALUE;
@@ -179,7 +198,7 @@ public final class DeepslateFinderModule extends FinderModule {
 		if (!found) {
 			if (!warnedNoSeed) {
 				warnedNoSeed = true;
-				LOGGER.info("Capy: deepslate finder needs a seed on a multiplayer server; set world_seed to enable it.");
+				LOGGER.info("Capy: seed chunk finder needs a seed on a multiplayer server; set Server Seed to enable it.");
 			}
 			seed = null;
 			appliedSeed = Long.MIN_VALUE;
@@ -194,25 +213,7 @@ public final class DeepslateFinderModule extends FinderModule {
 
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		if (flags.isEmpty()) {
-			return;
-		}
-		Set<Long> chunks = new HashSet<>();
-		for (long key : flags.keySet()) {
-			if (drawableFlag(flagDistance(key))) {
-				chunks.add(key);
-			}
-		}
-		int argb = colorArgb(timeSec);
-		int alpha = argb >>> 24;
-		ChunkStyles.fillContour(sink, chunks, 8.05, argb & 0xFFFFFF,
-				Math.max(28, Math.round(alpha * 0.16f)), Math.min(255, Math.max(180, alpha)), timeSec);
-		for (long key : flagsNearestFirst()) {
-			if (fullStyle(key, 90)) {
-				FlagStyles.stratumScan(sink, Chunks.x(key), Chunks.z(key), 8.08,
-						argb & 0xFFFFFF, timeMs);
-			}
-		}
+		drawSharedChunkFlags(sink, timeSec, timeMs);
 	}
 
 	@Override
@@ -246,8 +247,12 @@ public final class DeepslateFinderModule extends FinderModule {
 	@Override
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
-		worldSeed.set(ConfigValues.stringValue(json, "world_seed", ""));
+		// world_seed is the old key; it is read but never shown or rewritten.
+		legacySeed = ConfigValues.stringValue(json, "world_seed", "");
+		serverSeed.set(ConfigValues.stringValue(json, "server_seed", ""));
 		minimum.set(ConfigValues.intValue(json, "minimum", 4));
+		renderY.set(ConfigValues.intValue(json, "render_y", 63));
+		notifications.set(ConfigValues.boolValue(json, "notify", false));
 		seed = null;
 		appliedSeed = Long.MIN_VALUE;
 		appliedMinimum = minimum.get();
@@ -256,7 +261,9 @@ public final class DeepslateFinderModule extends FinderModule {
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
-		json.addProperty("world_seed", worldSeed.value());
+		json.addProperty("server_seed", serverSeed.value());
 		json.addProperty("minimum", minimum.get());
+		json.addProperty("render_y", renderY.get());
+		json.addProperty("notify", notifications.value());
 	}
 }

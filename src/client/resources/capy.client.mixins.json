@@ -8,7 +8,6 @@
 		"ClientBrandRetrieverMixin",
 		"ConnectionChannelMixin",
 		"KeyMappingCategoryMixin",
-		"KeyBindsListMixin",
 		"ClientPacketListenerMixin",
 		"MultiPlayerGameModeMixin",
 		"AbstractContainerScreenMixin",
@@ -37,7 +36,7 @@
 		"BoatPacketMixin"
 	],
 	"injectors": {
-		"defaultRequire": 1
+		"defaultRequire": 0
 	},
 	"overwrites": {
 		"requireAnnotations": true

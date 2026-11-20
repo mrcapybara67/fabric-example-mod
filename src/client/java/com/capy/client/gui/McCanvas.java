@@ -48,13 +48,22 @@ public final class McCanvas implements UiCanvas {
 	}
 
 	/**
-	 * Sets the uniform scale applied by the caller's pose. Geometry is already
-	 * scaled by the pose; scissor rectangles are raw screen coordinates, so
-	 * they are the one thing this canvas has to transform itself.
+	 * Sets the logical-to-device scale. The canvas is the single place that
+	 * rounds geometry into device space, so fills, lines, blits, text origins
+	 * and scissor rectangles all land on the same pixel grid.
 	 */
 	public McCanvas layoutScale(float scale) {
 		layoutScale = scale > 0f ? scale : 1f;
 		return this;
+	}
+
+	public float layoutScale() {
+		return layoutScale;
+	}
+
+	/** Rounds a logical coordinate to a device pixel. */
+	static int devicePixel(int logical, float scale) {
+		return Math.round(logical * (scale > 0f ? scale : 1f));
 	}
 
 	public GuiGraphics graphics() {
@@ -72,8 +81,15 @@ public final class McCanvas implements UiCanvas {
 		if (x2 <= x1 || y2 <= y1) {
 			return;
 		}
+		int dx1 = devicePixel(x1, layoutScale);
+		int dy1 = devicePixel(y1, layoutScale);
+		int dx2 = devicePixel(x2, layoutScale);
+		int dy2 = devicePixel(y2, layoutScale);
+		if (dx2 <= dx1 || dy2 <= dy1) {
+			return;
+		}
 		draws++;
-		graphics.fill(x1, y1, x2, y2, argb);
+		graphics.fill(dx1, dy1, dx2, dy2, argb);
 	}
 
 	@Override
@@ -81,8 +97,15 @@ public final class McCanvas implements UiCanvas {
 		if (x2 <= x1 || y2 <= y1) {
 			return;
 		}
+		int dx1 = devicePixel(x1, layoutScale);
+		int dy1 = devicePixel(y1, layoutScale);
+		int dx2 = devicePixel(x2, layoutScale);
+		int dy2 = devicePixel(y2, layoutScale);
+		if (dx2 <= dx1 || dy2 <= dy1) {
+			return;
+		}
 		draws++;
-		graphics.fillGradient(x1, y1, x2, y2, top, bottom);
+		graphics.fillGradient(dx1, dy1, dx2, dy2, top, bottom);
 	}
 
 	@Override
@@ -165,8 +188,15 @@ public final class McCanvas implements UiCanvas {
 		if (id == null || w <= 0 || h <= 0 || sourceW <= 0 || sourceH <= 0) {
 			return;
 		}
+		int dx = devicePixel(x, layoutScale);
+		int dy = devicePixel(y, layoutScale);
+		int dw = devicePixel(x + w, layoutScale) - dx;
+		int dh = devicePixel(y + h, layoutScale) - dy;
+		if (dw <= 0 || dh <= 0) {
+			return;
+		}
 		draws++;
-		graphics.blit(RenderPipelines.GUI_TEXTURED, id, x, y, 0f, 0f, w, h,
+		graphics.blit(RenderPipelines.GUI_TEXTURED, id, dx, dy, 0f, 0f, dw, dh,
 				sourceW, sourceH, sourceW, sourceH, color);
 	}
 
@@ -208,20 +238,27 @@ public final class McCanvas implements UiCanvas {
 		if (w <= 0 || h <= 0 || sourceW <= 0 || sourceH <= 0) {
 			return;
 		}
+		int dx = devicePixel(x, layoutScale);
+		int dy = devicePixel(y, layoutScale);
+		int dw = devicePixel(x + w, layoutScale) - dx;
+		int dh = devicePixel(y + h, layoutScale) - dy;
+		if (dw <= 0 || dh <= 0) {
+			return;
+		}
 		draws++;
 		// The thirteen-argument overload separates the source region from the
 		// destination rectangle. Without it the stretched centre sampled past
 		// the right and bottom edges of the generated texture.
-		graphics.blit(RenderPipelines.GUI_TEXTURED, id, x, y, u, v, w, h,
+		graphics.blit(RenderPipelines.GUI_TEXTURED, id, dx, dy, u, v, dw, dh,
 				sourceW, sourceH, TEX, TEX, color);
 	}
 
 	@Override
 	public void pushClip(int x, int y, int width, int height) {
-		int x1 = Math.round(x * layoutScale);
-		int y1 = Math.round(y * layoutScale);
-		int x2 = width <= 0 ? x1 : Math.round((x + width) * layoutScale);
-		int y2 = height <= 0 ? y1 : Math.round((y + height) * layoutScale);
+		int x1 = devicePixel(x, layoutScale);
+		int y1 = devicePixel(y, layoutScale);
+		int x2 = width <= 0 ? x1 : devicePixel(x + width, layoutScale);
+		int y2 = height <= 0 ? y1 : devicePixel(y + height, layoutScale);
 		if (clipDepth > 0) {
 			x1 = Math.max(x1, clipLeft[clipDepth - 1]);
 			y1 = Math.max(y1, clipTop[clipDepth - 1]);

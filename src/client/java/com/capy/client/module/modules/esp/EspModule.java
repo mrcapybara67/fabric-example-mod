@@ -108,6 +108,11 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 		this(id, null, defaultRange, defaultTracers);
 	}
 
+	/** An overlay with its own range limits (Storage ESP reads a tighter band). */
+	protected EspModule(String id, int defaultRange, boolean defaultTracers, int minRange, int maxRange) {
+		this(Category.DONUT_SMP, id, null, defaultRange, defaultTracers, minRange, maxRange);
+	}
+
 	private EspModule(String id, Integer defaultColor, int defaultRange, boolean defaultTracers) {
 		// Every ESP overlay lives in DonutSMP: it is the category players open
 		// on that server, and grouping the three overlays together makes their
@@ -127,22 +132,34 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 	}
 
 	private EspModule(Category category, String id, Integer defaultColor, int defaultRange, boolean defaultTracers) {
+		this(category, id, defaultColor, defaultRange, defaultTracers, MIN_RANGE, MAX_RANGE);
+	}
+
+	private EspModule(Category category, String id, Integer defaultColor, int defaultRange, boolean defaultTracers,
+			int minRange, int maxRange) {
 		super(category, id);
 		this.defaultColor = defaultColor == null ? 0 : defaultColor;
 		this.defaultRange = defaultRange;
 		this.defaultTracers = defaultTracers;
 		// The colour is the first row: it is the setting people open the card
 		// for, and it is the only one whose effect is visible immediately.
-		this.color = defaultColor == null ? null : setting(new ColorSetting("color", defaultColor));
-		this.range = setting(new SliderSetting("range", defaultRange, MIN_RANGE, MAX_RANGE));
-		this.fill = setting(new BooleanSetting("fill", true));
-		this.outline = setting(new BooleanSetting("outline", true));
-		this.tracers = setting(new BooleanSetting("tracers", defaultTracers));
+		this.color = defaultColor == null ? null : describe(setting(new ColorSetting("color", defaultColor)),
+				"The overlay colour; its alpha is the outline strength.");
+		this.range = describe(setting(new SliderSetting("range", defaultRange, minRange, maxRange)),
+				"How far the overlay looks, in blocks.");
+		this.fill = describe(setting(new BooleanSetting("fill", true)),
+				"Draw translucent faces.");
+		this.outline = describe(setting(new BooleanSetting("outline", true)),
+				"Draw the box edges.");
+		this.tracers = describe(setting(new BooleanSetting("tracers", defaultTracers)),
+				"Draw a fading line from the crosshair to every box.");
 		// The two widths are separate on purpose. A tracer is a long diagonal
 		// line and reads thin at the same width a box edge needs to stay visible,
 		// so tuning one usually means not tuning the other.
-		this.boxWidth = setting(new SliderSetting("box_width", DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, 2));
-		this.tracerWidth = setting(new SliderSetting("tracer_width", DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, 2));
+		this.boxWidth = describe(setting(new SliderSetting("box_width", DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, 2)),
+				"Box edge thickness in GUI-scaled pixels.");
+		this.tracerWidth = describe(setting(new SliderSetting("tracer_width", DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, 2)),
+				"Tracer line thickness in GUI-scaled pixels.");
 	}
 
 	/** The boxes to draw this frame. Never allocates a new list per call. */
@@ -235,6 +252,12 @@ public abstract class EspModule extends Module implements Configurable, Tickable
 
 	/** True when a tracer line runs from the crosshair to every box centre. */
 	public boolean tracers() {
+		return tracers.value();
+	}
+
+	/** Overlay tracers fade towards their far end. */
+	@Override
+	public boolean tracerFade() {
 		return tracers.value();
 	}
 

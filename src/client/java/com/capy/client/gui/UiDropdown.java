@@ -106,7 +106,7 @@ public class UiDropdown {
 	}
 
 	/** Draws the collapsed control. */
-	public void render(UiCanvas c, UiText font, int mouseX, int mouseY, float delta) {
+	public void render(UiCanvas c, UiText font, float mouseX, float mouseY, float delta) {
 		open.to(expanded ? 1f : 0f, delta);
 		boolean hovered = contains(mouseX, mouseY);
 		int r = UiTheme.RADIUS;
@@ -125,7 +125,7 @@ public class UiDropdown {
 	}
 
 	/** Draws the open list. Called after the rest of the interface. */
-	public void renderOverlay(UiCanvas c, UiText font, int mouseX, int mouseY, float delta) {
+	public void renderOverlay(UiCanvas c, UiText font, float mouseX, float mouseY, float delta) {
 		open.to(expanded ? 1f : 0f, delta);
 		float t = open.value();
 		if (t <= 0.02f) {

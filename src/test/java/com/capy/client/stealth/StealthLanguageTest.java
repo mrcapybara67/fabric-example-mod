@@ -32,6 +32,17 @@ class StealthLanguageTest {
 	}
 
 	@Test
+	void capyTextDoesNotContainKeybindTranslations() throws Exception {
+		Path text = Path.of("src/client/resources/assets/capy/text/en_us.json");
+		try (Reader reader = Files.newBufferedReader(text)) {
+			JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+			for (String key : root.keySet()) {
+				assertFalse(key.startsWith("key.capy."), key);
+			}
+		}
+	}
+
+	@Test
 	void aCapyKeyCannotResolveThroughTheServerComponentResolver() {
 		assertEquals("key.capy.open_gui",
 				Component.translatable("key.capy.open_gui").getString());

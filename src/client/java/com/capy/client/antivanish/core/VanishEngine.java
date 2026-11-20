@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Signal fusion. Weak clues become a CRITICAL alert only when clues of at least two different types agree inside a 15 second
@@ -34,6 +35,7 @@ public final class VanishEngine {
     private final Map<String, Long> cooldowns = new HashMap<>();
     private final Map<String, Detection> detections = new HashMap<>();
     private long lastCritical = Long.MIN_VALUE / 2, lastCluster = Long.MIN_VALUE / 2;
+    private String lastCriticalSubject;
 
     /** Adds a clue unless the same type and subject fired within cooldownMs. Returns true when it was added. */
     public synchronized boolean add(Type type, String subject, Proof proof, String reason, int weight, long cooldownMs, long now) {
@@ -55,6 +57,16 @@ public final class VanishEngine {
     }
 
     public synchronized Critical evaluate(long now) {
+        return evaluate(now, critical -> true);
+    }
+
+    /**
+     * Evaluates fusion and accepts only candidates the caller can actually
+     * show. Filtering here, before the cooldown is consumed and before the
+     * highest-scoring candidate is chosen, keeps a far or otherwise unusable
+     * critical from hiding a nearby accepted one for the next twelve seconds.
+     */
+    public synchronized Critical evaluate(long now, Predicate<Critical> accept) {
         prune(now);
         // Fusion is per subject. Summing every watched player's clues into one
         // score could pair Steve's vanish with Alex's invisible body and then
@@ -70,23 +82,23 @@ public final class VanishEngine {
                     .merge(signal.type(), signal.weight(), Math::max);
             if (signal.proof() != null) proofs.put(key, signal.proof());
         }
-        String bestKey = null;
-        int bestScore = 0;
+        Critical best = null;
         for (Map.Entry<String, Map<Type, Integer>> entry : weights.entrySet()) {
             if (entry.getValue().size() < 2 || proofs.get(entry.getKey()) == null) continue;
             int score = 0;
             for (int weight : entry.getValue().values()) score += weight;
             if (score < CRITICAL_SCORE) continue;
-            String candidate = names.get(entry.getKey());
-            if (bestKey == null || score > bestScore
-                    || (score == bestScore && candidate.compareToIgnoreCase(names.get(bestKey)) < 0)) {
-                bestKey = entry.getKey();
-                bestScore = score;
+            Critical candidate = new Critical(names.get(entry.getKey()), proofs.get(entry.getKey()), score);
+            if (accept != null && !accept.test(candidate)) continue;
+            if (best == null || score > best.score()
+                    || (score == best.score() && candidate.name().compareToIgnoreCase(best.name()) < 0)) {
+                best = candidate;
             }
         }
-        if (bestKey != null && now - lastCritical >= CRITICAL_COOLDOWN_MS) {
+        if (best != null && now - lastCritical >= CRITICAL_COOLDOWN_MS) {
             lastCritical = now;
-            return new Critical(names.get(bestKey), proofs.get(bestKey), bestScore);
+            lastCriticalSubject = best.name();
+            return best;
         }
         return null;
     }
@@ -130,11 +142,27 @@ public final class VanishEngine {
         detections.values().removeIf(d -> d.name().equalsIgnoreCase(name) && d.reason().toLowerCase(Locale.ROOT).startsWith("vanish event"));
     }
 
+    /** A death proved the account did not vanish: drop every clue about it. */
+    public synchronized void forgetSubject(String name) {
+        if (name == null) return;
+        boolean removed = signals.removeIf(s -> s.subject() != null && s.subject().equalsIgnoreCase(name));
+        detections.values().removeIf(d -> d.name().equalsIgnoreCase(name));
+        String suffix = "|" + name.toLowerCase(Locale.ROOT);
+        cooldowns.keySet().removeIf(key -> key.endsWith(suffix));
+        // Only release the gate when the subject that consumed it is the one
+        // whose evidence was just disproved. A dead unrelated player must not
+        // shorten the cooldown and let the same alert replay every few ticks.
+        if (removed && lastCriticalSubject != null && lastCriticalSubject.equalsIgnoreCase(name)) {
+            lastCritical = Long.MIN_VALUE / 2;
+            lastCriticalSubject = null;
+        }
+    }
+
     private void prune(long now) {
         while (!signals.isEmpty() && now - signals.peekFirst().at() > WINDOW_MS) signals.pollFirst();
         while (!located.isEmpty() && now - located.peekFirst().at() > WINDOW_MS) located.pollFirst();
         if (cooldowns.size() > 512) cooldowns.values().removeIf(t -> now - t > 60_000);
     }
 
-    public synchronized void clear() { signals.clear(); located.clear(); cooldowns.clear(); detections.clear(); lastCritical = lastCluster = Long.MIN_VALUE / 2; }
+    public synchronized void clear() { signals.clear(); located.clear(); cooldowns.clear(); detections.clear(); lastCritical = lastCluster = Long.MIN_VALUE / 2; lastCriticalSubject = null; }
 }

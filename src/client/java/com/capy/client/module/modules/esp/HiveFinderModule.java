@@ -7,6 +7,7 @@ import com.capy.client.finder.core.DrawSink;
 import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.HiveFinder;
 import com.capy.client.finder.core.TerrainPlate;
+import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.SliderSetting;
 import com.google.gson.JsonObject;
 import java.util.HashMap;
@@ -38,7 +39,12 @@ public final class HiveFinderModule extends FinderModule {
 	private static final Predicate<BlockState> HIVE = state ->
 			state != null && (state.is(Blocks.BEEHIVE) || state.is(Blocks.BEE_NEST));
 
-	private final SliderSetting mergeRadius = setting(new SliderSetting("merge_radius", 4, 1, 8));
+	private final SliderSetting mergeRadius = describe(setting(new SliderSetting("merge_radius", 4, 1, 8)),
+			"Chunks this close are folded into one hive flag.");
+	private final BooleanSetting notifications = describe(setting(new BooleanSetting("notifications", false)),
+			"Show a short toast when a new hive cluster is found.");
+	private final BooleanSetting beam = describe(setting(new BooleanSetting("beam", false)),
+			"Draw a vertical beam above every hive cluster.");
 	private final HiveFinder hive = new HiveFinder();
 	private final Map<Long, Long> retry = new HashMap<>();
 	private long lastEvaluateTick = -1L;
@@ -141,9 +147,16 @@ public final class HiveFinderModule extends FinderModule {
 				unmarkFlag(key);
 			}
 		}
+		boolean announced = false;
 		for (long key : merged) {
 			if (!flags.containsKey(key)) {
 				markFlag(key, "full hive cluster", 1, List.of(surfaceBox(key)));
+				if (!announced && notifications.value()) {
+					announced = true;
+					notify.toast(Minecraft.getInstance(), "Hive finder",
+							"Full hive cluster near " + (Chunks.x(key) * 16 + 8) + ", "
+									+ (Chunks.z(key) * 16 + 8));
+				}
 			}
 		}
 		retainTerrain(merged);
@@ -152,22 +165,12 @@ public final class HiveFinderModule extends FinderModule {
 
 	@Override
 	public void drawFlags(DrawSink sink, double timeSec, double timeMs) {
-		int base = colorArgb(timeSec);
-		for (long key : flagsNearestFirst()) {
-			int[] heights = cachedTerrain(key);
-			double distance = flagDistance(key);
-			if (heights == null || !drawableFlag(distance)) {
-				continue;
-			}
-			int argb = staleColor(key, base);
-			double y = TerrainPlate.average(heights) + 0.04;
-			if (fullStyle(distance, 260)) {
-				ChunkStyles.marker(sink, Chunks.x(key), Chunks.z(key), y, argb & 0xFFFFFF, 1.0, timeMs, true);
-				FlagStyles.honeycomb(sink, Chunks.x(key), Chunks.z(key), y + 0.02, argb & 0xFFFFFF, timeMs);
-			} else {
-				ChunkStyles.simple(sink, Chunks.x(key), Chunks.z(key), y, argb, false);
-			}
-		}
+		drawSharedChunkFlags(sink, timeSec, timeMs);
+	}
+
+	@Override
+	protected boolean sharedFlagBeam() {
+		return beam.value();
 	}
 
 	@Override

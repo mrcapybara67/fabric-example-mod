@@ -90,12 +90,36 @@ public final class AlertRenderer {
 	/** Draws the guardian style face effect and then the wording. */
 	public static void renderFaceAlert(UiCanvas c, GuiGraphics graphics,
 			int screenW, int screenH, AdminAlert alert) {
+		String pattern = switch (alert.kind()) {
+			case JOINED -> LABEL_JOINED;
+			case VANISHED -> LABEL_VANISHED;
+			case GHOST -> LABEL_GHOST;
+			case PROBED -> LABEL_PROBED;
+			case SPECTATOR -> LABEL_SPECTATOR;
+			case HIDDEN_TAG -> LABEL_HIDDEN_TAG;
+			case NEARBY -> LABEL_WATCHING;
+			case UNSEEN -> LABEL_UNSEEN;
+		};
+		renderFaceAlert(c, graphics, screenW, screenH, alert,
+				pattern.replace("%s", alert.username()), LABEL_SIGN_OFF);
+	}
+
+	/**
+	 * Draws the same guardian timeline with caller supplied wording.
+	 *
+	 * <p>Anti Vanish has its own sentence for a confirmed near vanish, but it
+	 * must use the same face, timing and sign-off stage as Anti Admin. Keeping
+	 * the renderer here means the two modules cannot drift into different
+	 * animations.</p>
+	 */
+	public static void renderFaceAlert(UiCanvas c, GuiGraphics graphics, int screenW, int screenH,
+			AdminAlert alert, String nameLine, String signOffLine) {
 		long now = System.currentTimeMillis();
 		if (alert.alpha(now) <= 0.01f) {
 			return;
 		}
 		renderFace(c, graphics, screenW, screenH, alert, now);
-		renderWording(graphics, screenW, screenH, alert, now);
+		renderWording(graphics, screenW, screenH, alert, now, nameLine, signOffLine);
 	}
 
 	// ------------------------------------------------------------------ face
@@ -140,8 +164,8 @@ public final class AlertRenderer {
 
 	// --------------------------------------------------------------- wording
 
-	private static void renderWording(GuiGraphics graphics,
-			int screenW, int screenH, AdminAlert alert, long now) {
+	private static void renderWording(GuiGraphics graphics, int screenW, int screenH,
+			AdminAlert alert, long now, String nameLine, String signOffLine) {
 		float nameAlpha = alert.nameAlpha(now);
 		float signOffAlpha = alert.signOffAlpha(now);
 		if (nameAlpha <= 0.01f && signOffAlpha <= 0.01f) {
@@ -167,22 +191,11 @@ public final class AlertRenderer {
 		int maxWidth = Math.max(40, screenW - 48);
 
 		if (nameAlpha > 0.01f) {
-			String pattern = switch (alert.kind()) {
-				case JOINED -> LABEL_JOINED;
-				case VANISHED -> LABEL_VANISHED;
-				case GHOST -> LABEL_GHOST;
-				case PROBED -> LABEL_PROBED;
-				case SPECTATOR -> LABEL_SPECTATOR;
-				case HIDDEN_TAG -> LABEL_HIDDEN_TAG;
-				case NEARBY -> LABEL_WATCHING;
-				case UNSEEN -> LABEL_UNSEEN;
-			};
-			String line = pattern.replace("%s", alert.username());
-			drawCentered(graphics, font, line, screenW / 2, top, maxWidth, nameScale,
+			drawCentered(graphics, font, nameLine, screenW / 2, top, maxWidth, nameScale,
 					Ui.withAlpha(ALERT_RED, Math.round(255f * nameAlpha)));
 		}
 		if (signOffAlpha > 0.01f) {
-			drawCentered(graphics, font, LABEL_SIGN_OFF, screenW / 2,
+			drawCentered(graphics, font, signOffLine, screenW / 2,
 					top + nameHeight + LINE_GAP, maxWidth, signOffScale,
 					Ui.withAlpha(ALERT_RED, Math.round(255f * signOffAlpha)));
 		}
@@ -207,12 +220,18 @@ public final class AlertRenderer {
 		if (text == null || text.isEmpty() || ((color >>> 24) & 0xFF) <= 0) {
 			return;
 		}
-		String fitted = fit(font, text, maxWidth, scale);
-		float width = font.width(fitted) * scale;
+		// Long warning lines keep their whole wording on smaller GUI scales;
+		// only shrink below this when even the reduced size cannot fit.
+		float fittedScale = scale;
+		if (maxWidth > 0 && font.width(text) > 0) {
+			fittedScale = Math.max(0.75f, Math.min(scale, maxWidth / (float) font.width(text)));
+		}
+		String fitted = fit(font, text, maxWidth, fittedScale);
+		float width = font.width(fitted) * fittedScale;
 		var pose = graphics.pose();
 		pose.pushMatrix();
 		pose.translate(centerX - width / 2f, y);
-		pose.scale(scale, scale);
+		pose.scale(fittedScale, fittedScale);
 		graphics.drawString(font, fitted, 0, 0, color, true);
 		pose.popMatrix();
 	}

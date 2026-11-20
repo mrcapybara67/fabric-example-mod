@@ -3,12 +3,15 @@ package com.capy.client.module.modules.esp;
 import com.capy.client.finder.core.ChunkStyles;
 import com.capy.client.finder.core.Chunks;
 import com.capy.client.finder.core.DrawSink;
+import com.capy.client.finder.core.FinderRules;
 import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.GrowthRules;
 import com.capy.client.finder.core.TerrainPlate;
 import com.capy.client.finder.core.PocketFilter;
 import com.capy.client.finder.core.SusChunkEngine;
 import com.capy.client.mixin.ClientCommonPacketListenerAccessor;
+import com.capy.client.module.BooleanSetting;
+import com.capy.client.module.IntSetting;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -32,6 +35,7 @@ import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.MangrovePropaguleBlock;
 import net.minecraft.world.level.block.NetherWartBlock;
 import net.minecraft.world.level.block.StemBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.SweetBerryBushBlock;
 import net.minecraft.world.level.block.TwistingVinesBlock;
 import net.minecraft.world.level.block.VineBlock;
@@ -74,8 +78,47 @@ public final class StalledGrowthFinderModule extends FinderModule {
 				|| state.is(Blocks.MEDIUM_AMETHYST_BUD) || state.is(Blocks.LARGE_AMETHYST_BUD)
 				|| state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.DIRT)
 				|| state.is(Blocks.OPEN_EYEBLOSSOM) || state.is(Blocks.CLOSED_EYEBLOSSOM)
+				|| state.is(Blocks.SNOW) || state.is(Blocks.ICE) || state.is(Blocks.FROSTED_ICE)
 				|| state.getBlock() instanceof CropBlock || state.getBlock() instanceof LeavesBlock;
 	};
+
+	private final IntSetting simulationDistance = describe(
+			setting(new IntSetting("simulation_distance", 4, 2, 16, 1)),
+			"The simulation radius used to eliminate chunks; this replaces the server value.");
+	private final IntSetting fillIntensity = describe(setting(new IntSetting("fill_intensity", 40, 5, 100, 5)),
+			"How strong the chunk plate fill is, in percent of the colour's alpha.");
+	private final BooleanSetting followMyHeight = describe(setting(new BooleanSetting("follow_my_height", false)),
+			"Ride the plate at your feet instead of hugging the terrain.");
+	private final IntSetting height = describe(setting(new IntSetting("height", 63, -64, 320, 1),
+			() -> !followMyHeight.value()), "The ceiling for the terrain-hugging plate.");
+	private final IntSetting sensitivity = describe(setting(new IntSetting("sensitivity", 40, 1, 500, 1)),
+			"How much stalled-growth support a chunk needs to be flagged.");
+	private final BooleanSetting holeFilter = describe(setting(new BooleanSetting("hole_filter", false)),
+			"Drop candidates close to a long vertical shaft.");
+	private final IntSetting holeDistance = describe(setting(new IntSetting("hole_distance", 2, 0, 8, 1),
+			() -> holeFilter.value()), "How many chunks around a shaft are dropped.");
+	private final BooleanSetting customFlags = describe(setting(new BooleanSetting("custom_flags", false)),
+			"Choose which kinds of evidence count instead of accepting all of them.");
+	private final BooleanSetting kelp = evidence("kelp", "Kelp columns");
+	private final BooleanSetting caveVines = evidence("cave_vines", "Cave vines");
+	private final BooleanSetting weepingVines = evidence("weeping_vines", "Weeping and twisting vines");
+	private final BooleanSetting bamboo = evidence("bamboo", "Bamboo");
+	private final BooleanSetting sugarCane = evidence("sugar_cane", "Sugar cane");
+	private final BooleanSetting cactus = evidence("cactus", "Cactus");
+	private final BooleanSetting cocoa = evidence("cocoa", "Cocoa");
+	private final BooleanSetting berries = evidence("berries", "Sweet berry bushes");
+	private final BooleanSetting netherWart = evidence("nether_wart", "Nether wart");
+	private final BooleanSetting crops = evidence("crops", "Crops");
+	private final BooleanSetting stems = evidence("stems", "Melon and pumpkin stems");
+	private final BooleanSetting amethyst = evidence("amethyst", "Amethyst buds and budding amethyst");
+	private final BooleanSetting vines = evidence("vines", "Vines");
+	private final BooleanSetting leaves = evidence("leaves", "Leaves");
+	private final BooleanSetting soil = evidence("soil", "Grass and dirt");
+	private final BooleanSetting propagules = evidence("propagules", "Mangrove propagules");
+	private final BooleanSetting eyeblossoms = evidence("eyeblossoms", "Eyeblossoms");
+	private final BooleanSetting snow = evidence("snow", "Snow layers");
+	private final BooleanSetting ice = evidence("ice", "Ice");
+	private int appliedCustom = -1;
 
 	private final BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
 	private final Set<Long> renderChunks = new HashSet<>();
@@ -91,7 +134,36 @@ public final class StalledGrowthFinderModule extends FinderModule {
 	private boolean folia;
 
 	public StalledGrowthFinderModule() {
-		super("stalled_growth_finder", 0xFFFF5A5A);
+		super("stalled_growth_finder", 0xFFFF5A7A);
+	}
+
+	private BooleanSetting evidence(String key, String tip) {
+		return describe(setting(new BooleanSetting(key, true), () -> customFlags.value()), tip);
+	}
+
+	/** True when this kind of evidence is currently counted. */
+	private boolean allowed(BooleanSetting kind) {
+		return !customFlags.value() || kind.value();
+	}
+
+	private int customSignature() {
+		int hash = customFlags.value() ? 1 : 0;
+		BooleanSetting[] kinds = {kelp, caveVines, weepingVines, bamboo, sugarCane, cactus, cocoa,
+				berries, netherWart, crops, stems, amethyst, vines, leaves, soil, propagules,
+				eyeblossoms, snow, ice};
+		for (BooleanSetting kind : kinds) {
+			hash = hash * 31 + (kind.value() ? 1 : 0);
+		}
+		return hash;
+	}
+
+	@Override
+	public String reliability() {
+		int server = level == null ? 0 : level.getServerSimulationDistance();
+		if (server > 0 && server != simulationDistance.get()) {
+			return "hard to hide, sim " + simulationDistance.get() + " (server " + server + ")";
+		}
+		return "hard to hide";
 	}
 
 	@Override
@@ -100,6 +172,18 @@ public final class StalledGrowthFinderModule extends FinderModule {
 			return;
 		}
 		ensureEngine();
+		int custom = customSignature();
+		if (custom != appliedCustom) {
+			// Which evidence counts is part of the cached result: a different
+			// set makes every old support count a claim about another rule.
+			appliedCustom = custom;
+			if (engine != null) {
+				engine.clear();
+			}
+			clearFlags();
+			renderChunks.clear();
+			FinderScanner.get().queueAllLoaded();
+		}
 		long tick = level.getGameTime();
 		if (lastEvaluateTick < 0L || tick - lastEvaluateTick >= EVALUATE_INTERVAL_TICKS) {
 			lastEvaluateTick = tick;
@@ -122,7 +206,7 @@ public final class StalledGrowthFinderModule extends FinderModule {
 			scanBlossomWrong = 0;
 		}
 
-		Boolean blossomOpen = eyeblossomsJudgeable()
+		Boolean blossomOpen = eyeblossomsJudgeable() && allowed(eyeblossoms)
 				? GrowthRules.eyeblossomsShouldBeOpen(level.getDayTime())
 				: null;
 		int minY = chunk.getMinY();
@@ -192,13 +276,9 @@ public final class StalledGrowthFinderModule extends FinderModule {
 	}
 
 	private int evidenceRadius() {
-		int sent = level.getServerSimulationDistance();
-		if (sent <= 0) {
-			Minecraft mc = Minecraft.getInstance();
-			int view = mc == null ? 8 : mc.options.getEffectiveRenderDistance();
-			sent = Math.min(Math.max(0, view), 8);
-		}
-		return Math.max(1, Math.min(32, sent));
+		// The card's value is the whole answer: default 4 means "use 4", not
+		// "use the server's value until I touch this row".
+		return simulationDistance.get();
 	}
 
 	private void updateServerFlavor(Minecraft mc) {
@@ -225,6 +305,9 @@ public final class StalledGrowthFinderModule extends FinderModule {
 	}
 
 	private boolean isOwed(BlockState state, int x, int y, int z) {
+		if (!evidenceEnabled(state)) {
+			return false;
+		}
 		if (state.is(Blocks.KELP)) {
 			BlockState above = level.getBlockState(probe.set(x, y + 1, z));
 			if (!above.getFluidState().is(FluidTags.WATER)) {
@@ -330,7 +413,79 @@ public final class StalledGrowthFinderModule extends FinderModule {
 			BlockState support = level.getBlockState(probe.set(x, y, z).relative(facing.getOpposite()));
 			return GrowthRules.amethystBud(support.is(Blocks.BUDDING_AMETHYST), false);
 		}
+		if (state.is(Blocks.SNOW)) {
+			return GrowthRules.snow(level.getMaxLocalRawBrightness(probe.set(x, y, z)),
+					state.getValue(SnowLayerBlock.LAYERS));
+		}
+		if (state.is(Blocks.ICE) || state.is(Blocks.FROSTED_ICE)) {
+			return GrowthRules.ice(level.getMaxLocalRawBrightness(probe.set(x, y, z)));
+		}
 		return false;
+	}
+
+	/** The Custom Flags filter, applied before the expensive per-block checks. */
+	private boolean evidenceEnabled(BlockState state) {
+		if (!customFlags.value()) {
+			return true;
+		}
+		if (state.is(Blocks.KELP)) {
+			return kelp.value();
+		}
+		if (state.getBlock() instanceof WeepingVinesBlock || state.getBlock() instanceof TwistingVinesBlock) {
+			return weepingVines.value();
+		}
+		if (state.is(Blocks.CAVE_VINES)) {
+			return caveVines.value();
+		}
+		if (state.is(Blocks.BAMBOO)) {
+			return bamboo.value();
+		}
+		if (state.is(Blocks.SUGAR_CANE)) {
+			return sugarCane.value();
+		}
+		if (state.is(Blocks.CACTUS)) {
+			return cactus.value();
+		}
+		if (state.is(Blocks.COCOA)) {
+			return cocoa.value();
+		}
+		if (state.is(Blocks.SWEET_BERRY_BUSH)) {
+			return berries.value();
+		}
+		if (state.is(Blocks.NETHER_WART)) {
+			return netherWart.value();
+		}
+		if (state.is(Blocks.MELON_STEM) || state.is(Blocks.PUMPKIN_STEM)) {
+			return stems.value();
+		}
+		if (state.getBlock() instanceof CropBlock) {
+			return crops.value();
+		}
+		if (state.is(Blocks.VINE)) {
+			return vines.value();
+		}
+		if (state.getBlock() instanceof LeavesBlock) {
+			return leaves.value();
+		}
+		if (state.is(Blocks.MANGROVE_PROPAGULE)) {
+			return propagules.value();
+		}
+		if (state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.DIRT)) {
+			return soil.value();
+		}
+		if (state.is(Blocks.BUDDING_AMETHYST) || isAmethystBud(state)) {
+			return amethyst.value();
+		}
+		if (state.is(Blocks.OPEN_EYEBLOSSOM) || state.is(Blocks.CLOSED_EYEBLOSSOM)) {
+			return eyeblossoms.value();
+		}
+		if (state.is(Blocks.SNOW)) {
+			return snow.value();
+		}
+		if (state.is(Blocks.ICE) || state.is(Blocks.FROSTED_ICE)) {
+			return ice.value();
+		}
+		return true;
 	}
 
 	private boolean eyeblossomsJudgeable() {
@@ -407,7 +562,11 @@ public final class StalledGrowthFinderModule extends FinderModule {
 		int cx = mc.player.blockPosition().getX() >> 4;
 		int cz = mc.player.blockPosition().getZ() >> 4;
 		engine.prune(cx, cz, Math.min(64, engine.reach() + 8));
-		Set<Long> found = engine.flagged(this::loaded, SusChunkEngine.thresholdFor(engine.radius()));
+		Set<Long> found = engine.flagged(this::loaded, sensitivity.get());
+		if (holeFilter.value()) {
+			int distance = holeDistance.get();
+			found.removeIf(key -> hasVerticalShaftNear(key, distance));
+		}
 		List<PocketFilter.Patch> patches = PocketFilter.patches(found, PocketFilter.maxSizeFor(engine.radius()));
 
 		beginBulk();
@@ -442,38 +601,42 @@ public final class StalledGrowthFinderModule extends FinderModule {
 				}
 			}
 		}
-		if (renderChunks.isEmpty()) {
-			return;
+		drawSharedChunkFlags(sink, timeSec, timeMs);
+	}
+
+	@Override
+	protected int sharedFlagColor(long key, double timeSec) {
+		return staleColor(key, colorArgb(timeSec));
+	}
+
+	/** True when any chunk within {@code distance} has a long open column. */
+	private boolean hasVerticalShaftNear(long key, int distance) {
+		if (level == null) {
+			return false;
 		}
-		int argb = colorArgb(timeSec);
-		int rgb = argb & 0xFFFFFF;
-		int fill = Math.round((argb >>> 24) * 0.40f);
-		int edge = Math.min(255, Math.max(170, argb >>> 24));
-		List<Long> ordered = new ArrayList<>(renderChunks);
-		ordered.sort(java.util.Comparator.comparingDouble(this::flagDistance));
-		for (long key : ordered) {
-			int[] heights = cachedTerrain(key);
-			if (heights == null || !drawableFlag(flagDistance(key))) {
-				continue;
+		int cx = Chunks.x(key);
+		int cz = Chunks.z(key);
+		for (int dx = -distance; dx <= distance; dx++) {
+			for (int dz = -distance; dz <= distance; dz++) {
+				if (columnHasShaft(cx + dx, cz + dz)) {
+					return true;
+				}
 			}
-			int keyRgb = isStale(key) ? dimRgb(rgb) : rgb;
-			int keyEdge = isStale(key) ? Math.max(110, edge * 45 / 100) : edge;
-			int keyFill = isStale(key) ? Math.max(16, fill * 45 / 100) : fill;
-			double average = TerrainPlate.average(heights);
-			oneChunk.clear();
-			oneChunk.add(key);
-			ChunkStyles.fillContour(sink, oneChunk, average + 0.05, keyRgb, 0, keyEdge, timeSec);
-			TerrainPlate.emit(sink, Chunks.x(key), Chunks.z(key), heights,
-					ChunkStyles.argb(keyFill, keyRgb), 0.05);
 		}
-		for (long key : flagsNearestFirst()) {
-			int[] heights = cachedTerrain(key);
-			if (heights == null || !fullStyle(key, 110)) {
-				continue;
-			}
-			FlagStyles.radarSweep(sink, Chunks.x(key), Chunks.z(key),
-					TerrainPlate.average(heights) + 0.08, isStale(key) ? dimRgb(rgb) : rgb, timeMs);
+		return false;
+	}
+
+	private boolean columnHasShaft(int cx, int cz) {
+		int x = cx * 16 + 8;
+		int z = cz * 16 + 8;
+		int start = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, x, z) - 1;
+		int min = Math.max(level.getMinY(), start - 48);
+		int length = Math.max(1, start - min);
+		boolean[] air = new boolean[length];
+		for (int i = 0; i < length; i++) {
+			air[i] = level.getBlockState(probe.set(x, start - i, z)).isAir();
 		}
+		return FinderRules.hasVerticalRun(air, 10);
 	}
 
 	@Override
@@ -504,6 +667,7 @@ public final class StalledGrowthFinderModule extends FinderModule {
 		renderChunks.clear();
 		terrain.clear();
 		lastEvaluateTick = -1L;
+		appliedCustom = -1;
 		clearScan();
 	}
 }

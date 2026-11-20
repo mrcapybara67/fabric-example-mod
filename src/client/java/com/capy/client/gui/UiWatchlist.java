@@ -105,7 +105,7 @@ public class UiWatchlist {
 		}
 	}
 
-	public void render(UiCanvas c, UiText font, int x, int y, int w, int mouseX, int mouseY, float delta) {
+	public void render(UiCanvas c, UiText font, int x, int y, int w, float mouseX, float mouseY, float delta) {
 		int cy = y;
 
 		// Header: the setting label.
