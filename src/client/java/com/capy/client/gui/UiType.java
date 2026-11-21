@@ -5,7 +5,7 @@ package com.capy.client.gui;
  *
  * Keeping the four weights behind one object means a component can ask for
  * "the title face" without knowing how it is produced, and the offline
- * renderer can supply the same four weights from the bundled Inter files.
+ * renderer can supply the same four weights from the bundled Poppins files.
  */
 public interface UiType {
 	/** Body text: descriptions, values, hints. */

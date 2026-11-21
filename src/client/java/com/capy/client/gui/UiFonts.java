@@ -26,16 +26,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Capy's UI typography: real vector glyphs from bundled Inter TTFs
+ * Capy's UI typography: real vector glyphs from bundled Poppins TTFs
  * (SIL Open Font License) rendered through the same TrueType pipeline vanilla
  * uses for its own fonts.
  *
- * Vector-smooth grotesque letterforms in five static cuts:
- *   regular()  = Inter 400 — body text, descriptions, values
- *   medium()   = Inter 500 — module names, labels
- *   bold()     = Inter 600 — headings, emphasised values
- *   display()  = Inter 700 at a larger size — wordmark, alert headline
- *   headline() = Inter 700, larger again — the Anti Admin alert
+ * Vector-smooth geometric letterforms in five static cuts:
+ *   regular()  = Poppins 400 — body text, descriptions, values
+ *   medium()   = Poppins 500 — module names, labels
+ *   bold()     = Poppins 600 — headings, emphasised values
+ *   display()  = Poppins 700 at a larger size — wordmark, alert headline
+ *   headline() = Poppins 700, larger again — the Anti Admin alert
  *
  * Why the fonts are opened directly instead of going through
  * {@code TrueTypeGlyphProviderDefinition}: that definition resolves its
@@ -56,29 +56,31 @@ import org.slf4j.LoggerFactory;
 public final class UiFonts {
 	private static final Logger LOGGER = LoggerFactory.getLogger(UiFonts.class);
 
-	/** Rendered pixel size. Inter is optically small, so this sits a touch high. */
-	private static final float SIZE = 9.0f;
+	/**
+	 * Rendered pixel size. Poppins is wider than the old face, so the body
+	 * size is reduced slightly to keep labels inside their existing rows.
+	 */
+	private static final float SIZE = 8.5f;
 	/** Size of the display weight used for the wordmark and alert headlines. */
-	private static final float DISPLAY_SIZE = 12.0f;
+	private static final float DISPLAY_SIZE = 11.5f;
 	/**
 	 * Size of the headline weight. Large on purpose: the Anti Admin alert is
 	 * the one piece of text in the client that has to be read instantly, from
 	 * the middle of the screen, without stopping to look at it.
 	 */
-	private static final float HEADLINE_SIZE = 17.0f;
+	private static final float HEADLINE_SIZE = 16.0f;
 	/**
 	 * Glyph supersampling. Three times instead of two is what keeps the small
-	 * Inter cuts crisp at 1080p and above, where the GUI scale magnifies each
-	 * glyph: at two the stems of 9 px text soften into grey.
+	 * Poppins cuts crisp at 1080p and above, where the GUI scale magnifies each
+	 * glyph: at two the stems of 8.5 px text soften into grey.
 	 */
 	private static final float OVERSAMPLE = 3.0f;
 
 	/** Bundle-relative path of each static weight. */
-	private static final String REGULAR_TTF = "/assets/capy/font/inter-500.ttf";
-	private static final String MEDIUM_TTF = "/assets/capy/font/inter-600.ttf";
-	private static final String BOLD_TTF = "/assets/capy/font/inter-700.ttf";
-	/** The true regular weight, used for body text. */
-	private static final String LIGHT_TTF = "/assets/capy/font/inter-400.ttf";
+	private static final String REGULAR_TTF = "/assets/capy/font/poppins-400.ttf";
+	private static final String MEDIUM_TTF = "/assets/capy/font/poppins-500.ttf";
+	private static final String SEMIBOLD_TTF = "/assets/capy/font/poppins-600.ttf";
+	private static final String DISPLAY_TTF = "/assets/capy/font/poppins-700.ttf";
 
 	private static FontSet setRegular;
 	private static FontSet setMedium;
@@ -161,23 +163,18 @@ public final class UiFonts {
 		try {
 			Minecraft mc = Minecraft.getInstance();
 
-			loaded.add(loadFromBundle(LIGHT_TTF, SIZE));
 			loaded.add(loadFromBundle(REGULAR_TTF, SIZE));
 			loaded.add(loadFromBundle(MEDIUM_TTF, SIZE));
-			loaded.add(loadFromBundle(BOLD_TTF, SIZE));
-			loaded.add(loadFromBundle(BOLD_TTF, DISPLAY_SIZE));
-			loaded.add(loadFromBundle(BOLD_TTF, HEADLINE_SIZE));
+			loaded.add(loadFromBundle(SEMIBOLD_TTF, SIZE));
+			loaded.add(loadFromBundle(DISPLAY_TTF, DISPLAY_SIZE));
+			loaded.add(loadFromBundle(DISPLAY_TTF, HEADLINE_SIZE));
 			providers = List.copyOf(loaded);
 
 			setRegular = buildSet(mc, "regular", loaded.get(0));
 			setMedium = buildSet(mc, "medium", loaded.get(1));
 			setBold = buildSet(mc, "bold", loaded.get(2));
-			// Index 3 is the 9 px bold face; the display and headline cut are the
-			// two larger rasterisations that follow it. Keeping the display face
-			// on the 9 px entry was why the in-game wordmark was smaller than the
-			// preview: the preview always used 12 px.
-			setDisplay = buildSet(mc, "display", loaded.get(4));
-			setHeadline = buildSet(mc, "headline", loaded.get(5));
+			setDisplay = buildSet(mc, "display", loaded.get(3));
+			setHeadline = buildSet(mc, "headline", loaded.get(4));
 
 			regular = fontFor(setRegular);
 			medium = fontFor(setMedium);
@@ -189,10 +186,10 @@ public final class UiFonts {
 			// from shipping the wrong font. The load is retried, because the
 			// usual cause is a missing render context during startup.
 			if (attempts == 1) {
-				LOGGER.error("Capy: could not build the bundled Inter fonts ({} / {} / {} / {}), retrying.",
-						LIGHT_TTF, REGULAR_TTF, MEDIUM_TTF, BOLD_TTF, t);
+				LOGGER.error("Capy: could not build the bundled Poppins fonts ({} / {} / {} / {}), retrying.",
+						REGULAR_TTF, MEDIUM_TTF, SEMIBOLD_TTF, DISPLAY_TTF, t);
 			} else {
-				LOGGER.warn("Capy: still no bundled Inter fonts (attempt {}), retrying.", attempts);
+				LOGGER.warn("Capy: still no bundled Poppins fonts (attempt {}), retrying.", attempts);
 			}
 			// Give the faces that were already opened back.
 			for (GlyphProvider provider : loaded) {

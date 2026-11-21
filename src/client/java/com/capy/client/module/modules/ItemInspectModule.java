@@ -10,25 +10,36 @@ import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
 import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 /**
- * Item Inspect — a short first-person flourish for the held tool.
+ * Item Inspect — a staged first-person inspection for the held weapon.
  *
  * <p>No custom model and no texture: the ordinary vanilla item is animated in
  * hand space, so resource packs, enchantment glints and every tool material
  * keep working. The animation starts and ends at the vanilla hand pose; a
  * swing, use, slot change or screen cancels it with a short return instead of a
  * snap.</p>
+ *
+ * <p>Every sword uses the sword profile, every spear and trident the spear
+ * profile, and bows, crossbows, maces and any item carrying the vanilla
+ * {@code WEAPON} component have their own profile. The per-type switches only
+ * decide which of those profiles the player wants to see.</p>
  */
 public class ItemInspectModule extends Module implements Tickable, Configurable {
 	public enum Tool {
-		SWORD(1_400_000_000L),
-		AXE(1_500_000_000L),
-		PICKAXE(1_400_000_000L),
-		SHOVEL(1_200_000_000L),
-		HOE(1_200_000_000L);
+		SWORD(1_650_000_000L),
+		SPEAR(1_950_000_000L),
+		AXE(1_750_000_000L),
+		PICKAXE(1_650_000_000L),
+		SHOVEL(1_450_000_000L),
+		HOE(1_450_000_000L),
+		MACE(1_900_000_000L),
+		RANGED(1_800_000_000L),
+		GENERIC(1_650_000_000L);
 
 		private final long durationNanos;
 
@@ -48,6 +59,10 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 	private final BooleanSetting pickaxe = setting(new BooleanSetting("pickaxe", true));
 	private final BooleanSetting shovel = setting(new BooleanSetting("shovel", true));
 	private final BooleanSetting hoe = setting(new BooleanSetting("hoe", true));
+	private final BooleanSetting spear = setting(new BooleanSetting("spear", true));
+	private final BooleanSetting mace = setting(new BooleanSetting("mace", true));
+	private final BooleanSetting ranged = setting(new BooleanSetting("ranged", true));
+	private final BooleanSetting otherWeapon = setting(new BooleanSetting("other_weapon", true));
 	private long cooldownUntil;
 
 	public ItemInspectModule() {
@@ -66,6 +81,18 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 		if (stack == null || stack.isEmpty()) {
 			return null;
 		}
+		// Spears first: a trident is a spear for inspection purposes, but it is
+		// not a sword or an axe even though it is a weapon.
+		if (stack.is(ItemTags.SPEARS) || stack.is(ItemTags.TRIDENT_ENCHANTABLE)
+				|| stack.is(Items.TRIDENT)) {
+			return spear.value() ? Tool.SPEAR : null;
+		}
+		if (stack.is(ItemTags.MACE_ENCHANTABLE) || stack.is(Items.MACE)) {
+			return mace.value() ? Tool.MACE : null;
+		}
+		if (stack.is(ItemTags.BOW_ENCHANTABLE) || stack.is(ItemTags.CROSSBOW_ENCHANTABLE)) {
+			return ranged.value() ? Tool.RANGED : null;
+		}
 		if (stack.is(ItemTags.SWORDS)) {
 			return sword.value() ? Tool.SWORD : null;
 		}
@@ -80,6 +107,13 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 		}
 		if (stack.is(ItemTags.HOES)) {
 			return hoe.value() ? Tool.HOE : null;
+		}
+		// Last, so every specific profile above wins. WEAPON covers vanilla
+		// weapons and modded weapons that use the vanilla component; the tag
+		// catches the remaining weapon-like items that only declare the
+		// enchantment category.
+		if (stack.has(DataComponents.WEAPON) || stack.is(ItemTags.WEAPON_ENCHANTABLE)) {
+			return otherWeapon.value() ? Tool.GENERIC : null;
 		}
 		return null;
 	}
@@ -145,6 +179,10 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 		pickaxe.set(ConfigValues.boolValue(json, "pickaxe", true));
 		shovel.set(ConfigValues.boolValue(json, "shovel", true));
 		hoe.set(ConfigValues.boolValue(json, "hoe", true));
+		spear.set(ConfigValues.boolValue(json, "spear", true));
+		mace.set(ConfigValues.boolValue(json, "mace", true));
+		ranged.set(ConfigValues.boolValue(json, "ranged", true));
+		otherWeapon.set(ConfigValues.boolValue(json, "other_weapon", true));
 	}
 
 	@Override
@@ -156,5 +194,9 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 		json.addProperty("pickaxe", pickaxe.value());
 		json.addProperty("shovel", shovel.value());
 		json.addProperty("hoe", hoe.value());
+		json.addProperty("spear", spear.value());
+		json.addProperty("mace", mace.value());
+		json.addProperty("ranged", ranged.value());
+		json.addProperty("other_weapon", otherWeapon.value());
 	}
 }

@@ -37,11 +37,9 @@ public class UiToggle {
 				Ui.lerpColor(0x2EFFFFFF, 0x73FFFFFF, t),
 				Ui.lerpColor(0x12FFFFFF, 0x26FFFFFF, t));
 
-		// Two small block ticks make the track read as a control even before
-		// the knob is noticed, and the square knob is the requested shape.
-		int tickColour = Ui.withAlpha(t > 0.5f ? UiTheme.ON_ACCENT : UiTheme.TEXT_3, 0x70);
-		c.fill(x + 8, y + h / 2 - 3, x + 9, y + h / 2 + 3, tickColour);
-		c.fill(x + 11, y + h / 2 - 3, x + 12, y + h / 2 + 3, tickColour);
+		// The knob and the track fill carry the state on their own. The old
+		// pair of track ticks looked like a pause icon once the knob slid right,
+		// and added noise to every card in the grid.
 		int d = h - 8;
 		// A short overshoot on the knob: the track crossfades underneath while
 		// the knob arrives with a little spring, not a linear slide.
@@ -53,7 +51,5 @@ public class UiToggle {
 				Ui.lerpColor(Ui.lerpColor(0xFFEAF4FC, UiTheme.ACCENT_2, t),
 						Ui.lerpColor(0xFFC4D7E8, UiTheme.ACCENT, t), 0.5f));
 		Ui.outline(c, kx, ky, d, d, 1, 0x73FFFFFF);
-		c.fill(kx + d / 2 - 2, ky + d / 2, kx + d / 2 + 2, ky + d / 2 + 1,
-				Ui.withAlpha(t > 0.5f ? UiTheme.ON_ACCENT : UiTheme.PANEL_ALT, 0xB0));
 	}
 }

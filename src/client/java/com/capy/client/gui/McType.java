@@ -1,7 +1,7 @@
 package com.capy.client.gui;
 
 /**
- * {@link UiType} backed by the bundled Inter faces.
+ * {@link UiType} backed by the bundled Poppins faces.
  *
  * The faces are resolved lazily, so creating this object is cheap and safe at
  * any point during startup.

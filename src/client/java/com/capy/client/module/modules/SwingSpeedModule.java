@@ -37,6 +37,13 @@ public class SwingSpeedModule extends Module implements Configurable {
 	public static final int MAX_SPEED = 20;
 	public static final int DEFAULT_SPEED = VANILLA_SPEED;
 
+	/**
+	 * A one-tick swing never advances {@code attackAnim} away from zero, and a
+	 * two-tick swing has only one moving frame. Keep at least two ticks so the
+	 * fast end of the slider always has a visible beginning and end.
+	 */
+	public static final int MIN_SWING_TICKS = 2;
+
 	private final SliderSetting speed = setting(new SliderSetting("speed", DEFAULT_SPEED, MIN_SPEED, MAX_SPEED));
 
 	public SwingSpeedModule() {
@@ -47,7 +54,7 @@ public class SwingSpeedModule extends Module implements Configurable {
 	 * Scales the swing duration vanilla computed for the held item.
 	 *
 	 * @param vanillaDuration the duration in ticks vanilla wants to use
-	 * @return the scaled duration, never below one tick
+	 * @return the scaled duration, never below {@link #MIN_SWING_TICKS}
 	 */
 	public int scaleSwingDuration(int vanillaDuration) {
 		int base = Math.max(1, vanillaDuration);
@@ -60,7 +67,7 @@ public class SwingSpeedModule extends Module implements Configurable {
 	}
 
 	private static int clampTicks(int ticks) {
-		return Math.max(1, Math.min(120, ticks));
+		return Math.max(MIN_SWING_TICKS, Math.min(120, ticks));
 	}
 
 	/**

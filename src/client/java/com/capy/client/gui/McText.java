@@ -18,6 +18,8 @@ import net.minecraft.client.gui.Font;
 public final class McText implements UiText {
 	private final Supplier<Font> supplier;
 	private final Map<String, Integer> widths = new HashMap<>();
+	/** The face the width cache was measured with; null before the first use. */
+	private Font widthsFor;
 
 	public McText(Supplier<Font> supplier) {
 		this.supplier = supplier;
@@ -38,12 +40,23 @@ public final class McText implements UiText {
 		if (text == null) {
 			return 0;
 		}
+		Font font = resolve();
+		if (font == null) {
+			return 0;
+		}
+		// Widths are only valid for the face that produced them. The bundled
+		// Poppins faces load lazily, so the first measurements can come from
+		// the vanilla fallback; without this reset every label keeps fallback
+		// metrics after the real face arrives, breaking centring and ellipsis.
+		if (font != widthsFor) {
+			widthsFor = font;
+			widths.clear();
+		}
 		Integer cached = widths.get(text);
 		if (cached != null) {
 			return cached;
 		}
-		Font font = resolve();
-		int width = font == null ? 0 : font.width(text);
+		int width = font.width(text);
 		if (widths.size() > 512) {
 			widths.clear();
 		}

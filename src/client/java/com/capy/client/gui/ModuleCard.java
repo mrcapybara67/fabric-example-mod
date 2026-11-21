@@ -407,10 +407,21 @@ public class ModuleCard {
 			c.fill(x + 1, y + 9, x + 3, y + h - 9,
 					Ui.withAlpha(UiTheme.ACCENT, Math.round(0xD8 * onv)));
 		}
-		// A hairline, not a heavy frame.
-		Ui.surfaceEdge(c, x, y, w, h, r,
-				Ui.lerpColor(Ui.withAlpha(UiTheme.BORDER, 0xA8), Ui.withAlpha(UiTheme.ACCENT, 0xB0), onv * 0.8f),
-				Ui.withAlpha(UiTheme.BORDER, 0x60));
+		// A hairline, not a heavy frame. At rest the rim barely separates the
+		// card from the workspace; hover brings the accent forward, and an
+		// enabled card owns it. Previously every card carried the same bright
+		// rim, which made the grid feel outlined rather than layered.
+		int borderTop = Ui.withAlpha(UiTheme.BORDER, 0x55);
+		int borderBottom = Ui.withAlpha(UiTheme.BORDER, 0x2C);
+		if (hv > 0.01f) {
+			borderTop = Ui.lerpColor(borderTop, Ui.withAlpha(UiTheme.ACCENT, 0x9E), hv * 0.85f);
+			borderBottom = Ui.lerpColor(borderBottom, Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x70), hv * 0.85f);
+		}
+		if (onv > 0.01f) {
+			borderTop = Ui.lerpColor(borderTop, Ui.withAlpha(UiTheme.ACCENT, 0xC0), onv);
+			borderBottom = Ui.lerpColor(borderBottom, Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x90), onv);
+		}
+		Ui.surfaceEdge(c, x, y, w, h, r, borderTop, borderBottom);
 		Ui.innerBevel(c, x, y, w, h, r, UiTheme.HIGHLIGHT, UiTheme.SHADE);
 
 		// The name owns the card. Descriptions and the old settings glyph are

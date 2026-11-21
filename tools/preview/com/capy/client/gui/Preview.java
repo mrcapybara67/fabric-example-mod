@@ -1,26 +1,21 @@
 package com.capy.client.gui;
 
 import com.capy.client.module.Category;
+import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
-import com.capy.client.module.modules.AntiAdminModule;
-import com.capy.client.module.modules.CustomKnifeModule;
-import com.capy.client.module.modules.SwingSpeedModule;
-import com.capy.client.module.modules.WeatherNotifierModule;
-import com.capy.client.module.modules.antiadmin.AdminAlert;
-import com.capy.client.module.modules.antiadmin.AdminDetector;
-import com.capy.client.module.modules.antiadmin.AlertRenderer;
-import com.capy.client.module.modules.esp.PlayerEspModule;
-import com.capy.client.module.modules.esp.StorageEspModule;
-import com.capy.client.module.modules.hud.HudElements;
+import com.capy.client.module.modules.ItemInspectModule;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
+import java.awt.GradientPaint;
 import java.awt.Graphics2D;
-import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.Reader;
@@ -35,368 +30,252 @@ import javax.imageio.ImageIO;
 /**
  * Offline renderer for the Capy interface.
  *
- * It runs the real {@link GuiFrame}, the real components and the real alert
- * renderer against a Java2D canvas and the bundled Inter files, so the images
- * are what the client draws - not a mock-up. The images are used to review
- * proportions, spacing, typography, contrast and the alert timeline without a
- * running game.
+ * It runs the real {@link GuiFrame}, the real components and the bundled
+ * Poppins files against a Java2D canvas. The images are used to review
+ * proportions, spacing, typography and contrast without a running game.
  *
  * Usage: java com.capy.client.gui.Preview [outputDir]
  */
 public final class Preview {
-	private static final Path ROOT = Path.of(System.getProperty("capy.root", "."));
-	private static final Path FONT_DIR = ROOT.resolve("src/client/resources/assets/capy/font");
-	private static final Path LANG = ROOT.resolve("src/main/resources/assets/capy/lang/en_us.json");
+    private static final Path ROOT = Path.of(System.getProperty("capy.root", "."));
+    private static final Path FONTS = ROOT.resolve("src/client/resources/assets/capy/font");
+    private static final Path TEXT = ROOT.resolve("src/client/resources/assets/capy/text/en_us.json");
 
-	public static void main(String[] args) throws Exception {
-		Path out = Path.of(args.length > 0 ? args[0] : "/tmp/capy-preview");
-		Files.createDirectories(out);
+    private Preview() {}
 
-		loadLanguage();
-		UiTheme.setPalette("sakura");
+    public static void main(String[] args) throws Exception {
+        Path out = Path.of(args.length > 0 ? args[0] : "/tmp/capy-gui");
+        Files.createDirectories(out);
+        loadText();
 
-		ModuleManager modules = ModuleManager.get();
-		modules.register(new SwingSpeedModule());
-		modules.register(new CustomKnifeModule());
-		modules.register(new WeatherNotifierModule());
-		modules.register(new AntiAdminModule());
-		// Only the player and storage overlays: Block ESP resolves its filter
-		// through the block registry, which needs the game's registries to be
-		// bootstrapped and this renderer runs without them. Storage only looks
-		// at block states while scanning, so its card - six colour rows, one
-		// per kind - can be reviewed here.
-		modules.register(new PlayerEspModule());
-		modules.register(new StorageEspModule());
-		HudElements.register(modules);
+        ItemInspectModule inspect = new ItemInspectModule();
+        ModuleManager.get().register(inspect);
+        register("freelook", Category.VISUAL);
+        register("atmosphere", Category.VISUAL);
+        register("custom_fov", Category.VISUAL);
+        register("fullbright", Category.VISUAL);
+        register("hand_aura", Category.VISUAL);
+        register("smooth_camera", Category.VISUAL);
+        register("block_overlay", Category.VISUAL);
+        register("swing_speed", Category.VISUAL);
+        register("amethyst_finder", Category.BASE_FINDER);
+        register("chunk_reload", Category.BASE_FINDER);
+        register("shaft_finder", Category.BASE_FINDER);
+        register("fly", Category.WORLD);
+        register("weather_notifier", Category.WORLD);
+        register("boat_fly", Category.WORLD);
+        register("player_esp", Category.DONUT_SMP);
+        register("storage_esp", Category.DONUT_SMP);
+        register("block_esp", Category.DONUT_SMP);
+        register("freecam", Category.DONUT_SMP);
+        register("anti_admin", Category.MISC);
+        register("anti_vanish", Category.MISC);
+        register("anticheat_notifier", Category.MISC);
+        register("hud_fps", Category.HUD);
+        register("hud_coords", Category.HUD);
+        register("hud_biome", Category.HUD);
+        inspect.setEnabled(true);
+        setEnabled("player_esp", true);
+        setEnabled("weather_notifier", true);
+        setEnabled("anti_admin", true);
+        setEnabled("hud_fps", true);
 
-		SwingType type = new SwingType();
+        SwingType type = new SwingType();
+        save(out.resolve("01-overview-640x360.png"), type, 640, 360, null);
+        save(out.resolve("02-settings-640x360.png"), type, 640, 360, f -> {
+            f.setCategory(Category.VISUAL.ordinal());
+            f.expandCard(Category.VISUAL, 0);
+        });
+        save(out.resolve("03-search-640x360.png"), type, 640, 360, f -> {
+            f.setSearch("esp");
+            searchFocused(f, true);
+        });
+        save(out.resolve("04-global-settings-640x360.png"), type, 640, 360,
+                Preview::openGlobalSettings);
+        save(out.resolve("05-overview-480x270.png"), type, 480, 270, null);
+        save(out.resolve("06-overview-427x240.png"), type, 427, 240, null);
+        save(out.resolve("08-settings-427x240.png"), type, 427, 240, f -> {
+            f.setCategory(Category.VISUAL.ordinal());
+            f.expandCard(Category.VISUAL, 0);
+        });
+        save(out.resolve("09-global-settings-427x240.png"), type, 427, 240,
+                Preview::openGlobalSettings);
+        System.out.println("wrote " + out.toAbsolutePath());
+    }
 
-		save(out.resolve("01-overview-1920x1080.png"), type, 1920, 1080);
-		save(out.resolve("02-overview-1280x720.png"), type, 1280, 720);
-		save(out.resolve("03-overview-960x540.png"), type, 960, 540);
-		save(out.resolve("04-overview-2560x1440.png"), type, 2560, 1440);
-		save(out.resolve("05-category-visual.png"), type, 1600, 900, Category.VISUAL.ordinal());
-		// The Custom Knife card with its settings open: the choice row is the
-		// only control in the interface that is neither a slider nor a switch.
-		saveExpanded(out.resolve("06-visual-custom-knife.png"), type, 1600, 900,
-				Category.VISUAL.ordinal(), 1);
-		saveExpanded(out.resolve("07-world-weather.png"), type, 1600, 900,
-				Category.WORLD.ordinal(), 0);
-		// A world overlay with its settings open: colour, range, the two layers
-		// and the tracer switch all belong to the shared ESP base.
-		saveExpanded(out.resolve("08-donutsmp-player-esp.png"), type, 1600, 900,
-				Category.DONUT_SMP.ordinal(), 0);
+    private static void searchFocused(GuiFrame frame, boolean focused) {
+        try {
+            java.lang.reflect.Field field = GuiFrame.class.getDeclaredField("search");
+            field.setAccessible(true);
+            ((UiSearch) field.get(frame)).setFocused(focused);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-		// The radial style: the hub, a category sheet, and the colour studio.
-		saveRadial(out.resolve("09-radial-hub-1920x1080.png"), type, 1920, 1080, -1);
-		saveRadial(out.resolve("10-radial-donutsmp-1920x1080.png"), type, 1920, 1080,
-				Category.DONUT_SMP.ordinal());
-		saveRadial(out.resolve("11-radial-hub-960x540.png"), type, 960, 540, -1);
-		saveColours(out.resolve("12-colour-studio-1920x1080.png"), type, 1920, 1080);
-		saveRadial(out.resolve("13-radial-donutsmp-960x540.png"), type, 960, 540,
-				Category.DONUT_SMP.ordinal());
-		saveRadialExpanded(out.resolve("14-radial-expanded-960x540.png"), type, 960, 540,
-				Category.DONUT_SMP.ordinal());
-		saveColours(out.resolve("15-colour-studio-normal-960x540.png"), type, 960, 540, false);
-		// The smallest canvas a 1080p screen produces at GUI scale 3. The ring
-		// has to stay inside it, and the studio has to fit without clipping.
-		save(out.resolve("16-normal-640x360.png"), type, 640, 360);
-		saveRadial(out.resolve("17-radial-hub-640x360.png"), type, 640, 360, -1);
-		saveRadial(out.resolve("18-radial-donutsmp-640x360.png"), type, 640, 360,
-				Category.DONUT_SMP.ordinal());
-		saveRadialExpanded(out.resolve("19-radial-expanded-640x360.png"), type, 640, 360,
-				Category.DONUT_SMP.ordinal());
-		saveColours(out.resolve("20-colour-studio-640x360.png"), type, 640, 360);
-		saveExpanded(out.resolve("21-donutsmp-player-esp-1080p.png"), type, 1920, 1080,
-				Category.DONUT_SMP.ordinal(), 0);
-		// The auto GUI scale on a 1080p screen: 480x270. This is the canvas that
-		// catches panels which are taller than the screen.
-		save(out.resolve("22-normal-480x270.png"), type, 480, 270);
-		saveRadial(out.resolve("23-radial-hub-480x270.png"), type, 480, 270, -1);
-		saveColours(out.resolve("24-colour-studio-480x270.png"), type, 480, 270);
-		saveRadial(out.resolve("25-radial-donutsmp-480x270.png"), type, 480, 270,
-				Category.DONUT_SMP.ordinal());
-		// The shortest canvas the game produces: 1280x720 at GUI scale 3 is
-		// 427x240, and that is the size where a stacked panel overflows.
-		save(out.resolve("26-normal-427x240.png"), type, 427, 240);
-		saveRadial(out.resolve("27-radial-hub-427x240.png"), type, 427, 240, -1);
-		saveColours(out.resolve("28-colour-studio-427x240.png"), type, 427, 240);
-		// The only category with a full sheet of cards. The sheet sizes itself
-		// to its content and scrolls, so this is the shot that shows whether
-		// the list and its rail behave when there is more than one card.
-		saveRadial(out.resolve("29-radial-hud-960x540.png"), type, 960, 540, Category.HUD.ordinal());
+    private static void openGlobalSettings(GuiFrame frame) {
+        try {
+            java.lang.reflect.Field field = GuiFrame.class.getDeclaredField("guiSettingsOpen");
+            field.setAccessible(true);
+            field.setBoolean(frame, true);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-		// The storage overlay with its six colour rows open, and the Anti Admin
-		// card with its whole setting list open - the two cards whose rows this
-		// build changed.
-		saveExpanded(out.resolve("30-donutsmp-storage-esp.png"), type, 1600, 900,
-				Category.DONUT_SMP.ordinal(), 1);
-		saveExpanded(out.resolve("31-misc-anti-admin.png"), type, 1600, 900,
-				Category.MISC.ordinal(), 0);
+    private static void setEnabled(String id, boolean enabled) {
+        for (Module module : ModuleManager.get().modules()) {
+            if (module.id().equals(id)) module.setEnabled(enabled);
+        }
+    }
 
-		// The alert at the points of its timeline that matter: the face in,
-		// the peak, the bottom of the travel, the hand over to the wording,
-		// the two text lines, and the last frames before it is gone.
-		for (long at : new long[] {60L, 300L, 700L, 1000L, 1200L, 1350L, 1450L, 1499L, 1600L, 2200L, 3800L, 4250L }) {
-			renderAlert(out.resolve(String.format("alert-%04dms.png", at)), type, 1920, 1080, at);
-		}
+    private static void register(String id, Category category) {
+        ModuleManager.get().register(new PreviewModule(category, id));
+    }
 
-		System.out.println("preview written to " + out.toAbsolutePath());
-	}
+    private interface Setup { void apply(GuiFrame frame); }
 
-	/** Renders the whole window once it has settled. */
-	private static void save(Path file, SwingType type, int w, int h) throws Exception {
-		save(file, type, w, h, 0);
-	}
+    private static void save(Path file, SwingType type, int w, int h, Setup setup) throws Exception {
+        GuiFrame frame = new GuiFrame();
+        frame.resize(w, h);
+        if (setup != null) setup.apply(frame);
+        SwingCanvas warm = new SwingCanvas(w, h);
+        float mx = w * 0.42f;
+        float my = h * 0.42f;
+        for (int i = 0; i < 120; i++) {
+            frame.render(warm, type, mx, my, 1f, 1f);
+        }
+        // Put the pointer on the first card for the overview shots so hover is visible.
+        if (setup == null) {
+            var cards = frame.visibleCardsForTest();
+            if (!cards.isEmpty()) {
+                ModuleCard card = cards.get(0);
+                mx = card.x() + card.width() * 0.5f;
+                my = card.y() + card.height() * 0.5f;
+                for (int i = 0; i < 90; i++) frame.render(warm, type, mx, my, 1f, 1f);
+            }
+        }
+        SwingCanvas canvas = new SwingCanvas(w, h);
+        canvas.world();
+        frame.render(canvas, type, mx, my, 1f, 1f);
+        ImageIO.write(canvas.image(), "png", file.toFile());
+        System.out.println(file.getFileName() + ": " + canvas.draws + " fills");
+    }
 
-	private static void save(Path file, SwingType type, int w, int h, int category) throws Exception {
-		GuiFrame frame = new GuiFrame();
-		frame.resize(w, h);
-		frame.setCategory(category);
-		SwingCanvas canvas = new SwingCanvas(w, h);
-		for (int i = 0; i < 90; i++) {
-			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		}
-		SwingCanvas.fills = 0;
-		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		System.out.println(w + "x" + h + ": " + SwingCanvas.fills + " draw calls");
-		ImageIO.write(canvas.image(), "png", file.toFile());
-	}
+    private static void loadText() throws Exception {
+        if (!Files.exists(TEXT)) return;
+        try (Reader reader = Files.newBufferedReader(TEXT, StandardCharsets.UTF_8)) {
+            JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
+            for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
+                UiLabels.override(entry.getKey(), entry.getValue().getAsString());
+            }
+        }
+    }
 
-	/** Renders one category with one card's settings open. */
-	private static void saveExpanded(Path file, SwingType type, int w, int h, int category, int card)
-			throws Exception {
-		GuiFrame frame = new GuiFrame();
-		frame.resize(w, h);
-		frame.setCategory(category);
-		frame.expandCard(Category.values()[category], card);
-		SwingCanvas canvas = new SwingCanvas(w, h);
-		for (int i = 0; i < 90; i++) {
-			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		}
-		ImageIO.write(canvas.image(), "png", file.toFile());
-	}
+    private static final class PreviewModule extends Module {
+        PreviewModule(Category category, String id) { super(category, id); }
+    }
 
-	/** Renders the radial style, optionally with one category open. */
-	private static void saveRadial(Path file, SwingType type, int w, int h, int category) throws Exception {
-		GuiFrame frame = new GuiFrame();
-		frame.resize(w, h);
-		frame.setStyle(GuiStyle.RADIAL);
-		if (category >= 0) {
-			frame.setRadialCategory(category);
-		}
-		SwingCanvas canvas = new SwingCanvas(w, h);
-		for (int i = 0; i < 120; i++) {
-			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		}
-		SwingCanvas.fills = 0;
-		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		System.out.println(w + "x" + h + " radial: " + SwingCanvas.fills + " draw calls");
-		ImageIO.write(canvas.image(), "png", file.toFile());
-	}
+    static final class SwingCanvas implements UiCanvas {
+        private final BufferedImage image;
+        private final Graphics2D g;
+        private final List<Shape> clips = new ArrayList<>();
+        int draws;
 
-	/** Renders the radial sheet with its first card expanded. */
-	private static void saveRadialExpanded(Path file, SwingType type, int w, int h, int category) throws Exception {
-		GuiFrame frame = new GuiFrame();
-		frame.resize(w, h);
-		frame.setStyle(GuiStyle.RADIAL);
-		frame.setRadialCategory(category);
-		frame.setRadialExpanded(0);
-		SwingCanvas canvas = new SwingCanvas(w, h);
-		for (int i = 0; i < 120; i++) {
-			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		}
-		SwingCanvas.fills = 0;
-		frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		System.out.println(w + "x" + h + " radial expanded: " + SwingCanvas.fills + " draw calls");
-		ImageIO.write(canvas.image(), "png", file.toFile());
-	}
+        SwingCanvas(int width, int height) {
+            image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+            g = image.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        }
 
-	/** Renders the colour studio over the radial hub. */
-	private static void saveColours(Path file, SwingType type, int w, int h) throws Exception {
-		saveColours(file, type, w, h, true);
-	}
+        BufferedImage image() { return image; }
+        Graphics2D graphics() { return g; }
 
-	/** Renders the colour studio over either style. */
-	private static void saveColours(Path file, SwingType type, int w, int h, boolean radial) throws Exception {
-		GuiFrame frame = new GuiFrame();
-		frame.resize(w, h);
-		if (radial) {
-			frame.setStyle(GuiStyle.RADIAL);
-		}
-		frame.toggleAccentPanel();
-		SwingCanvas canvas = new SwingCanvas(w, h);
-		for (int i = 0; i < 120; i++) {
-			frame.render(canvas, type, w / 2, h / 2, 1f, 1f);
-		}
-		ImageIO.write(canvas.image(), "png", file.toFile());
-	}
+        void world() {
+            g.setComposite(AlphaComposite.Src);
+            g.setPaint(new GradientPaint(0, 0, new Color(0xFF7899B1), 0, image.getHeight(),
+                    new Color(0xFF53694F)));
+            g.fillRect(0, 0, image.getWidth(), image.getHeight());
+            g.setComposite(AlphaComposite.SrcOver);
+            g.setColor(new Color(0x557A684A, true));
+            for (int i = 0; i < 24; i++) {
+                int x = (i * 197) % (image.getWidth() + 200) - 100;
+                int y = image.getHeight() / 2 + (i * 53) % Math.max(1, image.getHeight() / 2);
+                g.fillRect(x, y, 150, 95);
+            }
+            g.setColor(new Color(0x33425238, true));
+            g.fillRect(0, image.getHeight() / 2, image.getWidth(), image.getHeight() / 2);
+        }
 
-	/** Renders the alert at a given point of its timeline over a stand-in world. */
-	private static void renderAlert(Path file, SwingType type, int w, int h, long at) throws Exception {
-		SwingCanvas canvas = new SwingCanvas(w, h);
-		// A rough stand-in for the game behind the HUD, so the face can be
-		// judged against something with structure instead of flat grey.
-		canvas.fill(0, 0, w, h / 2, 0xFF6E8FA8);
-		canvas.fill(0, h / 2, w, h, 0xFF4E6B45);
-		for (int i = 0; i < 12; i++) {
-			int bx = (i * 173) % w;
-			int by = h / 2 + (i * 47) % (h / 2);
-			canvas.fill(bx, by, bx + 120, by + 90, 0xFF7A6A4E);
-		}
-		AdminDetector.Match match = new AdminDetector.Match(
-				java.util.UUID.nameUUIDFromBytes("preview".getBytes(StandardCharsets.UTF_8)),
-				"CookieAdmin", "CookieAdmin", 12.4, 0L, null);
-		AdminAlert alert = new AdminAlert(match, AdminAlert.Kind.NEARBY,
-				System.currentTimeMillis() - at);
-		AlertRenderer.renderFaceAlert(canvas, type, null, w, h, alert);
-		AlertRenderer.renderNotification(canvas, type, w, h, alert,
-				alert.alpha(System.currentTimeMillis()));
-		ImageIO.write(canvas.image(), "png", file.toFile());
-	}
+        @Override
+        public void fill(int x1, int y1, int x2, int y2, int argb) {
+            if (x2 <= x1 || y2 <= y1) return;
+            draws++;
+            g.setColor(new Color(argb, true));
+            g.fillRect(x1, y1, x2 - x1, y2 - y1);
+        }
 
-	// ------------------------------------------------------------------ setup
+        @Override
+        public void pushClip(int x, int y, int width, int height) {
+            Shape old = g.getClip();
+            clips.add(old);
+            Rectangle2D rect = new Rectangle2D.Float(x, y, Math.max(0, width), Math.max(0, height));
+            g.setClip(old == null ? rect : old.getBounds2D().createIntersection(rect));
+        }
 
-	private static void loadLanguage() throws Exception {
-		if (!Files.exists(LANG)) {
-			return;
-		}
-		try (Reader reader = Files.newBufferedReader(LANG, StandardCharsets.UTF_8)) {
-			JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-			for (Map.Entry<String, com.google.gson.JsonElement> entry : json.entrySet()) {
-				UiLabels.override(entry.getKey(), entry.getValue().getAsString());
-			}
-		}
-	}
+        @Override
+        public void popClip() {
+            if (!clips.isEmpty()) g.setClip(clips.remove(clips.size() - 1));
+        }
 
-	// ------------------------------------------------------------- Java2D
+        @Override
+        public int drawCalls() { return draws; }
+    }
 
-	/** A {@link UiCanvas} that rasterises into a BufferedImage. */
-	static final class SwingCanvas implements UiCanvas {
-		/** Counts the draw calls, so the cost of a frame can be measured. */
-		static long fills;
-		private final BufferedImage image;
-		final Graphics2D g;
-		private final List<Shape> clips = new ArrayList<>();
+    static final class SwingText implements UiText {
+        private final Font font;
+        private final FontMetrics metrics;
 
-		SwingCanvas(int width, int height) {
-			this.image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-			this.g = image.createGraphics();
-			this.g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
-			this.g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-			this.g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
-		}
+        SwingText(Font font, Graphics2D g) {
+            this.font = font;
+            this.metrics = g.getFontMetrics(font);
+        }
 
-		BufferedImage image() {
-			return image;
-		}
+        @Override public int width(String text) { return text == null ? 0 : Math.round(metrics.stringWidth(text)); }
+        @Override public int lineHeight() { return metrics.getHeight(); }
 
-		@Override
-		public void fill(int x1, int y1, int x2, int y2, int argb) {
-			fills++;
-			if (x2 <= x1 || y2 <= y1) {
-				return;
-			}
-			g.setColor(new Color(argb, true));
-			g.fillRect(x1, y1, x2 - x1, y2 - y1);
-		}
+        @Override
+        public void draw(UiCanvas canvas, String text, int x, int y, int argb) {
+            if (text == null || text.isEmpty() || !(canvas instanceof SwingCanvas sc)) return;
+            sc.g.setFont(font);
+            sc.g.setColor(new Color(argb, true));
+            sc.g.drawString(text, x, y + metrics.getAscent());
+        }
+    }
 
-		@Override
-		public void pushClip(int x, int y, int width, int height) {
-			Shape old = g.getClip();
-			Rectangle rect = new Rectangle(x, y, Math.max(0, width), Math.max(0, height));
-			Shape next = old == null ? rect : old.getBounds().createIntersection(rect);
-			g.setClip(next);
-			clips.add(old);
-		}
+    static final class SwingType implements UiType {
+        private final SwingText regular, medium, bold, display, headline;
 
-		@Override
-		public void popClip() {
-			if (clips.isEmpty()) {
-				return;
-			}
-			g.setClip(clips.remove(clips.size() - 1));
-		}
-	}
+        SwingType() throws Exception {
+            BufferedImage probe = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = probe.createGraphics();
+            regular = new SwingText(load("poppins-400.ttf", 8.5f), g);
+            medium = new SwingText(load("poppins-500.ttf", 8.5f), g);
+            bold = new SwingText(load("poppins-600.ttf", 8.5f), g);
+            display = new SwingText(load("poppins-700.ttf", 11.5f), g);
+            headline = new SwingText(load("poppins-700.ttf", 16f), g);
+        }
 
-	/** A {@link UiText} backed by Java2D and the bundled Inter files. */
-	static final class SwingText implements UiText {
-		private final Font font;
-		private final FontMetrics metrics;
+        private static Font load(String name, float size) throws Exception {
+            return Font.createFont(Font.TRUETYPE_FONT, FONTS.resolve(name).toFile()).deriveFont(size);
+        }
 
-		SwingText(Font font, Graphics2D g) {
-			this.font = font;
-			this.metrics = g.getFontMetrics(font);
-		}
-
-		@Override
-		public int width(String text) {
-			return text == null ? 0 : Math.round(metrics.stringWidth(text));
-		}
-
-		@Override
-		public int lineHeight() {
-			return metrics.getHeight();
-		}
-
-		@Override
-		public void draw(UiCanvas canvas, String text, int x, int y, int argb) {
-			if (text == null || text.isEmpty() || !(canvas instanceof SwingCanvas sc)) {
-				return;
-			}
-			sc.g.setFont(font);
-			sc.g.setColor(new Color(argb, true));
-			sc.g.drawString(text, x, y + metrics.getAscent());
-		}
-	}
-
-	/** The four Inter weights used by the interface. */
-	static final class SwingType implements UiType {
-		private final SwingText regular;
-		private final SwingText medium;
-		private final SwingText bold;
-		private final SwingText display;
-		private final SwingText headline;
-
-		SwingType() throws Exception {
-			BufferedImage probe = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
-			Graphics2D g = probe.createGraphics();
-			this.regular = new SwingText(load("inter-400.ttf", 9f), g);
-			this.medium = new SwingText(load("inter-500.ttf", 9f), g);
-			this.bold = new SwingText(load("inter-600.ttf", 9f), g);
-			this.display = new SwingText(load("inter-700.ttf", 12f), g);
-			this.headline = new SwingText(load("inter-700.ttf", 17f), g);
-		}
-
-		private static Font load(String name, float size) throws Exception {
-			File file = FONT_DIR.resolve(name).toFile();
-			Font font = Font.createFont(Font.TRUETYPE_FONT, file);
-			return font.deriveFont(size);
-		}
-
-		@Override
-		public UiText regular() {
-			return regular;
-		}
-
-		@Override
-		public UiText medium() {
-			return medium;
-		}
-
-		@Override
-		public UiText bold() {
-			return bold;
-		}
-
-		@Override
-		public UiText display() {
-			return display;
-		}
-
-		@Override
-		public UiText headline() {
-			return headline;
-		}
-	}
+        @Override public UiText regular() { return regular; }
+        @Override public UiText medium() { return medium; }
+        @Override public UiText bold() { return bold; }
+        @Override public UiText display() { return display; }
+        @Override public UiText headline() { return headline; }
+    }
 }
