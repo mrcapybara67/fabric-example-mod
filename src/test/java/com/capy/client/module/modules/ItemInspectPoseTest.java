@@ -39,6 +39,16 @@ class ItemInspectPoseTest {
 	}
 
 	@Test
+	void swordAndAxeHaveDistinctFullTurnFlourishes() {
+		assertTrue(ItemInspectPose.spinForTest(ItemInspectModule.Tool.SWORD, 0.70f) > 350f);
+		assertTrue(ItemInspectPose.spinForTest(ItemInspectModule.Tool.AXE, 0.70f) < -350f);
+		assertFalse(ItemInspectPose.spinRollForTest(ItemInspectModule.Tool.SWORD));
+		assertTrue(ItemInspectPose.spinRollForTest(ItemInspectModule.Tool.AXE));
+		assertEquals(0f, ItemInspectPose.spinForTest(ItemInspectModule.Tool.SWORD, 0.72f), 0.0001f);
+		assertEquals(0f, ItemInspectPose.spinForTest(ItemInspectModule.Tool.PICKAXE, 0.70f), 0.0001f);
+	}
+
+	@Test
 	void leftHandMirrorsTheRightHandAcrossTheGrip() {
 		Matrix4f right = matrix(ItemInspectModule.Tool.SWORD, 0.5f, false);
 		Matrix4f left = matrix(ItemInspectModule.Tool.SWORD, 0.5f, true);

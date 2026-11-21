@@ -21,11 +21,11 @@ import net.minecraft.world.item.ItemStack;
  * on the first and last frame, which is what makes the animation start and end
  * exactly at the normal hand pose.</p>
  *
- * <p>The sequence is deliberately staged like a weapon inspection rather than
- * a spin: lift the item into view, turn it side-on, examine one side, roll to
- * the other side, add a short wrist flick, then settle back into the hand.
- * Nothing loops and nothing snaps; a cancel simply runs the same pose backwards
- * over 180 ms.</p>
+ * <p>The sequence is staged like a weapon inspection: lift the item into view,
+ * turn it side-on, examine one side, then settle back into the hand. Swords add
+ * a full turn around the grip while axes get a heavier counter-rotating twirl,
+ * so the two weapons do not share the same reveal. Nothing loops and nothing
+ * snaps; a cancel simply runs the same pose backwards over 180 ms.</p>
  */
 public final class ItemInspectPose {
 	private static final long CANCEL_NANOS = 180_000_000L;
@@ -35,31 +35,34 @@ public final class ItemInspectPose {
 	/**
 	 * One inspection profile. Yaw values are the two sides the item is turned
 	 * to; roll values control the blade/head angle; pitch lifts the business
-	 * end toward the eye. The units are degrees, except the translations,
-	 * which are metres in hand space.
+	 * end toward the eye. {@code spinDegrees} is a full-turn flourish around
+	 * the grip; {@code spinRoll} chooses the local Z axis instead of Y. The
+	 * units are degrees, except the translations, which are metres in hand
+	 * space.
 	 */
 	private record Profile(float liftX, float liftY, float pull,
-			float yawA, float yawB, float rollA, float rollB, float pitch, float flick) {
+			float yawA, float yawB, float rollA, float rollB, float pitch, float flick,
+			float spinDegrees, boolean spinRoll) {
 	}
 
 	private static final Profile SWORD_PROFILE = new Profile(
-			0.022f, 0.078f, 0.120f, 50f, -30f, -18f, 20f, -60f, 10f);
+			0.022f, 0.078f, 0.120f, 50f, -30f, -18f, 20f, -60f, 10f, 360f, false);
 	private static final Profile SPEAR_PROFILE = new Profile(
-			0.018f, 0.070f, 0.135f, 64f, -36f, 18f, -12f, -74f, 8f);
+			0.018f, 0.070f, 0.135f, 64f, -36f, 18f, -12f, -74f, 8f, 0f, false);
 	private static final Profile AXE_PROFILE = new Profile(
-			0.018f, 0.080f, 0.105f, 44f, -24f, -12f, 16f, -42f, 8f);
+			0.018f, 0.080f, 0.105f, 44f, -24f, -12f, 16f, -42f, 8f, -360f, true);
 	private static final Profile PICKAXE_PROFILE = new Profile(
-			0.018f, 0.078f, 0.105f, 48f, -26f, -10f, 14f, -38f, 8f);
+			0.018f, 0.078f, 0.105f, 48f, -26f, -10f, 14f, -38f, 8f, 0f, false);
 	private static final Profile SHOVEL_PROFILE = new Profile(
-			0.018f, 0.072f, 0.100f, 42f, -22f, -8f, 12f, -30f, 6f);
+			0.018f, 0.072f, 0.100f, 42f, -22f, -8f, 12f, -30f, 6f, 0f, false);
 	private static final Profile HOE_PROFILE = new Profile(
-			0.017f, 0.070f, 0.098f, 38f, -18f, -6f, 10f, -26f, 5f);
+			0.017f, 0.070f, 0.098f, 38f, -18f, -6f, 10f, -26f, 5f, 0f, false);
 	private static final Profile MACE_PROFILE = new Profile(
-			0.020f, 0.082f, 0.110f, 48f, -26f, -14f, 16f, -48f, 9f);
+			0.020f, 0.082f, 0.110f, 48f, -26f, -14f, 16f, -48f, 9f, 0f, false);
 	private static final Profile RANGED_PROFILE = new Profile(
-			0.018f, 0.070f, 0.095f, 40f, -20f, -10f, 12f, -24f, 6f);
+			0.018f, 0.070f, 0.095f, 40f, -20f, -10f, 12f, -24f, 6f, 0f, false);
 	private static final Profile GENERIC_PROFILE = new Profile(
-			0.020f, 0.076f, 0.108f, 46f, -24f, -14f, 16f, -50f, 8f);
+			0.020f, 0.076f, 0.108f, 46f, -24f, -14f, 16f, -50f, 8f, 0f, false);
 
 	private static boolean running;
 	private static boolean ending;
@@ -198,6 +201,18 @@ public final class ItemInspectPose {
 		apply(pose, kind, Math.max(0f, Math.min(1f, raw)), left);
 	}
 
+	/** Package-private hook for checking the flourish without a renderer. */
+	static float spinForTest(ItemInspectModule.Tool kind, float raw) {
+		Profile p = profile(kind);
+		float t = segment(Math.max(0f, Math.min(1f, raw)), 0.30f, 0.72f);
+		return t >= 1f ? 0f : p.spinDegrees() * smooth(t);
+	}
+
+	/** True when the flourish rolls around local Z instead of local Y. */
+	static boolean spinRollForTest(ItemInspectModule.Tool kind) {
+		return profile(kind).spinRoll();
+	}
+
 	private static void apply(PoseStack pose, ItemInspectModule.Tool kind, float raw) {
 		apply(pose, kind, raw, leftHanded);
 	}
@@ -227,6 +242,11 @@ public final class ItemInspectPose {
 		float yaw = lerp(p.yawA(), p.yawB(), turn) * held;
 		float roll = lerp(p.rollA(), p.rollB(), turn) * held;
 		float pitch = p.pitch() * held;
+		// A full rotation in the middle of the inspect. It is deliberately an
+		// integer turn and is snapped back to zero at the end: the orientation
+		// is identical, but the matrix has no accumulated 2*pi residue.
+		float spinT = segment(raw, 0.30f, 0.72f);
+		float spin = spinT >= 1f ? 0f : p.spinDegrees() * smooth(spinT);
 		// A short window centred at 0.72: the wrist gives the item one last
 		// small roll before it returns, which is what makes the motion read as
 		// an inspect rather than a static turn.
@@ -239,9 +259,15 @@ public final class ItemInspectPose {
 				p.liftY() * presence + 0.003f * breathe * held,
 				-p.pull() * presence);
 		pose.translate(0f, -0.0035f * flick, 0f);
-		pose.mulPose(Axis.YP.rotationDegrees(m * yaw));
-		pose.mulPose(Axis.XP.rotationDegrees(pitch));
-		pose.mulPose(Axis.ZP.rotationDegrees(m * (roll + p.flick() * flick)));
+		if (p.spinRoll()) {
+			pose.mulPose(Axis.YP.rotationDegrees(m * yaw));
+			pose.mulPose(Axis.XP.rotationDegrees(pitch));
+			pose.mulPose(Axis.ZP.rotationDegrees(m * (roll + p.flick() * flick + spin)));
+		} else {
+			pose.mulPose(Axis.YP.rotationDegrees(m * (yaw + spin)));
+			pose.mulPose(Axis.XP.rotationDegrees(pitch));
+			pose.mulPose(Axis.ZP.rotationDegrees(m * (roll + p.flick() * flick)));
+		}
 	}
 
 	private static Profile profile(ItemInspectModule.Tool kind) {

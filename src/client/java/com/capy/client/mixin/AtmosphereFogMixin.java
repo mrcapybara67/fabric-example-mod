@@ -1,5 +1,6 @@
 package com.capy.client.mixin;
 
+import com.capy.client.module.modules.AtmosphereSkyModel;
 import com.capy.client.module.modules.AtmosphereState;
 import com.capy.client.util.Guard;
 import net.minecraft.client.Camera;
@@ -48,10 +49,9 @@ public class AtmosphereFogMixin {
 	 */
 	@Inject(method = "getBaseColor", at = @At("RETURN"), cancellable = true, require = 0)
 	private void capy$tintFog(ClientLevel level, Camera camera, int base, float partialTick,
-			CallbackInfoReturnable<Integer> cir) {
-		try {
+			CallbackInfoReturnable<Integer> cir) {			try {
 			float hot = AtmosphereState.fogTintHot;
-			if (!AtmosphereState.active || hot <= 0.01f) {
+			if (!AtmosphereState.active || hot <= 0.01f || level == null) {
 				return;
 			}
 			int original = cir.getReturnValue();
@@ -59,9 +59,14 @@ public class AtmosphereFogMixin {
 			int r = (original >> 16) & 0xFF;
 			int g = (original >> 8) & 0xFF;
 			int b = original & 0xFF;
-			int tr = Math.round(AtmosphereState.fogR * 255f);
-			int tg = Math.round(AtmosphereState.fogG * 255f);
-			int tb = Math.round(AtmosphereState.fogB * 255f);
+			var forward = camera.forwardVector();
+			double viewYaw = Math.toDegrees(Math.atan2(forward.x(), forward.z()));
+			AtmosphereSkyModel.Sun sun = AtmosphereSkyModel.sun(
+					AtmosphereState.timeDay, level.getDayTime());
+			int target = AtmosphereSkyModel.fogColor(AtmosphereState.theme, viewYaw, sun);
+			int tr = (target >> 16) & 0xFF;
+			int tg = (target >> 8) & 0xFF;
+			int tb = target & 0xFF;
 			r = Math.round(r + (tr - r) * hot);
 			g = Math.round(g + (tg - g) * hot);
 			b = Math.round(b + (tb - b) * hot);
@@ -85,7 +90,11 @@ public class AtmosphereFogMixin {
 			// A zero or negative multiplier would put the far plane behind the
 			// near one and make the world vanish; the slider cannot ask for it,
 			// but the clamp also covers a value caught mid-ease.
-			float scale = 1f / Math.max(0.05f, hot);
+			// A little altitude response gives low ground and valleys more air
+			// than a mountain ridge without introducing a second fog pipeline.
+			float altitude = (float) Math.exp(-Math.max(0.0, camera.position().y - 63.0) / 110.0);
+			float heightDensity = 0.74f + 0.38f * altitude;
+			float scale = 1f / Math.max(0.05f, hot * heightDensity);
 			data.environmentalStart = Math.max(0f, data.environmentalStart * scale);
 			data.environmentalEnd = Math.max(data.environmentalStart, data.environmentalEnd * scale);
 			data.renderDistanceStart = Math.max(0f, data.renderDistanceStart * scale);

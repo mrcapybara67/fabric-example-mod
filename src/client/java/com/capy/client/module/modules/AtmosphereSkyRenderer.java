@@ -47,6 +47,8 @@ public final class AtmosphereSkyRenderer {
 	private static ByteBufferBuilder buffer;
 	/** Static dome vertices for the last theme; rebuilt only when the theme changes. */
 	private static float[] domePositions;
+	private static float[] domeYaw;
+	private static float[] domePitch;
 	private static int[] domeColors;
 	private static int domeTheme = -1;
 	private static final Logger LOGGER = LoggerFactory.getLogger(AtmosphereSkyRenderer.class);
@@ -85,11 +87,15 @@ public final class AtmosphereSkyRenderer {
 			sky.set(vc, stack.last());
 			double now = System.nanoTime() / 1.0e9;
 			int theme = AtmosphereState.theme;
-			sky.dome(theme);
+			float partial = mc.getDeltaTracker().getGameTimeDeltaPartialTick(true);
+			long dayTime = mc.level.getDayTime();
+			AtmosphereSkyModel.Sun sun = AtmosphereSkyModel.sun(AtmosphereState.timeDay, dayTime);
+			float rain = Math.max(0f, Math.min(1f, mc.level.getRainLevel(partial)));
+			sky.dome(theme, sun);
 			if (AtmosphereState.skyDebug) {
 				sky.debug(now);
 			} else {
-				theme(sky, theme, now);
+				theme(sky, theme, now, sun, rain, dayTime);
 			}
 			batches.endBatch();
 			if (passStart != 0L) {
@@ -105,75 +111,135 @@ public final class AtmosphereSkyRenderer {
 		}
 	}
 
-	/** Top, middle, horizon and below-horizon colours for a theme. */
-	private static final int[][] PALETTES = {
-			{0xFF06101C, 0xFF12304A, 0xFF6C9BB8, 0xFF102028},
-			{0xFF180D22, 0xFF5B2731, 0xFFFF9860, 0xFF2A1512},
-			{0xFF01030A, 0xFF08142F, 0xFF213765, 0xFF05070D},
-			{0xFF010710, 0xFF062A32, 0xFF0B5B55, 0xFF020A0E},
-			{0xFF20262F, 0xFF48515E, 0xFF8D98A6, 0xFF171B21},
-			{0xFF01070F, 0xFF042B3E, 0xFF0B5D75, 0xFF010E16},
-			{0xFF120306, 0xFF3B0C12, 0xFF962A20, 0xFF190405},
-			{0xFF170A14, 0xFF4E2038, 0xFFE58DA8, 0xFF22101A},
-			{0xFF010006, 0xFF0B061B, 0xFF2A1550, 0xFF030008},
-			{0xFF01040B, 0xFF061B2A, 0xFF0B4A55, 0xFF02080D}
-	};
-
-	private static int[] palette(int theme) {
-		return PALETTES[Math.max(0, Math.min(PALETTES.length - 1, theme))];
-	}
-
-	private static void theme(Sky sky, int theme, double now) {
+	private static void theme(Sky sky, int theme, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
 		switch (theme) {
-			case 1 -> goldenHour(sky, now);
-			case 2 -> midnight(sky, now);
-			case 3 -> aurora(sky, now);
-			case 4 -> overcast(sky, now);
-			case 5 -> deepOcean(sky, now);
-			case 6 -> crimson(sky, now);
-			case 7 -> sakura(sky, now);
-			case 8 -> voidSky(sky, now);
-			case 9 -> neon(sky, now);
-			default -> gentle(sky, now);
+			case 1 -> goldenHour(sky, now, sun, rain, dayTime);
+			case 2 -> midnight(sky, now, sun, rain, dayTime);
+			case 3 -> aurora(sky, now, sun, rain, dayTime);
+			case 4 -> overcast(sky, now, sun, rain, dayTime);
+			case 5 -> deepOcean(sky, now, sun, rain, dayTime);
+			case 6 -> crimson(sky, now, sun, rain, dayTime);
+			case 7 -> sakura(sky, now, sun, rain, dayTime);
+			case 8 -> voidSky(sky, now, sun, rain, dayTime);
+			case 9 -> neon(sky, now, sun, rain, dayTime);
+			default -> gentle(sky, now, sun, rain, dayTime);
 		}
 	}
 
-	/** A calm blue sky: warm sun, a few long clouds, faint high stars. */
-	private static void gentle(Sky sky, double now) {
-		double drift = now * 0.23;
-		sky.sun(41.0 + drift, 24.0, 5.2, 0xFFFFE3A8, 0x38FFD27A);
-		for (int i = 0; i < 6; i++) {
-			// Slightly different speeds per layer give the clouds parallax as
-			// the player turns; one speed reads as a painted sheet.
-			double yaw = i * 54 + now * (0.7 + i * 0.035);
-			double pitch = 22 + (i % 3) * 7;
-			sky.puff(yaw, pitch, 13 + i % 2 * 4, 2.2, 0x42FFFFFF);
+	/** One sun disc, drawn only when the solar model says it is up. */
+	private static void sunDisc(Sky sky, AtmosphereSkyModel.Sun sun, int theme,
+			boolean rays, double now, float rain) {
+		if (sun.elevation() <= -0.035f || rain > 0.62f) {
+			return;
 		}
-		for (int i = 0; i < 22; i++) {
-			double twinkle = 0.45 + 0.55 * Math.sin(now * 0.9 + i * 1.7);
-			sky.star(hash(i * 13 + 4) * 360, 18 + hash(i * 29 + 7) * 55,
-					0.32, (int) (twinkle * 70), 0xFFE8F6FF);
+		double radius = switch (theme) {
+			case 1 -> 8.2;
+			case 6 -> 8.8;
+			case 5 -> 5.8;
+			default -> 5.2;
+		};
+		if (rays) {
+			sky.rays(sun.yaw(), sun.pitch(), 17, now * 0.06,
+					withAlpha(AtmosphereSkyModel.sunGlow(theme), 0x30));
 		}
-		// A slow, broad sheen along the horizon: the dome itself is cached, so
-		// this is the part that keeps the gradient from looking printed on.
+		sky.sun(sun.yaw(), sun.pitch(), radius,
+				AtmosphereSkyModel.sunColor(theme), AtmosphereSkyModel.sunGlow(theme));
+	}
+
+	/** The moon opposite the sun, with the world's real phase. */
+	private static void moonDisc(Sky sky, AtmosphereSkyModel.Sun sun, int theme,
+			long dayTime, float visibility, float rain) {
+		visibility *= 1f - rain * 0.85f;
+		if (visibility <= 0.02f || sun.night() <= 0.03f) {
+			return;
+		}
+		double yaw = sun.yaw() + 180.0;
+		double pitch = -sun.pitch();
+		if (pitch < -1.0) {
+			return;
+		}
+		float phase = AtmosphereSkyModel.moonPhase(dayTime);
+		int lit = theme == 6 ? 0xFFFFD8C0 : 0xFFF2F6FF;
+		int shadow = theme == 6 ? 0xFF2A1010 : 0xFF101827;
+		sky.moon(yaw, pitch, 7.0, phase, lit, shadow, 48);
+		sky.ellipse(yaw + 1.0, pitch + 1.2, 1.2, 1.8, 0x30223758, 5);
+		sky.ellipse(yaw - 0.9, pitch - 1.4, 1.0, 1.2, 0x28223758, 4);
+	}
+
+	/** Stars fade out as the sun rises; they are not painted onto a blue sky. */
+	private static void stars(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			int count, int seed, float strength, int color, float rain) {
+		float visibility = AtmosphereSkyModel.starVisibility(sun) * strength
+				* (1f - rain * 0.92f);
+		if (visibility <= 0.02f) {
+			return;
+		}
+		for (int i = 0; i < count; i++) {
+			double yaw = hash(i * 17 + seed) * 360.0;
+			double pitch = 4.0 + hash(i * 37 + seed + 3) * 86.0;
+			double twinkle = 0.35 + 0.65 * Math.sin(now * 1.3 + i * 2.1 + seed);
+			int alpha = (int) ((30 + twinkle * 155) * visibility);
+			sky.star(yaw, pitch, i % 13 == 0 ? 0.48 : 0.24, alpha, color);
+		}
+	}
+
+	/**
+	 * A multi-layer cloud deck. The same geometry is used by every theme; the
+	 * palette, coverage and wind speed make it read as haze, storm or sunset
+	 * cloud. The extra layer is deliberately slower and larger: that parallax
+	 * is what stops the cloud field looking like one flat sheet.
+	 */
+	private static void cloudDeck(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, int count, double basePitch, double width, double speed,
+			int lit, int shade) {
+		int total = Math.max(1, count + Math.round(rain * count * 0.9f));
+		for (int i = 0; i < total; i++) {
+			double yaw = i * (360.0 / total) + now * speed * (0.82 + (i % 3) * 0.08);
+			double pitch = basePitch + ((i % 4) - 1.5) * 4.2
+					+ Math.sin(now * 0.055 + i * 1.7) * 1.4;
+			double w = width * (0.70 + hash(i * 53 + 5) * 0.60);
+			double h = w * (0.18 + hash(i * 71 + 9) * 0.12);
+			int l = scaleAlpha(lit, 0.86f + rain * 0.14f);
+			int s = scaleAlpha(shade, 0.86f + rain * 0.20f);
+			sky.cloud(yaw, pitch, w, h, l, s, sun.yaw());
+		}
+	}
+
+	private static int scaleAlpha(int color, float factor) {
+		int alpha = Math.round(((color >>> 24) & 0xFF) * Math.max(0f, Math.min(1f, factor)));
+		return withAlpha(color, alpha);
+	}
+
+	/** A calm blue sky: warm sun, layered clouds and faint high stars. */
+	private static void gentle(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		sunDisc(sky, sun, 0, false, now, rain);
+		moonDisc(sky, sun, 0, dayTime, 0.85f, rain);
+		stars(sky, now, sun, 34, 4, 0.9f, 0xFFE8F6FF, rain);
+		cloudDeck(sky, now, sun, rain, 8, 24.0, 12.0, 0.72,
+				AtmosphereSkyModel.cloudLit(0, sun), AtmosphereSkyModel.cloudShade(0, sun));
+		cloudDeck(sky, now, sun, rain * 0.5f, 4, 36.0, 8.0, 0.38,
+				scaleAlpha(AtmosphereSkyModel.cloudLit(0, sun), 0.55f),
+				scaleAlpha(AtmosphereSkyModel.cloudShade(0, sun), 0.55f));
 		double sheen = 0.5 + 0.5 * Math.sin(now * 0.18);
 		sky.band(-30 + Math.sin(now * 0.05) * 24, 6, 72, 18,
 				0x006C9BB8, withAlpha(0xFF8FC4E8, (int) (8 + sheen * 14)));
 	}
 
-	/** Golden Hour: a huge low sun, layered amber clouds and visible rays. */
-	private static void goldenHour(Sky sky, double now) {
-		double sunYaw = 66.0;
-		double sunPitch = 10.0 + Math.sin(now * 0.08) * 0.8;
-		sky.rays(sunYaw, sunPitch, 17, now * 0.06, 0x22FFC46A);
-		sky.sun(sunYaw, sunPitch, 12.0, 0xFFFFD58A, 0x48FF9A4A);
-		for (int i = 0; i < 10; i++) {
-			double yaw = i * 36 + now * 1.0;
-			double pitch = 16 + (i % 4) * 5;
-			sky.puff(yaw, pitch, 16 + i % 3 * 5, 2.6 + i % 2, 0x38FFD5A0);
-		}
+	/** Golden Hour: a large low sun, amber cloud layers and visible rays. */
+	private static void goldenHour(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		sunDisc(sky, sun, 1, true, now, rain);
+		moonDisc(sky, sun, 1, dayTime, 0.25f, rain);
+		stars(sky, now, sun, 12, 8, 0.35f, 0xFFFFE8C8, rain);
+		cloudDeck(sky, now, sun, rain, 12, 18.0, 15.0, 0.95,
+				AtmosphereSkyModel.cloudLit(1, sun), AtmosphereSkyModel.cloudShade(1, sun));
+		cloudDeck(sky, now, sun, rain * 0.5f, 5, 30.0, 9.0, 0.55,
+				scaleAlpha(AtmosphereSkyModel.cloudLit(1, sun), 0.55f),
+				scaleAlpha(AtmosphereSkyModel.cloudShade(1, sun), 0.55f));
 		for (int i = 0; i < 6; i++) {
-			double yaw = sunYaw + Math.sin(i * 2.1 + now * 0.04) * 40;
+			double yaw = sun.yaw() + Math.sin(i * 2.1 + now * 0.04) * 40;
 			double shimmer = 0.5 + 0.5 * Math.sin(now * 0.42 + i * 1.7);
 			sky.band(yaw, 3, 9, 13, 0x001F0E08,
 					withAlpha(0xFFFFB06A, (int) (20 + shimmer * 24)));
@@ -181,24 +247,10 @@ public final class AtmosphereSkyRenderer {
 	}
 
 	/** Midnight: moon with craters, a dense star field and a shooting star. */
-	private static void midnight(Sky sky, double now) {
-		double moonYaw = -43.0;
-		double moonPitch = 42.0;
-		// The phase is a real terminator across the disc, not a second dark
-		// disc offset over the bright one. Craters are soft marks inside it.
-		double phase = (now % 240.0) / 240.0;
-		sky.moon(moonYaw, moonPitch, 7.2, (float) phase, 0xFFF2F6FF, 0xFF101827, 48);
-		sky.ellipse(moonYaw + 1.0, moonPitch + 1.2, 1.2, 1.8, 0x30223758, 5);
-		sky.ellipse(moonYaw - 0.9, moonPitch - 1.4, 1.0, 1.2, 0x28223758, 4);
-		for (int i = 0; i < 130; i++) {
-			double yaw = hash(i * 17 + 3) * 360;
-			double pitch = 4 + hash(i * 37 + 9) * 86;
-			double twinkle = 0.35 + 0.65 * Math.sin(now * 1.3 + i * 2.1);
-			int alpha = 30 + (int) (twinkle * 155);
-			sky.star(yaw, pitch, i % 13 == 0 ? 0.48 : 0.24,
-					alpha, i % 7 == 0 ? 0xFFBFD8FF : 0xFFFFFFFF);
-		}
-		// One shooting star every half minute, and only while it is crossing.
+	private static void midnight(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		moonDisc(sky, sun, 2, dayTime, 1f, rain);
+		stars(sky, now, sun, 130, 3, 1f, 0xFFFFFFFF, rain);
 		double cycle = now % 30.0;
 		if (cycle < 1.2) {
 			double pass = cycle / 1.2;
@@ -206,35 +258,35 @@ public final class AtmosphereSkyRenderer {
 			sky.streak(sy, 62 - pass * 18, sy + 12.6, 59 - pass * 18,
 					0xE8FFFFFF, 0x00FFFFFF);
 		}
+		cloudDeck(sky, now, sun, rain, 5, 32.0, 11.0, 0.25,
+				AtmosphereSkyModel.cloudLit(2, sun), AtmosphereSkyModel.cloudShade(2, sun));
 	}
 
-	/** Aurora: three living curtains behind a cold star field. */
-	private static void aurora(Sky sky, double now) {
-		for (int i = 0; i < 100; i++) {
-			double twinkle = 0.4 + 0.6 * Math.sin(now * 1.1 + i * 1.3);
-			sky.star(hash(i * 11 + 5) * 360, 8 + hash(i * 23 + 15) * 80,
-					0.26, (int) (65 * twinkle), 0xFFC9FFF4);
-		}
-		sky.curtain(-80, 160, 17, 59, 22, now * 0.22, 0x8C4DFFC4, 0x006CFFB2);
-		sky.curtain(-20, 160, 24, 70, 18, now * 0.17 + 1.7, 0x7A7195FF, 0x203A59FF);
-		sky.curtain(-120, 140, 13, 48, 16, now * 0.26 + 3.1, 0x5C5CFFE0, 0x0044D6A4);
-		for (int i = 0; i < 5; i++) {
-			double yaw = i * 72 + now * 0.8;
-			sky.puff(yaw, 10 + i % 2 * 4, 18, 1.8, 0x1A9BF2E0);
-		}
+	/** Aurora: living curtains behind a cold star field. */
+	private static void aurora(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		moonDisc(sky, sun, 3, dayTime, 0.4f, rain);
+		stars(sky, now, sun, 100, 5, 0.85f, 0xFFC9FFF4, rain);
+		float night = (0.22f + 0.78f * sun.night()) * (1f - rain * 0.70f);
+		sky.curtain(-80, 160, 17, 59, 22, now * 0.22,
+				scaleAlpha(0x8C4DFFC4, night), scaleAlpha(0x006CFFB2, night));
+		sky.curtain(-20, 160, 24, 70, 18, now * 0.17 + 1.7,
+				scaleAlpha(0x7A7195FF, night), scaleAlpha(0x203A59FF, night));
+		sky.curtain(-120, 140, 13, 48, 16, now * 0.26 + 3.1,
+				scaleAlpha(0x5C5CFFE0, night), scaleAlpha(0x0044D6A4, night));
+		cloudDeck(sky, now, sun, rain, 5, 12.0, 13.0, 0.55,
+				AtmosphereSkyModel.cloudLit(3, sun), AtmosphereSkyModel.cloudShade(3, sun));
 	}
 
 	/** Overcast: rolling storm layers and distant sheet lightning. */
-	private static void overcast(Sky sky, double now) {
-		for (int layer = 0; layer < 4; layer++) {
-			double speed = 0.7 + layer * 0.35;
-			for (int i = 0; i < 7; i++) {
-				double yaw = i * 52 + now * speed + layer * 26;
-				double pitch = 30 + layer * 6 + (i % 3) * 4;
-				sky.puff(yaw, pitch, 19 - layer * 2, 3.2 - layer * 0.4,
-						0x2C6D7885 + layer * 0x04000000);
-			}
-		}
+	private static void overcast(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		int count = 16 + Math.round(rain * 18f);
+		cloudDeck(sky, now, sun, rain, count, 28.0, 18.0, 1.35,
+				AtmosphereSkyModel.cloudLit(4, sun), AtmosphereSkyModel.cloudShade(4, sun));
+		cloudDeck(sky, now, sun, rain * 0.7f, 9, 12.0, 13.0, 0.75,
+				scaleAlpha(AtmosphereSkyModel.cloudLit(4, sun), 0.65f),
+				scaleAlpha(AtmosphereSkyModel.cloudShade(4, sun), 0.65f));
 		double flash = Math.pow(Math.max(0.0, Math.sin(now * 0.62 + 1.3)), 24.0);
 		if (flash > 0.01) {
 			sky.band(-40 + Math.sin(now * 0.4) * 24, 7, 40, 38,
@@ -249,7 +301,9 @@ public final class AtmosphereSkyRenderer {
 	}
 
 	/** Deep Ocean: the water surface above, caustics, shafts and bubbles. */
-	private static void deepOcean(Sky sky, double now) {
+	private static void deepOcean(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		sunDisc(sky, sun, 5, false, now, rain);
 		for (int i = 0; i < 11; i++) {
 			double yaw = i * 33 + now * 0.9;
 			double pitch = 48 + (i % 4) * 8;
@@ -271,15 +325,16 @@ public final class AtmosphereSkyRenderer {
 	}
 
 	/** Crimson: a red sun under smoke, with sparks in the air. */
-	private static void crimson(Sky sky, double now) {
-		double pulse = 8.0 + Math.sin(now * 0.42) * 1.4;
-		sky.sun(97.0, 16.0, pulse, 0xFFFF7A54, 0x48FF3A24);
-		sky.ellipse(97.0, 16.0, pulse * 3.4, pulse * 3.4, 0x12FF2A18, 32);
-		for (int i = 0; i < 9; i++) {
-			double yaw = i * 45 + now * 0.6;
-			double pitch = 17 + (i % 4) * 6;
-			sky.puff(yaw, pitch, 20 - i % 3 * 3, 3.0, 0x38150608);
+	private static void crimson(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		sunDisc(sky, sun, 6, true, now, rain);
+		moonDisc(sky, sun, 6, dayTime, 0.22f, rain);
+		if (sun.elevation() > -0.035f) {
+			double pulse = 8.0 + Math.sin(now * 0.42) * 1.4;
+			sky.ellipse(sun.yaw(), sun.pitch(), pulse * 3.4, pulse * 3.4, 0x12FF2A18, 32);
 		}
+		cloudDeck(sky, now, sun, rain, 10, 18.0, 16.0, 0.55,
+				AtmosphereSkyModel.cloudLit(6, sun), AtmosphereSkyModel.cloudShade(6, sun));
 		for (int i = 0; i < 40; i++) {
 			double yaw = hash(i * 17 + 8) * 360 + Math.sin(now * 0.3 + i) * 3;
 			double pitch = 10 + (hash(i * 29 + 5) + now * 0.02) % 1.0 * 55;
@@ -288,14 +343,13 @@ public final class AtmosphereSkyRenderer {
 		}
 	}
 
-	/** Sakura: a rose dawn with soft clouds and drifting sky petals. */
-	private static void sakura(Sky sky, double now) {
-		sky.sun(23.0, 15.0, 6.4, 0xFFFFF0D2, 0x38FFB4C8);
-		for (int i = 0; i < 8; i++) {
-			double yaw = i * 47 + now * 1.0;
-			double pitch = 21 + i % 3 * 8;
-			sky.puff(yaw, pitch, 14 + i % 2 * 5, 2.2, 0x3CFFD8E5);
-		}
+	/** Sakura: a rose dawn with layered clouds and drifting sky petals. */
+	private static void sakura(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		sunDisc(sky, sun, 7, false, now, rain);
+		moonDisc(sky, sun, 7, dayTime, 0.2f, rain);
+		cloudDeck(sky, now, sun, rain, 8, 21.0, 14.0, 0.85,
+				AtmosphereSkyModel.cloudLit(7, sun), AtmosphereSkyModel.cloudShade(7, sun));
 		for (int i = 0; i < 3; i++) {
 			double yaw = i * 120 - now * 0.4;
 			sky.band(yaw, 8 + i * 3, 34, 7, 0x00FFD0E2, 0x14FFC6DE);
@@ -310,14 +364,9 @@ public final class AtmosphereSkyRenderer {
 	}
 
 	/** Void: a dying star, a black hole and slow nebula bands. */
-	private static void voidSky(Sky sky, double now) {
-		for (int i = 0; i < 110; i++) {
-			double yaw = hash(i * 23 + 9) * 360;
-			double pitch = 6 + hash(i * 37 + 11) * 82;
-			double twinkle = 0.35 + 0.65 * Math.sin(now * 0.8 + i * 2.6);
-			sky.star(yaw, pitch, i % 17 == 0 ? 0.55 : 0.22,
-					(int) (twinkle * 145), i % 5 == 0 ? 0xFFD9B8FF : 0xFF9F7AD8);
-		}
+	private static void voidSky(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
+		stars(sky, now, sun, 110, 9, 1f, 0xFF9F7AD8, rain);
 		for (int i = 0; i < 7; i++) {
 			double yaw = i * 63 + now * 0.25;
 			sky.band(yaw, 20 + i % 3 * 7, 30 + i % 2 * 18, 36 + i * 3,
@@ -333,8 +382,6 @@ public final class AtmosphereSkyRenderer {
 			sky.star(bx + Math.cos(angle) * 14.5, by + Math.sin(angle) * 13.2,
 					0.18, 55, 0xFFB48CFF);
 		}
-		// A slow rotating rift: three thin arcs whose phase never repeats
-		// within a play session.
 		for (int i = 0; i < 3; i++) {
 			double angle = now * 0.11 + i * 2.1;
 			sky.band(bx + Math.cos(angle) * 5.0, by + Math.sin(angle) * 4.0,
@@ -343,65 +390,30 @@ public final class AtmosphereSkyRenderer {
 	}
 
 	/** Neon: a banded synthwave sun over a neon horizon grid. */
-	private static void neon(Sky sky, double now) {
+	private static void neon(Sky sky, double now, AtmosphereSkyModel.Sun sun,
+			float rain, long dayTime) {
 		double sunYaw = 0.0;
 		double sunPitch = 22.0;
 		double pulse = 0.5 + 0.5 * Math.sin(now * 0.45);
-
-		// The horizon bloom sits behind the sun and the grid, so the lower sky
-		// glows instead of ending in a hard colour seam.
 		sky.ellipse(sunYaw, 5.0, 54.0, 8.0, 0x24FF3FBF, 10);
 		sky.ellipse(sunYaw, 2.0, 30.0, 4.5, 0x30FF5AC8, 8);
-		// Only the glow is drawn under the striped disc; drawing a normal sun
-		// first would show through every gap and turn the stripes back into
-		// dark bars laid over a solid disc.
 		sky.ellipse(sunYaw, sunPitch, 38.4, 38.4, 0x14FF48D0, 10);
 		sky.ellipse(sunYaw, sunPitch, 24.8, 24.8, 0x28FF48D0, 10);
-
-		// The stripes are holes in the disc itself. A dark band drawn over the
-		// sun left an opaque rectangle hanging in the sky and could never make
-		// the gaps wider towards the bottom.
 		sky.stripedSun(sunYaw, sunPitch, 16.0, now);
-
-		// Two cloud layers, one cyan and one magenta, drifting in opposite
-		// directions across the upper half of the frame.
-		for (int i = 0; i < 9; i++) {
-			double yaw = i * 42 + now * 0.32;
-			sky.puff(yaw, 35 + i % 3 * 5, 19 + i % 2 * 4, 1.4,
-					i % 2 == 0 ? 0x2620E0D0 : 0x1EFF68C8);
-		}
-		for (int i = 0; i < 5; i++) {
-			double yaw = -i * 61 - now * 0.22;
-			sky.puff(yaw, 26 + i % 2 * 4, 13, 1.0, 0x18FF9AD8);
-		}
-
-		// Longitude lines run from below the horizon up into the lower sky.
-		// They fade at the bottom and brighten towards the horizon, which is
-		// what sells the plane receding away from the viewer.
+		cloudDeck(sky, now, sun, rain, 9, 35.0, 17.0, 0.35,
+				AtmosphereSkyModel.cloudLit(9, sun), AtmosphereSkyModel.cloudShade(9, sun));
 		for (int i = 0; i < 18; i++) {
 			double yaw = i * 20 + now * 0.18;
-			sky.band(yaw, -14, 0.6, 17,
-					0x0018F8E8, 0x5A18F8E8);
+			sky.band(yaw, -14, 0.6, 17, 0x0018F8E8, 0x5A18F8E8);
 		}
-
-		// Latitude lines are split into short segments by ring(); a single
-		// flat quad across the horizon would cut through the dome.
 		for (int i = 0; i < 7; i++) {
 			double pitch = -12.0 + i * 2.1;
 			int alpha = 0x16 + i * 0x07;
-			sky.ring(pitch, 0.55, 32,
-					0x0018C8D8, withAlpha(0xFF18C8D8, alpha));
+			sky.ring(pitch, 0.55, 32, 0x0018C8D8, withAlpha(0xFF18C8D8, alpha));
 		}
 		sky.ring(-0.5, 0.9, 32, 0x0020E0D0, 0x7020E0D0);
-
-		// A scan line sweeps up from the grid into the sun. The ring follows
-		// the dome all the way round instead of ending at one side.
 		double scan = (now * 0.045) % 1.0;
-		sky.ring(-2.0 + scan * 24.0, 0.8, 32,
-				0x0010F8E8, 0x3010F8E8);
-
-		// A few high sparks keep the upper sky alive without becoming a star
-		// field; the theme is still a neon horizon, not a night sky.
+		sky.ring(-2.0 + scan * 24.0, 0.8, 32, 0x0010F8E8, 0x3010F8E8);
 		for (int i = 0; i < 24; i++) {
 			double yaw = hash(i * 19 + 7) * 360 + now * 0.12;
 			double pitch = 34 + hash(i * 31 + 5) * 48;
@@ -424,8 +436,13 @@ public final class AtmosphereSkyRenderer {
 		}
 
 		void dome(int theme) {
+			dome(theme, AtmosphereSkyModel.sun(0.5f, 6000L));
+		}
+
+		void dome(int theme, AtmosphereSkyModel.Sun sun) {
 			ensureDome(theme);
 			for (int i = 0; i < domeColors.length; i++) {
+				domeColors[i] = AtmosphereSkyModel.skyColor(theme, domeYaw[i], domePitch[i], sun);
 				int offset = i * 3;
 				vc.addVertex(pose, domePositions[offset], domePositions[offset + 1],
 						domePositions[offset + 2]).setColor(domeColors[i]);
@@ -548,6 +565,27 @@ public final class AtmosphereSkyRenderer {
 					withAlpha(color, Math.max(0, (color >>> 24) - 8)), 6);
 			ellipse(yaw - width * 0.30, pitch - height * 0.15, width * 0.48, height * 0.62,
 					withAlpha(color, Math.max(0, (color >>> 24) - 14)), 5);
+		}
+
+		/**
+		 * A cloud made from overlapping soft discs. The lit edge is shifted towards
+		 * the sun and the shaded body stays underneath, so a cloud has a light
+		 * side and a dark side instead of one translucent white blob.
+		 */
+		void cloud(double yaw, double pitch, double width, double height,
+				int lit, int shade, double sunYaw) {
+			if (width <= 0.0 || height <= 0.0) {
+				return;
+			}
+			double towardSun = Math.cos(Math.toRadians(yaw - sunYaw));
+			double shift = width * 0.16 * towardSun;
+			ellipse(yaw, pitch, width, height * 0.72, shade, 8);
+			ellipse(yaw - width * 0.30, pitch - height * 0.16,
+					width * 0.58, height * 0.46, shade, 7);
+			ellipse(yaw + shift, pitch + height * 0.12,
+					width * 0.74, height * 0.50, lit, 8);
+			ellipse(yaw + shift + width * 0.28, pitch + height * 0.22,
+					width * 0.38, height * 0.30, lit, 6);
 		}
 
 		/** A small star: a soft glow, a tight core and a faint cross. */
@@ -798,10 +836,10 @@ public final class AtmosphereSkyRenderer {
 		if (theme == domeTheme && domePositions != null) {
 			return;
 		}
-		int[] colours = palette(theme);
 		int quads = SEGMENTS * RINGS;
 		float[] positions = new float[quads * 4 * 3];
-		int[] vertexColours = new int[quads * 4];
+		float[] yaws = new float[quads * 4];
+		float[] pitches = new float[quads * 4];
 		double lower = -14;
 		double upper = 90;
 		int index = 0;
@@ -811,21 +849,21 @@ public final class AtmosphereSkyRenderer {
 			for (int segment = 0; segment < SEGMENTS; segment++) {
 				double y0 = 360.0 * segment / SEGMENTS;
 				double y1 = 360.0 * (segment + 1) / SEGMENTS;
-				int c0 = domeColor(p0, y0, colours[0], colours[1], colours[2], colours[3]);
-				int c1 = domeColor(p1, y1, colours[0], colours[1], colours[2], colours[3]);
-				index = writeDomeVertex(positions, vertexColours, index, y0, p0, c0);
-				index = writeDomeVertex(positions, vertexColours, index, y1, p0, c0);
-				index = writeDomeVertex(positions, vertexColours, index, y1, p1, c1);
-				index = writeDomeVertex(positions, vertexColours, index, y0, p1, c1);
+				index = writeDomeVertex(positions, yaws, pitches, index, y0, p0);
+				index = writeDomeVertex(positions, yaws, pitches, index, y1, p0);
+				index = writeDomeVertex(positions, yaws, pitches, index, y1, p1);
+				index = writeDomeVertex(positions, yaws, pitches, index, y0, p1);
 			}
 		}
 		domePositions = positions;
-		domeColors = vertexColours;
+		domeYaw = yaws;
+		domePitch = pitches;
+		domeColors = new int[quads * 4];
 		domeTheme = theme;
 	}
 
-	private static int writeDomeVertex(float[] positions, int[] colours, int index,
-			double yawDegrees, double pitchDegrees, int colour) {
+	private static int writeDomeVertex(float[] positions, float[] yaws, float[] pitches,
+			int index, double yawDegrees, double pitchDegrees) {
 		double yaw = Math.toRadians(yawDegrees);
 		double pitch = Math.toRadians(pitchDegrees);
 		double cp = Math.cos(pitch);
@@ -833,32 +871,9 @@ public final class AtmosphereSkyRenderer {
 		positions[offset] = (float) (Math.sin(yaw) * cp * RADIUS);
 		positions[offset + 1] = (float) (Math.sin(pitch) * RADIUS);
 		positions[offset + 2] = (float) (Math.cos(yaw) * cp * RADIUS);
-		colours[index] = colour;
+		yaws[index] = (float) yawDegrees;
+		pitches[index] = (float) pitchDegrees;
 		return index + 1;
-	}
-
-	private static int domeColor(double pitch, double yaw, int top, int mid, int horizon, int below) {
-		int colour;
-		if (pitch >= 45) {
-			colour = mix(mid, top, (float) Math.min(1.0, (pitch - 45) / 45.0));
-		} else if (pitch >= 0) {
-			colour = mix(horizon, mid, (float) (pitch / 45.0));
-		} else if (pitch >= -14) {
-			colour = mix(below, horizon, (float) ((pitch + 14) / 14.0));
-		} else {
-			colour = below;
-		}
-		// A sub-LSB dither breaks the remaining banding without a texture.
-		float noise = (float) ((hash((int) (pitch * 37 + yaw * 11)) - 0.5) * 1.8);
-		int alpha = (colour >>> 24) & 0xFF;
-		int r = clamp8(Math.round(((colour >> 16) & 0xFF) + noise));
-		int g = clamp8(Math.round(((colour >> 8) & 0xFF) + noise));
-		int b = clamp8(Math.round((colour & 0xFF) + noise));
-		return (alpha << 24) | (r << 16) | (g << 8) | b;
-	}
-
-	private static int clamp8(int value) {
-		return Math.max(0, Math.min(255, value));
 	}
 
 	private static int mix(int a, int b, float t) {

@@ -53,8 +53,8 @@ public final class AtmosphereParticles {
 	private static final float[] spin = new float[MAX_POOL];
 	private static final float[] spinSpeed = new float[MAX_POOL];
 	private static final float[] phase = new float[MAX_POOL];
-	private static final int[] variant = new int[MAX_POOL];
 	private static final int[] band = new int[MAX_POOL];
+	private enum Motion { FALL, FLOAT, RISE, SWIRL }
 	private static final boolean[] settled = new boolean[MAX_POOL];
 	private static final float[] settleTime = new float[MAX_POOL];
 	private static final boolean[] sways = new boolean[MAX_POOL];
@@ -130,6 +130,7 @@ public final class AtmosphereParticles {
 		double cx = camera.position().x;
 		double cy = camera.position().y;
 		double cz = camera.position().z;
+		double seconds = System.nanoTime() / 1.0e9;
 		var forward = camera.forwardVector();
 		float light = lightTint(mc, partialTick);
 		for (int i = 0; i < active; i++) {
@@ -152,6 +153,11 @@ public final class AtmosphereParticles {
 			if (settled[i]) {
 				alpha *= Math.max(0f, 1f - settleTime[i] / 1.4f);
 			}
+			if (profile.shimmer > 0f) {
+				double flicker = 0.5 + 0.5 * Math.sin(seconds * 2.1 + phase[i] * 3.0);
+				alpha *= 1f - profile.shimmer * 0.25f
+						+ profile.shimmer * 0.25f * (float) flicker;
+			}
 			if (alpha <= 0.008f) {
 				continue;
 			}
@@ -162,6 +168,8 @@ public final class AtmosphereParticles {
 				petal(vc, pose, px[i] - cx, py[i] - cy, pz[i] - cz, width, spin[i], phase[i], color, sprite);
 			} else if (profile.streak) {
 				streak(vc, pose, dx, dy, dz, width, color, sprite);
+			} else if (profile.bubble) {
+				bubble(vc, pose, dx, dy, dz, width, color, sprite);
 			} else {
 				billboard(vc, pose, dx, dy, dz, width, color, sprite);
 			}
@@ -181,7 +189,6 @@ public final class AtmosphereParticles {
 			spin[i] = (float) (hash(i * 83 + 19) * Math.PI * 2.0);
 			spinSpeed[i] = (float) ((hash(i * 97 + 23) - 0.5) * 2.4);
 			phase[i] = (float) (hash(i * 109 + 29) * Math.PI * 2.0);
-			variant[i] = i % 8;
 			settled[i] = false;
 			settleTime[i] = 0f;
 			sways[i] = hash(i * 113 + 31) > 0.55;
@@ -223,6 +230,7 @@ public final class AtmosphereParticles {
 		float rate = AtmosphereState.particleSpeed;
 		float windStrength = AtmosphereState.particleWind;
 		double seconds = now / 1.0e9;
+		ThemeProfile profile = ThemeProfile.of(lastTheme);
 		int active = Math.min(lastQuality, Math.max(0,
 				Math.round(lastQuality * AtmosphereState.particleDensity * exposure)));
 		for (int i = 0; i < lastQuality; i++) {
@@ -250,7 +258,18 @@ public final class AtmosphereParticles {
 			double sway = sways[i] ? Math.sin(seconds * 1.7 + phase[i]) * 0.055 : 0.0;
 			px[i] += (windX * 0.16 * windStrength + sway) * dt;
 			pz[i] += (windZ * 0.16 * windStrength - sway * 0.6) * dt;
-			py[i] -= fall[i] * rate * dt;
+			// Each theme owns a motion instead of sharing one snow-like fall.
+			switch (profile.motion) {
+				case FALL -> py[i] -= fall[i] * rate * profile.speed * dt;
+				case RISE -> py[i] += fall[i] * rate * profile.speed * dt;
+				case SWIRL -> {
+					px[i] += Math.cos(seconds * 0.5 + phase[i]) * 0.04 * profile.speed * dt;
+					pz[i] += Math.sin(seconds * 0.45 + phase[i]) * 0.04 * profile.speed * dt;
+					py[i] += Math.sin(seconds * 0.7 + phase[i]) * 0.06 * profile.speed * dt;
+				}
+				default -> py[i] += Math.sin(seconds * 0.8 + phase[i]) * 0.03
+						* profile.speed * dt;
+			}
 			spin[i] += spinSpeed[i] * dt;
 			phase[i] += dt * 0.23f;
 
@@ -259,7 +278,8 @@ public final class AtmosphereParticles {
 					py[i] = cy + hy * 0.95;
 					settled[i] = false;
 					settleTime[i] = 0f;
-				} else if (py[i] < ground + 0.12 && i % 6 == 0 && fall[i] > 0.15f) {
+				} else if (profile.motion == Motion.FALL && py[i] < ground + 0.12
+						&& i % 6 == 0 && fall[i] > 0.15f) {
 					settled[i] = true;
 					settleTime[i] = 0f;
 					py[i] = ground + 0.035;
@@ -427,6 +447,14 @@ public final class AtmosphereParticles {
 		textured(vc, pose, x - ux + vx, y - uy + vy, z - uz + vz, sprite, 0, 1, color);
 	}
 
+	private static void bubble(VertexConsumer vc, PoseStack.Pose pose,
+			double dx, double dy, double dz, double width, int color, int sprite) {
+		billboard(vc, pose, dx, dy, dz, width, color, sprite);
+		int shine = (Math.min(255, ((color >>> 24) & 0xFF) + 30) << 24) | 0x00FFFFFF;
+		billboard(vc, pose, dx - width * 0.22, dy + width * 0.22, dz,
+				width * 0.34, shine, 0);
+	}
+
 	private static void billboard(VertexConsumer vc, PoseStack.Pose pose,
 			double dx, double dy, double dz, double width, int color, int sprite) {
 		double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
@@ -487,20 +515,21 @@ public final class AtmosphereParticles {
 				.setNormal(0f, 1f, 0f);
 	}
 
-	/** One theme's sprite, palette and motion. */
+	/** One theme's sprite, palette, motion and light response. */
 	private record ThemeProfile(int[] colors, int spriteStart, int spriteCount,
-			float density, float size, float alpha, boolean petal, boolean streak, boolean bubble) {
+			float density, float size, float alpha, boolean petal, boolean streak, boolean bubble,
+			Motion motion, float speed, float shimmer) {
 		private static final ThemeProfile[] PROFILES = {
-				new ThemeProfile(new int[]{0xFFD8E8FF, 0xFFEFF6FF, 0xFFFFF0D8}, 0, 1, 0.55f, 0.020f, 0.42f, false, false, false),
-				new ThemeProfile(new int[]{0xFFFFC47A, 0xFFFFE0A8, 0xFFFFF1C8}, 0, 1, 0.75f, 0.026f, 0.50f, false, false, false),
-				new ThemeProfile(new int[]{0xFF9CC8FF, 0xFFD8E8FF, 0xFF7898D8}, 7, 1, 0.55f, 0.018f, 0.46f, false, false, false),
-				new ThemeProfile(new int[]{0xFF5CFFE0, 0xFFB8FFF2, 0xFF8AB4FF}, 0, 1, 0.62f, 0.028f, 0.40f, false, false, false),
-				new ThemeProfile(new int[]{0xFFE8F4FF, 0xFFC8E0F8, 0xFFFFF4FA}, 5, 2, 0.92f, 0.020f, 0.55f, false, true, false),
-				new ThemeProfile(new int[]{0xFFB8F4FF, 0xFF8AD8F8, 0xFFD8FFF4}, 6, 2, 0.72f, 0.026f, 0.48f, false, false, true),
-				new ThemeProfile(new int[]{0xFFFFD08A, 0xFFFF5A2A, 0xFF9C3A28}, 7, 1, 0.70f, 0.024f, 0.48f, false, false, false),
-				new ThemeProfile(new int[]{0xFFFFF4FB, 0xFFFFD6EA, 0xFFD6FFF8, 0xFFFFC8DE}, 1, 3, 1.00f, 0.042f, 0.62f, true, false, false),
-				new ThemeProfile(new int[]{0xFFC46AFF, 0xFF7A3CD8, 0xFF2A1348}, 7, 1, 0.48f, 0.020f, 0.40f, false, false, false),
-				new ThemeProfile(new int[]{0xFFFF56D8, 0xFF3FF4E4, 0xFFB8FFF4}, 7, 1, 0.65f, 0.022f, 0.50f, false, false, false)
+				new ThemeProfile(new int[]{0xFFD8E8FF, 0xFFEFF6FF, 0xFFFFF0D8}, 0, 1, 0.62f, 0.018f, 0.42f, false, false, false, Motion.FLOAT, 0.22f, 0.50f),
+				new ThemeProfile(new int[]{0xFFFFC47A, 0xFFFFE0A8, 0xFFFFF1C8}, 2, 1, 0.85f, 0.024f, 0.55f, false, false, false, Motion.RISE, 0.35f, 0.80f),
+				new ThemeProfile(new int[]{0xFF9CC8FF, 0xFFD8E8FF, 0xFF7898D8}, 0, 1, 0.50f, 0.014f, 0.45f, false, false, false, Motion.FLOAT, 0.18f, 0.20f),
+				new ThemeProfile(new int[]{0xFF5CFFE0, 0xFFB8FFF2, 0xFF8AB4FF}, 3, 1, 0.65f, 0.018f, 0.55f, false, false, false, Motion.FLOAT, 0.30f, 1.00f),
+				new ThemeProfile(new int[]{0xFFE8F4FF, 0xFFC8E0F8, 0xFFFFF4FA}, 4, 2, 1.00f, 0.032f, 0.46f, false, false, false, Motion.FLOAT, 0.40f, 0.00f),
+				new ThemeProfile(new int[]{0xFFB8F4FF, 0xFF8AD8F8, 0xFFD8FFF4}, 6, 1, 0.80f, 0.022f, 0.48f, false, false, true, Motion.RISE, 0.30f, 0.30f),
+				new ThemeProfile(new int[]{0xFFFFD08A, 0xFFFF5A2A, 0xFF9C3A28}, 2, 1, 0.70f, 0.020f, 0.55f, false, false, false, Motion.RISE, 0.45f, 1.00f),
+				new ThemeProfile(new int[]{0xFFFFF4FB, 0xFFFFD6EA, 0xFFD6FFF8, 0xFFFFC8DE}, 1, 1, 1.00f, 0.034f, 0.62f, true, false, false, Motion.FALL, 1.00f, 0.10f),
+				new ThemeProfile(new int[]{0xFFC46AFF, 0xFF7A3CD8, 0xFF2A1348}, 7, 1, 0.60f, 0.020f, 0.50f, false, false, false, Motion.SWIRL, 0.40f, 0.80f),
+				new ThemeProfile(new int[]{0xFFFF56D8, 0xFF3FF4E4, 0xFFB8FFF4}, 3, 1, 0.75f, 0.016f, 0.55f, false, false, false, Motion.FLOAT, 0.45f, 1.00f)
 		};
 
 		static ThemeProfile of(int theme) {
