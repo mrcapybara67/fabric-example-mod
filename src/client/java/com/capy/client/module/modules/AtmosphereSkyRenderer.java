@@ -249,10 +249,13 @@ public final class AtmosphereSkyRenderer {
 	/** Midnight: moon with craters, a dense star field and a shooting star. */
 	private static void midnight(Sky sky, double now, AtmosphereSkyModel.Sun sun,
 			float rain, long dayTime) {
+		// The preset defaults to midnight, but the clock is still a clock: if
+		// the player moves it to noon, this theme has to show a real day too.
+		sunDisc(sky, sun, 2, false, now, rain);
 		moonDisc(sky, sun, 2, dayTime, 1f, rain);
 		stars(sky, now, sun, 130, 3, 1f, 0xFFFFFFFF, rain);
 		double cycle = now % 30.0;
-		if (cycle < 1.2) {
+		if (sun.night() > 0.5f && cycle < 1.2) {
 			double pass = cycle / 1.2;
 			double sy = -80 + pass * 160;
 			sky.streak(sy, 62 - pass * 18, sy + 12.6, 59 - pass * 18,
@@ -265,9 +268,10 @@ public final class AtmosphereSkyRenderer {
 	/** Aurora: living curtains behind a cold star field. */
 	private static void aurora(Sky sky, double now, AtmosphereSkyModel.Sun sun,
 			float rain, long dayTime) {
+		sunDisc(sky, sun, 3, false, now, rain);
 		moonDisc(sky, sun, 3, dayTime, 0.4f, rain);
 		stars(sky, now, sun, 100, 5, 0.85f, 0xFFC9FFF4, rain);
-		float night = (0.22f + 0.78f * sun.night()) * (1f - rain * 0.70f);
+		float night = (0.08f + 0.92f * sun.night()) * (1f - rain * 0.70f);
 		sky.curtain(-80, 160, 17, 59, 22, now * 0.22,
 				scaleAlpha(0x8C4DFFC4, night), scaleAlpha(0x006CFFB2, night));
 		sky.curtain(-20, 160, 24, 70, 18, now * 0.17 + 1.7,

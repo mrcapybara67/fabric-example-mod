@@ -204,8 +204,9 @@ public final class ItemInspectPose {
 	/** Package-private hook for checking the flourish without a renderer. */
 	static float spinForTest(ItemInspectModule.Tool kind, float raw) {
 		Profile p = profile(kind);
-		float t = segment(Math.max(0f, Math.min(1f, raw)), 0.30f, 0.72f);
-		return t >= 1f ? 0f : p.spinDegrees() * smooth(t);
+		float clamped = Math.max(0f, Math.min(1f, raw));
+		return clamped >= 0.72f ? 0f
+				: p.spinDegrees() * smooth(segment(clamped, 0.30f, 0.72f));
 	}
 
 	/** True when the flourish rolls around local Z instead of local Y. */
@@ -245,8 +246,10 @@ public final class ItemInspectPose {
 		// A full rotation in the middle of the inspect. It is deliberately an
 		// integer turn and is snapped back to zero at the end: the orientation
 		// is identical, but the matrix has no accumulated 2*pi residue.
-		float spinT = segment(raw, 0.30f, 0.72f);
-		float spin = spinT >= 1f ? 0f : p.spinDegrees() * smooth(spinT);
+		// Use the raw boundary, not the segment's rounded result: a float
+		// segment can end at 0.99999994, which would leave a full turn in the
+		// matrix at the exact handoff frame instead of snapping to rest.
+		float spin = raw >= 0.72f ? 0f : p.spinDegrees() * smooth(segment(raw, 0.30f, 0.72f));
 		// A short window centred at 0.72: the wrist gives the item one last
 		// small roll before it returns, which is what makes the motion read as
 		// an inspect rather than a static turn.

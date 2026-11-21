@@ -60,4 +60,14 @@ class AtmosphereSkyModelTest {
 		int sunsetRed = (sunsetColour >> 16) & 0xFF;
 		assertTrue(noonBlue > sunsetRed, "noon should be blue, sunset should be warm");
 	}
+
+	@Test
+	void nightThemesHaveARealDayPaletteWhenTheClockSaysNoon() {
+		AtmosphereSkyModel.Sun noon = AtmosphereSkyModel.sun(0.5f, 0L);
+		for (int theme : new int[] { 2, 3 }) {
+			int colour = AtmosphereSkyModel.skyColor(theme, 0.0, 4.0, noon);
+			assertTrue((colour & 0xFF) > 0x80,
+					"theme " + theme + " must not stay black at noon");
+		}
+	}
 }
