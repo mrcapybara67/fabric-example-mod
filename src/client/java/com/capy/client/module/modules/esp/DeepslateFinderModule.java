@@ -11,6 +11,8 @@ import com.capy.client.module.IntSetting;
 import com.capy.client.module.SliderSetting;
 import com.capy.client.module.StringSetting;
 import com.google.gson.JsonObject;
+import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -30,10 +32,11 @@ import org.slf4j.LoggerFactory;
  *
  * <p>The overworld's natural deepslate near bedrock follows a seeded gradient.
  * Deepslate in that band which the gradient says should not be natural is
- * evidence of player building. The world seed is not sent by a multiplayer
- * server, so the finder uses the Server Seed setting, then an older saved
- * world_seed, then the integrated server's seed in singleplayer. Without any
- * seed it stays idle and says so once in the log.</p>
+ * evidence of player building. The blocks must also span several columns, so
+ * a single placed pillar is not turned into a base flag. The world seed is not
+ * sent by a multiplayer server, so the finder uses the Server Seed setting,
+ * then an older saved world_seed, then the integrated server's seed in
+ * singleplayer. Without any seed it stays idle and says so once in the log.</p>
  *
  * <p>Render Y is where the flag plate is drawn: a base at Y 40 can be reviewed
  * at eye level instead of at the bottom of the world.</p>
@@ -49,15 +52,20 @@ public final class DeepslateFinderModule extends FinderModule {
 			"The Y level the flag plates are drawn at.");
 	private final SliderSetting minimum = describe(setting(new SliderSetting("minimum", 4, 1, 32)),
 			"How many suspicious deepslate blocks a chunk needs to be flagged.");
+	private final IntSetting minimumColumns = describe(setting(new IntSetting("minimum_columns", 2, 1, 8, 1)),
+			"How many separate columns the suspicious deepslate must span.");
 	private String legacySeed = "";
 	private SeedDeepslate seed;
 	private long appliedSeed = Long.MIN_VALUE;
 	private int appliedMinimum = 4;
+	private int appliedColumns = 2;
+	private int appliedRenderY = 63;
 	private boolean warnedNoSeed;
 	private boolean scanning;
 	private long scanKey;
 	private int scanSection;
 	private int scanSuspicious;
+	private final BitSet scanColumns = new BitSet(256);
 
 	public DeepslateFinderModule() {
 		super("deepslate_finder", 0x9600FF00);
@@ -89,6 +97,19 @@ public final class DeepslateFinderModule extends FinderModule {
 			resetSeedView();
 			FinderScanner.get().queueAllLoaded();
 		}
+		int columnsValue = minimumColumns.get();
+		if (columnsValue != appliedColumns) {
+			appliedColumns = columnsValue;
+			resetSeedView();
+			FinderScanner.get().queueAllLoaded();
+		}
+		int renderYValue = renderY.get();
+		if (renderYValue != appliedRenderY) {
+			// A rescan would lose the current flags; only their plate height
+			// has to move, so rebuild those boxes in place.
+			appliedRenderY = renderYValue;
+			refreshPlateBoxes(renderYValue);
+		}
 		refreshTerrain(flags.keySet());
 	}
 
@@ -116,6 +137,7 @@ public final class DeepslateFinderModule extends FinderModule {
 			scanKey = key;
 			scanSection = firstSection;
 			scanSuspicious = 0;
+			scanColumns.clear();
 		}
 
 		int baseX = chunk.getPos().getMinBlockX();
@@ -143,16 +165,19 @@ public final class DeepslateFinderModule extends FinderModule {
 				for (int z = 0; z < 16; z++) {
 					for (int x = 0; x < 16; x++) {
 						BlockState state = section.getBlockState(x, localY, z);
-						if (state.is(Blocks.DEEPSLATE) && seed.suspicious(baseX + x, worldY, baseZ + z)) {
+						if (state != null && state.is(Blocks.DEEPSLATE)
+								&& seed.suspicious(baseX + x, worldY, baseZ + z)) {
 							scanSuspicious++;
+							scanColumns.set((x << 4) | z);
 						}
 					}
 				}
 			}
 		}
-		if (scanSuspicious >= minimum.get()) {
+		if (enoughEvidence(scanSuspicious, scanColumns.cardinality(), minimum.get(), minimumColumns.get())) {
 			int plateY = renderY.get();
-			markFlag(key, "suspicious deepslate", scanSuspicious,
+			markFlag(key, scanSuspicious + " suspicious deepslate in " + scanColumns.cardinality()
+					+ " columns", scanSuspicious,
 					List.of(new AABB(baseX, plateY, baseZ, baseX + 16.0, plateY + 0.1, baseZ + 16.0)));
 			if (!hadFlag && notifications.value()) {
 				notify.toast(Minecraft.getInstance(), "Seed chunk finder",
@@ -164,6 +189,11 @@ public final class DeepslateFinderModule extends FinderModule {
 		}
 		clearScan();
 		return true;
+	}
+
+	/** A single pillar of placed deepslate is not a base; spread-out blocks are. */
+	static boolean enoughEvidence(int blocks, int columns, int minimumBlocks, int minimumSpans) {
+		return blocks >= Math.max(1, minimumBlocks) && columns >= Math.max(1, minimumSpans);
 	}
 
 	private boolean resolveSeed() {
@@ -228,11 +258,24 @@ public final class DeepslateFinderModule extends FinderModule {
 		clearScan();
 	}
 
+	/** Moves the existing flag plates to a newly chosen Render Y. */
+	private void refreshPlateBoxes(int plateY) {
+		beginBulk();
+		for (long key : new ArrayList<>(flags.keySet())) {
+			int baseX = Chunks.x(key) * 16;
+			int baseZ = Chunks.z(key) * 16;
+			boxesByFlag.put(key, List.of(new AABB(baseX, plateY, baseZ,
+					baseX + 16.0, plateY + 0.1, baseZ + 16.0)));
+		}
+		endBulk();
+	}
+
 	private void clearScan() {
 		scanning = false;
 		scanKey = 0L;
 		scanSection = 0;
 		scanSuspicious = 0;
+		scanColumns.clear();
 	}
 
 	@Override
@@ -241,6 +284,8 @@ public final class DeepslateFinderModule extends FinderModule {
 		seed = null;
 		appliedSeed = Long.MIN_VALUE;
 		appliedMinimum = minimum.get();
+		appliedColumns = minimumColumns.get();
+		appliedRenderY = renderY.get();
 		clearScan();
 	}
 
@@ -251,11 +296,14 @@ public final class DeepslateFinderModule extends FinderModule {
 		legacySeed = ConfigValues.stringValue(json, "world_seed", "");
 		serverSeed.set(ConfigValues.stringValue(json, "server_seed", ""));
 		minimum.set(ConfigValues.intValue(json, "minimum", 4));
+		minimumColumns.set(ConfigValues.intValue(json, "minimum_columns", 2));
 		renderY.set(ConfigValues.intValue(json, "render_y", 63));
 		notifications.set(ConfigValues.boolValue(json, "notify", false));
 		seed = null;
 		appliedSeed = Long.MIN_VALUE;
 		appliedMinimum = minimum.get();
+		appliedColumns = minimumColumns.get();
+		appliedRenderY = renderY.get();
 	}
 
 	@Override
@@ -263,6 +311,7 @@ public final class DeepslateFinderModule extends FinderModule {
 		super.saveConfig(json);
 		json.addProperty("server_seed", serverSeed.value());
 		json.addProperty("minimum", minimum.get());
+		json.addProperty("minimum_columns", minimumColumns.get());
 		json.addProperty("render_y", renderY.get());
 		json.addProperty("notify", notifications.value());
 	}

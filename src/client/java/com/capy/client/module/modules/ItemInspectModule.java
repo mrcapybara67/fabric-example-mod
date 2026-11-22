@@ -1,22 +1,15 @@
 package com.capy.client.module.modules;
 
-import com.capy.client.config.ConfigValues;
-import com.capy.client.module.BooleanSetting;
 import com.capy.client.module.Category;
-import com.capy.client.module.Configurable;
 import com.capy.client.module.Module;
 import com.capy.client.module.ModuleManager;
-import com.capy.client.module.SliderSetting;
 import com.capy.client.module.Tickable;
-import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-
-/**
- * Item Inspect — a staged first-person inspection for the held weapon.
+import net.minecraft.world.item.Items;/**
+ * Item Inspect — a CS2-style inspection for the held weapon.
  *
  * <p>No custom model and no texture: the ordinary vanilla item is animated in
  * hand space, so resource packs, enchantment glints and every tool material
@@ -24,12 +17,12 @@ import net.minecraft.world.item.Items;
  * swing, use, slot change or screen cancels it with a short return instead of a
  * snap.</p>
  *
- * <p>Every sword uses the sword profile, every spear and trident the spear
- * profile, and bows, crossbows, maces and any item carrying the vanilla
- * {@code WEAPON} component have their own profile. The per-type switches only
- * decide which of those profiles the player wants to see.</p>
+ * <p>Every press of C chooses one of three rotation variants in
+ * {@link ItemInspectPose}. Those three variants are always active while the
+ * module is enabled; there is no animation switch, speed slider or per-weapon
+ * filter to configure.</p>
  */
-public class ItemInspectModule extends Module implements Tickable, Configurable {
+public class ItemInspectModule extends Module implements Tickable {
 	public enum Tool {
 		SWORD(1_650_000_000L),
 		SPEAR(1_950_000_000L),
@@ -52,29 +45,11 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 		}
 	}
 
-	private final BooleanSetting enabled = setting(new BooleanSetting("enabled", true));
-	private final SliderSetting speed = setting(new SliderSetting("speed", 100, 50, 200));
-	private final BooleanSetting sword = setting(new BooleanSetting("sword", true));
-	private final BooleanSetting axe = setting(new BooleanSetting("axe", true));
-	private final BooleanSetting pickaxe = setting(new BooleanSetting("pickaxe", true));
-	private final BooleanSetting shovel = setting(new BooleanSetting("shovel", true));
-	private final BooleanSetting hoe = setting(new BooleanSetting("hoe", true));
-	private final BooleanSetting spear = setting(new BooleanSetting("spear", true));
-	private final BooleanSetting mace = setting(new BooleanSetting("mace", true));
-	private final BooleanSetting ranged = setting(new BooleanSetting("ranged", true));
-	private final BooleanSetting otherWeapon = setting(new BooleanSetting("other_weapon", true));
+	private static final long COOLDOWN_NANOS = 350_000_000L;
 	private long cooldownUntil;
 
 	public ItemInspectModule() {
 		super(Category.VISUAL, "item_inspect");
-	}
-
-	public boolean animationEnabled() {
-		return enabled.value();
-	}
-
-	public float speedFactor() {
-		return Math.max(0.5f, Math.min(2f, (float) speed.real() / 100f));
 	}
 
 	public Tool toolOf(ItemStack stack) {
@@ -85,41 +60,41 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 		// not a sword or an axe even though it is a weapon.
 		if (stack.is(ItemTags.SPEARS) || stack.is(ItemTags.TRIDENT_ENCHANTABLE)
 				|| stack.is(Items.TRIDENT)) {
-			return spear.value() ? Tool.SPEAR : null;
+			return Tool.SPEAR;
 		}
 		if (stack.is(ItemTags.MACE_ENCHANTABLE) || stack.is(Items.MACE)) {
-			return mace.value() ? Tool.MACE : null;
+			return Tool.MACE;
 		}
 		if (stack.is(ItemTags.BOW_ENCHANTABLE) || stack.is(ItemTags.CROSSBOW_ENCHANTABLE)) {
-			return ranged.value() ? Tool.RANGED : null;
+			return Tool.RANGED;
 		}
 		if (stack.is(ItemTags.SWORDS)) {
-			return sword.value() ? Tool.SWORD : null;
+			return Tool.SWORD;
 		}
 		if (stack.is(ItemTags.AXES)) {
-			return axe.value() ? Tool.AXE : null;
+			return Tool.AXE;
 		}
 		if (stack.is(ItemTags.PICKAXES)) {
-			return pickaxe.value() ? Tool.PICKAXE : null;
+			return Tool.PICKAXE;
 		}
 		if (stack.is(ItemTags.SHOVELS)) {
-			return shovel.value() ? Tool.SHOVEL : null;
+			return Tool.SHOVEL;
 		}
 		if (stack.is(ItemTags.HOES)) {
-			return hoe.value() ? Tool.HOE : null;
+			return Tool.HOE;
 		}
 		// Last, so every specific profile above wins. WEAPON covers vanilla
 		// weapons and modded weapons that use the vanilla component; the tag
 		// catches the remaining weapon-like items that only declare the
 		// enchantment category.
 		if (stack.has(DataComponents.WEAPON) || stack.is(ItemTags.WEAPON_ENCHANTABLE)) {
-			return otherWeapon.value() ? Tool.GENERIC : null;
+			return Tool.GENERIC;
 		}
 		return null;
 	}
 
 	public void triggerInspect() {
-		if (!isEnabled() || !enabled.value()) {
+		if (!isEnabled()) {
 			return;
 		}
 		Minecraft mc = Minecraft.getInstance();
@@ -140,13 +115,13 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 		if (tool == null || mc.player.getAttackAnim(1f) > 0.01f || mc.player.isUsingItem()) {
 			return;
 		}
-		cooldownUntil = System.nanoTime() + 350_000_000L;
-		ItemInspectPose.start(tool, speedFactor(), stack);
+		cooldownUntil = System.nanoTime() + COOLDOWN_NANOS;
+		ItemInspectPose.start(tool, stack);
 	}
 
 	@Override
 	public void onTick(Minecraft mc) {
-		if (!isEnabled() || !enabled.value()) {
+		if (!isEnabled()) {
 			ItemInspectPose.cancel();
 			return;
 		}
@@ -161,42 +136,5 @@ public class ItemInspectModule extends Module implements Tickable, Configurable 
 				|| toolOf(mc.player.getMainHandItem()) == null) {
 			ItemInspectPose.cancel();
 		}
-	}
-
-	@Override
-	protected void onToggle(boolean state) {
-		if (!state) {
-			ItemInspectPose.cancel();
-		}
-	}
-
-	@Override
-	public void loadConfig(JsonObject json) {
-		enabled.set(ConfigValues.boolValue(json, "enabled", true));
-		speed.set(ConfigValues.intValue(json, "speed", 100));
-		sword.set(ConfigValues.boolValue(json, "sword", true));
-		axe.set(ConfigValues.boolValue(json, "axe", true));
-		pickaxe.set(ConfigValues.boolValue(json, "pickaxe", true));
-		shovel.set(ConfigValues.boolValue(json, "shovel", true));
-		hoe.set(ConfigValues.boolValue(json, "hoe", true));
-		spear.set(ConfigValues.boolValue(json, "spear", true));
-		mace.set(ConfigValues.boolValue(json, "mace", true));
-		ranged.set(ConfigValues.boolValue(json, "ranged", true));
-		otherWeapon.set(ConfigValues.boolValue(json, "other_weapon", true));
-	}
-
-	@Override
-	public void saveConfig(JsonObject json) {
-		json.addProperty("enabled", enabled.value());
-		json.addProperty("speed", speed.get());
-		json.addProperty("sword", sword.value());
-		json.addProperty("axe", axe.value());
-		json.addProperty("pickaxe", pickaxe.value());
-		json.addProperty("shovel", shovel.value());
-		json.addProperty("hoe", hoe.value());
-		json.addProperty("spear", spear.value());
-		json.addProperty("mace", mace.value());
-		json.addProperty("ranged", ranged.value());
-		json.addProperty("other_weapon", otherWeapon.value());
 	}
 }

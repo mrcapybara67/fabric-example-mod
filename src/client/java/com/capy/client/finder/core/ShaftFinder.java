@@ -5,7 +5,8 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Vertical shaft finder. A cell is "open" when its block has an empty collision shape.
+ * Vertical shaft finder. A cell is "open" only when it is actual air; a
+ * collision-empty water or plant column is not a tunnel hole.
  * ONE = 1x1 column: open cell, all four horizontal neighbours closed.
  * THREE = 3x1 slot (along X or Z): three open cells in a row, both ends closed, both long sides closed.
  * A run of matching cells at least minDepth tall is a shaft.

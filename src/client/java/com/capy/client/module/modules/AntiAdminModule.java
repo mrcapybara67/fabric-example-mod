@@ -27,6 +27,7 @@ import com.capy.client.module.modules.antiadmin.ChatDetector;
 import com.capy.client.module.modules.antiadmin.Confidence;
 import com.capy.client.module.modules.antiadmin.ContainerDetector;
 import com.capy.client.module.modules.antiadmin.Correlator;
+import com.capy.client.module.modules.antiadmin.DeathTracker;
 import com.capy.client.module.modules.antiadmin.EntityTabCrossRefDetector;
 import com.capy.client.module.modules.antiadmin.ExplosionDetector;
 import com.capy.client.module.modules.antiadmin.GamemodeDetector;
@@ -58,7 +59,10 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.GameType;
 
 /**
  * Anti Admin: watches the accounts on your watchlist and the traces a vanished
@@ -122,6 +126,8 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	private final Set<UUID> joined = new HashSet<>();
 	/** Tab tells already reported this session, keyed by account and tell. */
 	private final Set<String> toldTells = new HashSet<>();
+	/** Accounts that just died; a death-screen spectator is not a vanish. */
+	private final DeathTracker deaths = new DeathTracker();
 	/**
 	 * Set when an alert lands on a watched account, cleared once the staff list
 	 * has rebuilt its rows.
@@ -173,7 +179,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		detectors.add(probeDetector);
 		detectors.add(new PingGhostDetector(buffer));
 		detectors.add(new TeamPacketDetector(buffer));
-		detectors.add(new GamemodeDetector(buffer));
+		detectors.add(new GamemodeDetector(buffer, deaths));
 		detectors.add(new RapidPacketDetector(buffer));
 		detectors.add(new ShadowMapDetector(buffer));
 		detectors.add(new ContainerDetector(buffer));
@@ -224,6 +230,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 		npcs.clear();
 		joined.clear();
 		toldTells.clear();
+		deaths.clear();
 		staffListDirty = false;
 		PacketSignals.clear();
 		tick = 0L;
@@ -248,6 +255,7 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			return;
 		}
 		tick++;
+		long now = System.currentTimeMillis();
 		buffer.tick(tick);
 		probeDetector.setWatchlistPresent(!watchlist.entries().isEmpty());
 		syncWebhook();
@@ -255,20 +263,34 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			profileCountdown = PROFILE_INTERVAL;
 			resolveProfile(mc);
 		}
-		for (PacketSignals.Event event : PacketSignals.drain()) {
+		List<PacketSignals.Event> events = PacketSignals.drain();
+		rememberDeaths(mc, now);
+		// Learn deaths before the detectors see a same-tick spectator update.
+		// A server may send the death line and the game-mode change together.
+		for (PacketSignals.Event event : events) {
+			if (event instanceof PacketSignals.SystemChat chat) {
+				rememberDeathLine(mc, chat.text(), chat.timeMs());
+			}
+		}
+		for (PacketSignals.Event event : events) {
+			if (event instanceof PacketSignals.InfoUpdate update && update.gameMode() != null
+					&& update.gameMode() != GameType.SPECTATOR.getId()) {
+				deaths.alive(update.uuid());
+			}
 			for (SignalDetector detector : detectors) {
 				if (active(detector)) {
 					detector.onPacket(event);
 				}
 			}
 		}
+		deaths.prune(now);
 		for (SignalDetector detector : detectors) {
 			if (active(detector)) {
 				detector.onTick(mc);
 			}
 		}
 		correlator.tick(mc, profile, minimumConfidence(), host,
-				watchlistOnly.value() ? watchlist : null);
+				watchlistOnly.value() ? watchlist : null, deaths);
 		if (--scanCountdown <= 0) {
 			scanCountdown = SCAN_INTERVAL;
 			scanWatchlist(mc);
@@ -294,16 +316,25 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 	 * account exists.
 	 */
 	private void scanWatchlist(Minecraft mc) {
+		long now = System.currentTimeMillis();
 		for (AdminDetector.Match match : AdminDetector.scan(mc, watchlist)) {
-			if (match.distance() > detectionRange()) {
+			if (deaths.isDead(match.uuid(), now) || match.distance() > detectionRange()) {
 				continue;
 			}
 			raise(match, AdminAlert.Kind.NEARBY, positionOf(mc, match.uuid()), match.distance());
 		}
 		for (AdminDetector.Match match : AdminDetector.scanJoins(mc, watchlist, joined)) {
+			if (deaths.isDead(match.uuid(), now)) {
+				continue;
+			}
 			raise(match, AdminAlert.Kind.JOINED, null, -1.0);
 		}
 		for (AdminDetector.TabTell tell : AdminDetector.scanTells(mc, watchlist)) {
+			if (deaths.isDead(tell.match().uuid(), now)) {
+				// A death-screen spectator entry is not a vanish tell. This is
+				// the false alert: the tab says SPECTATOR, but the account is dead.
+				continue;
+			}
 			AdminAlert.Kind kind = tell.tell() == AdminDetector.Tell.SPECTATOR
 					? AdminAlert.Kind.SPECTATOR
 					: AdminAlert.Kind.HIDDEN_TAG;
@@ -316,6 +347,53 @@ public class AntiAdminModule extends Module implements Configurable, Tickable {
 			raise(tell.match(), kind, null, -1.0);
 		}
 		queueWatchlistProbes(mc);
+	}
+
+	/** Marks an account dead and removes any alert that already mentioned it. */
+	private void markDead(UUID uuid, long now) {
+		if (uuid == null) {
+			return;
+		}
+		deaths.death(uuid, now);
+		alerts.clearSubject(uuid);
+		// A tell shown before the death must be allowed to report again if the
+		// same account later respawns and genuinely switches to spectator.
+		String prefix = uuid + ":";
+		toldTells.removeIf(key -> key.startsWith(prefix));
+	}
+
+	private void rememberDeaths(Minecraft mc, long now) {
+		if (mc == null || mc.level == null) {
+			return;
+		}
+		for (AbstractClientPlayer player : mc.level.players()) {
+			if (player == null) {
+				continue;
+			}
+			UUID id = player.getUUID();
+			if (player.isDeadOrDying()) {
+				markDead(id, now);
+			} else if (deaths.isDead(id, now)) {
+				// The body is alive again: a later spectator switch is no longer
+				// explained by the old death.
+				deaths.alive(id);
+			}
+		}
+	}
+
+	/** Records deaths announced in system chat, which covers players out of range. */
+	private void rememberDeathLine(Minecraft mc, String text, long now) {
+		if (mc == null || mc.getConnection() == null || text == null || text.isBlank()) {
+			return;
+		}
+		for (PlayerInfo info : mc.getConnection().getOnlinePlayers()) {
+			if (info == null || info.getProfile() == null || info.getProfile().id() == null) {
+				continue;
+			}
+			if (DeathTracker.looksLikeDeath(text, info.getProfile().name())) {
+				markDead(info.getProfile().id(), now);
+			}
+		}
 	}
 
 	/**

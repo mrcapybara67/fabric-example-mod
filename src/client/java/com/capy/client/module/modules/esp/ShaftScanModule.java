@@ -1,7 +1,6 @@
 package com.capy.client.module.modules.esp;
 
 import com.capy.client.finder.core.Chunks;
-import com.capy.client.finder.core.OpenStateCache;
 import com.capy.client.finder.core.ShaftFinder;
 import java.util.Collection;
 import java.util.HashMap;
@@ -9,12 +8,6 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.AbstractChestBlock;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.CrossCollisionBlock;
-import net.minecraft.world.level.block.IronBarsBlock;
-import net.minecraft.world.level.block.WallBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -23,28 +16,20 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  * Shared, read-only shaft scanner for the tunnel-hole and chunk-scanner
  * modules.
  *
- * <p>The old filler asked for a collision shape for every cell of the 22x22
- * map at every Y level. The map is now filled one vertical section at a time:
- * an all-air section is open everywhere, a single-state palette asks that
- * state once, and a mixed section reads its cells with an identity-keyed
- * per-state cache. That removes the repeated shape lookups without changing
- * what the finder considers open.</p>
- *
- * <p>Position-dependent shapes are the exception. Fences ({@link
- * CrossCollisionBlock}), walls ({@link WallBlock}), chests ({@link
- * AbstractChestBlock}) and panes ({@link IronBarsBlock}) inspect their
- * neighbours, so their states are never cached or bulk-filled. This is the
- * short list of world-dependent collision blocks; every other collision
- * shape is a function of the block state alone.</p>
+ * <p>Only air counts as open. The old filler used an empty collision shape,
+ * which also made water, lava, kelp, grass and other pass-through blocks look
+ * like a walkable shaft. Those are exactly the natural columns that filled
+ * the finder with false flags. An all-air section is open everywhere, a
+ * single-state palette answers once, and a mixed section reads its cells
+ * directly; there is no collision-shape lookup or per-state cache left.</p>
  *
  * <p>Border cells are read from loaded neighbour chunks. A missing neighbour
  * leaves its cells unknown, which {@link ShaftFinder.OpenMap} treats as open,
- * so a chunk edge cannot invent a shaft.</p>
+ * so a chunk edge cannot invent a shaft. A real border shaft is found when
+ * the neighbour is loaded and scanned in its own turn.</p>
  */
 public abstract class ShaftScanModule extends FinderModule {
-	private final OpenStateCache<BlockState> openStates = new OpenStateCache<>();
 	private final Map<Long, List<ShaftFinder.Shaft>> sourceShafts = new HashMap<>();
-	private final BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
 	private Job job;
 	private int appliedDepth = Integer.MIN_VALUE;
 
@@ -154,42 +139,27 @@ public abstract class ShaftScanModule extends FinderModule {
 				}
 				BlockState first = section.getStates().get(0, 0, 0);
 				boolean single = !section.maybeHas(state -> state != first);
-				if (single && !positionDependent(first)) {
-					int worldX = current.baseX + mapMinX;
-					int worldZ = current.baseZ + mapMinZ;
-					boolean open = first.getCollisionShape(level, probe.set(worldX, sectionY, worldZ)).isEmpty();
+				if (single) {
+					boolean open = first != null && first.isAir();
 					set(current.map, mapMinX, mapMaxX, mapMinZ, mapMaxZ, sectionY, open);
 					continue;
 				}
 				for (int mapX = mapMinX; mapX <= mapMaxX; mapX++) {
 					int localX = mapX - dx * 16;
-					int worldX = current.baseX + mapX;
 					for (int mapZ = mapMinZ; mapZ <= mapMaxZ; mapZ++) {
 						int localZ = mapZ - dz * 16;
-						int worldZ = current.baseZ + mapZ;
 						for (int localY = 0; localY < 16; localY++) {
 							int worldY = sectionY + localY;
 							if (worldY > current.map.maxY()) {
 								break;
 							}
 							BlockState state = section.getBlockState(localX, localY, localZ);
-							boolean open = openStates.isOpen(state, positionDependent(state),
-									() -> state.getCollisionShape(level, probe.set(worldX, worldY, worldZ)).isEmpty());
-							current.map.set(mapX, worldY, mapZ, open);
+							current.map.set(mapX, worldY, mapZ, state != null && state.isAir());
 						}
 					}
 				}
 			}
 		}
-	}
-
-	private static boolean positionDependent(BlockState state) {
-		Block block = state.getBlock();
-		// These shapes read neighbours as well as the state. A pane is included
-		// conservatively: its connection properties can be stale for a tick
-		// after a neighbouring block changes, so it must be judged in place.
-		return block instanceof CrossCollisionBlock || block instanceof WallBlock
-				|| block instanceof AbstractChestBlock<?> || block instanceof IronBarsBlock;
 	}
 
 	private static void setOpen(ShaftFinder.OpenMap map, int minX, int maxX, int minZ, int maxZ, int sectionY) {

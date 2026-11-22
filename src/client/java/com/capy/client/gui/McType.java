@@ -7,6 +7,7 @@ package com.capy.client.gui;
  * any point during startup.
  */
 public final class McType implements UiType {
+	private final UiText caption;
 	private final UiText regular;
 	private final UiText medium;
 	private final UiText bold;
@@ -14,11 +15,17 @@ public final class McType implements UiType {
 	private final UiText headline;
 
 	public McType() {
+		this.caption = new McText(UiFonts::caption);
 		this.regular = new McText(UiFonts::regular);
 		this.medium = new McText(UiFonts::medium);
 		this.bold = new McText(UiFonts::bold);
 		this.display = new McText(UiFonts::display);
 		this.headline = new McText(UiFonts::headline);
+	}
+
+	@Override
+	public UiText caption() {
+		return caption;
 	}
 
 	@Override

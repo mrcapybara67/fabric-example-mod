@@ -29,12 +29,12 @@ import net.minecraft.world.phys.AABB;
  *
  * <h2>How a geode is found</h2>
  * A geode is recognised by what it is full of, not by a structure table: every
- * {@code amethyst_cluster} block is collected, grouped into the sixteen block
- * cell it sits in, and a cell that holds at least {@code threshold} clusters is
- * a geode. Counting the clusters rather than scanning for budding amethyst
- * matters because budding blocks sit inside the shell and are not what the
- * player is mining; the clusters are the visible, harvestable proof, and a
- * geode always has several.
+ * {@code amethyst_cluster} block is collected, nearby clusters are merged into
+ * one group, and a group with at least {@code threshold} clusters is a geode.
+ * The clusters are the visible, harvestable proof. A group must also still
+ * have {@code budding_amethyst} in its shell: a natural geode always keeps
+ * some, while a wall of placed clusters without one is decoration rather than
+ * a find.
  *
  * <h2>How far it looks</h2>
  * As far as the client has chunks. A cluster the client was never sent cannot
@@ -79,6 +79,7 @@ public final class AmethystFinderModule extends EspModule {
 	private final Set<AABB> geodes = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final Set<AABB> scratchGeodes = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final Predicate<BlockState> isCluster = state -> state.is(Blocks.AMETHYST_CLUSTER);
+	private final Predicate<BlockState> isBudding = state -> state.is(Blocks.BUDDING_AMETHYST);
 	private ClientLevel level;
 	private int cooldown;
 	private int lastThreshold = -1;
@@ -162,6 +163,7 @@ public final class AmethystFinderModule extends EspModule {
 		int lowY = center.getY() - limit;
 		int highY = center.getY() + limit;
 		Map<Long, List<BlockPos>> found = new HashMap<>();
+		List<BlockPos> budding = new ArrayList<>();
 
 		EspScanner.forEachChunk(level, center, limit, chunk -> {
 			LevelChunkSection[] sections = chunk.getSections();
@@ -178,8 +180,12 @@ public final class AmethystFinderModule extends EspModule {
 					continue;
 				}
 				// A section of plain stone answers this in a handful of
-				// comparisons, which is what keeps the scan cheap.
-				if (!section.maybeHas(isCluster)) {
+				// comparisons, which is what keeps the scan cheap. Budding
+				// amethyst is read in the same walk: it is the proof that a
+				// cluster group is a real geode rather than placed decoration.
+				boolean clusters = section.maybeHas(isCluster);
+				boolean buds = section.maybeHas(isBudding);
+				if (!clusters && !buds) {
 					continue;
 				}
 				for (int y = 0; y < 16; y++) {
@@ -194,7 +200,13 @@ public final class AmethystFinderModule extends EspModule {
 							// would end the scan with a crash instead of skipping a
 							// column. One comparison per block is not measurable.
 							BlockState state = section.getBlockState(x, y, z);
-							if (state == null || !state.is(Blocks.AMETHYST_CLUSTER)) {
+							if (state == null) {
+								continue;
+							}
+							if (buds && state.is(Blocks.BUDDING_AMETHYST)) {
+								budding.add(new BlockPos(baseX + x, worldY, baseZ + z));
+							}
+							if (!clusters || !state.is(Blocks.AMETHYST_CLUSTER)) {
 								continue;
 							}
 							BlockPos pos = new BlockPos(baseX + x, worldY, baseZ + z);
@@ -237,7 +249,19 @@ public final class AmethystFinderModule extends EspModule {
 		// merge when they were created. Merge the resulting overlap before
 		// applying the threshold, or one geode can be counted as two halves.
 		mergeOverlappingGroups(groups, groupBounds);
+		// A cluster group only becomes a geode when the shell around it still
+		// holds budding amethyst. Natural geodes always do; a wall of placed
+		// clusters without one is decoration, not a find.
+		for (int i = groups.size() - 1; i >= 0; i--) {
+			if (!holdsBudding(groupBounds.get(i), budding)) {
+				groups.remove(i);
+				groupBounds.remove(i);
+			}
+		}
 		for (List<BlockPos> clusters : groups) {
+			if (scratch.size() >= MAX_BOXES) {
+				break;
+			}
 			if (showCluster.value()) {
 				for (BlockPos pos : clusters) {
 					if (scratch.size() >= MAX_BOXES) {
@@ -248,6 +272,11 @@ public final class AmethystFinderModule extends EspModule {
 			}
 			if (clusters.size() < need) {
 				continue;
+			}
+			// The geode box counts against the cap too; previously it was added
+			// after the break, so the published list could exceed MAX_BOXES.
+			if (scratch.size() >= MAX_BOXES) {
+				break;
 			}
 			AABB geode = union(clusters).inflate(GEODE_INFLATE);
 			scratchGeodes.add(geode);
@@ -281,6 +310,17 @@ public final class AmethystFinderModule extends EspModule {
 				}
 			}
 		}
+	}
+
+	/** True when a geode shell near this cluster group still holds budding amethyst. */
+	private static boolean holdsBudding(AABB bounds, List<BlockPos> budding) {
+		AABB near = bounds.inflate(MERGE_GAP);
+		for (BlockPos pos : budding) {
+			if (near.contains(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** The box around a whole group of clusters. */

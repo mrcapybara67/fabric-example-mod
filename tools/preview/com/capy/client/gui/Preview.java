@@ -253,26 +253,23 @@ public final class Preview {
             sc.g.setColor(new Color(argb, true));
             sc.g.drawString(text, x, y + metrics.getAscent());
         }
-    }
-
-    static final class SwingType implements UiType {
-        private final SwingText regular, medium, bold, display, headline;
+    }	static final class SwingType implements UiType {
+		private final SwingText caption, regular, medium, bold, display, headline;
 
         SwingType() throws Exception {
             BufferedImage probe = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g = probe.createGraphics();
-            regular = new SwingText(load("poppins-400.ttf", 8.5f), g);
+            Graphics2D g = probe.createGraphics();			caption = new SwingText(load("poppins-500.ttf", 7.5f), g);
+			regular = new SwingText(load("poppins-400.ttf", 8.5f), g);
             medium = new SwingText(load("poppins-500.ttf", 8.5f), g);
             bold = new SwingText(load("poppins-600.ttf", 8.5f), g);
-            display = new SwingText(load("poppins-700.ttf", 11.5f), g);
+            display = new SwingText(load("poppins-700.ttf", 12.5f), g);
             headline = new SwingText(load("poppins-700.ttf", 16f), g);
         }
 
         private static Font load(String name, float size) throws Exception {
             return Font.createFont(Font.TRUETYPE_FONT, FONTS.resolve(name).toFile()).deriveFont(size);
-        }
-
-        @Override public UiText regular() { return regular; }
+        }		@Override public UiText caption() { return caption; }
+		@Override public UiText regular() { return regular; }
         @Override public UiText medium() { return medium; }
         @Override public UiText bold() { return bold; }
         @Override public UiText display() { return display; }

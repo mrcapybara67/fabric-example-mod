@@ -903,6 +903,45 @@ public final class Ui {
 	}
 
 	/**
+	 * Width of {@code text} with {@code spacing} extra pixels between glyphs.
+	 * Used by the small uppercase overlines, where a little tracking turns
+	 * plain all-caps into a deliberate typographic label.
+	 */
+	public static int trackedWidth(UiText font, String text, float spacing) {
+		if (font == null || text == null || text.isEmpty()) {
+			return 0;
+		}
+		float gap = Math.max(0f, spacing);
+		float width = gap * (text.length() - 1);
+		for (int i = 0; i < text.length(); i++) {
+			width += font.width(text.substring(i, i + 1));
+		}
+		return Math.round(width);
+	}
+
+	/** Draws text with added tracking between each glyph. */
+	public static void drawTracked(UiCanvas c, UiText font, String text, int x, int y,
+			int color, float spacing) {
+		if (font == null || text == null || text.isEmpty()) {
+			return;
+		}
+		float gap = Math.max(0f, spacing);
+		float cursor = x;
+		for (int i = 0; i < text.length(); i++) {
+			String glyph = text.substring(i, i + 1);
+			font.draw(c, glyph, Math.round(cursor), y, color);
+			cursor += font.width(glyph) + gap;
+		}
+	}
+
+	/** Draws tracked text centered on {@code x}. */
+	public static void drawTrackedCentered(UiCanvas c, UiText font, String text,
+			int x, int y, int color, float spacing) {
+		int width = trackedWidth(font, text, spacing);
+		drawTracked(c, font, text, x - width / 2, y, color, spacing);
+	}
+
+	/**
 	 * The y a line of text must be drawn at to sit vertically centred inside a
 	 * box of the given height.
 	 *

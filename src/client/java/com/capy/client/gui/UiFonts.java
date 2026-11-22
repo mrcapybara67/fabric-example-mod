@@ -30,7 +30,8 @@ import org.slf4j.LoggerFactory;
  * (SIL Open Font License) rendered through the same TrueType pipeline vanilla
  * uses for its own fonts.
  *
- * Vector-smooth geometric letterforms in five static cuts:
+ * Vector-smooth geometric letterforms in six static cuts:
+ *   caption()  = Poppins 500 at a small size — overlines and counts
  *   regular()  = Poppins 400 — body text, descriptions, values
  *   medium()   = Poppins 500 — module names, labels
  *   bold()     = Poppins 600 — headings, emphasised values
@@ -61,8 +62,10 @@ public final class UiFonts {
 	 * size is reduced slightly to keep labels inside their existing rows.
 	 */
 	private static final float SIZE = 8.5f;
+	/** Size of the tracked micro-label cut. */
+	private static final float CAPTION_SIZE = 7.5f;
 	/** Size of the display weight used for the wordmark and alert headlines. */
-	private static final float DISPLAY_SIZE = 11.5f;
+	private static final float DISPLAY_SIZE = 12.5f;
 	/**
 	 * Size of the headline weight. Large on purpose: the Anti Admin alert is
 	 * the one piece of text in the client that has to be read instantly, from
@@ -82,6 +85,7 @@ public final class UiFonts {
 	private static final String SEMIBOLD_TTF = "/assets/capy/font/poppins-600.ttf";
 	private static final String DISPLAY_TTF = "/assets/capy/font/poppins-700.ttf";
 
+	private static FontSet setCaption;
 	private static FontSet setRegular;
 	private static FontSet setMedium;
 	private static FontSet setBold;
@@ -89,6 +93,7 @@ public final class UiFonts {
 	private static FontSet setHeadline;
 	/** Strong references to the loaded providers: each owns a native FT_Face. */
 	private static List<GlyphProvider> providers = List.of();
+	private static Font caption;
 	private static Font regular;
 	private static Font medium;
 	private static Font bold;
@@ -99,6 +104,11 @@ public final class UiFonts {
 	private static int attempts;
 
 	private UiFonts() {
+	}
+
+	public static Font caption() {
+		ensureCreated();
+		return caption;
 	}
 
 	public static Font regular() {
@@ -168,6 +178,7 @@ public final class UiFonts {
 			loaded.add(loadFromBundle(SEMIBOLD_TTF, SIZE));
 			loaded.add(loadFromBundle(DISPLAY_TTF, DISPLAY_SIZE));
 			loaded.add(loadFromBundle(DISPLAY_TTF, HEADLINE_SIZE));
+			loaded.add(loadFromBundle(MEDIUM_TTF, CAPTION_SIZE));
 			providers = List.copyOf(loaded);
 
 			setRegular = buildSet(mc, "regular", loaded.get(0));
@@ -175,12 +186,14 @@ public final class UiFonts {
 			setBold = buildSet(mc, "bold", loaded.get(2));
 			setDisplay = buildSet(mc, "display", loaded.get(3));
 			setHeadline = buildSet(mc, "headline", loaded.get(4));
+			setCaption = buildSet(mc, "caption", loaded.get(5));
 
 			regular = fontFor(setRegular);
 			medium = fontFor(setMedium);
 			bold = fontFor(setBold);
 			display = fontFor(setDisplay);
 			headline = fontFor(setHeadline);
+			caption = fontFor(setCaption);
 		} catch (Throwable t) {
 			// Loud on purpose: a silent fallback is impossible to tell apart
 			// from shipping the wrong font. The load is retried, because the

@@ -63,7 +63,11 @@ public final class ChunkReloadModule extends Module implements Tickable {
 	}
 
 	private void restore(Minecraft mc) {
-		if (savedDistance >= 0 && mc != null && mc.options != null) {
+		// Only undo our own temporary drop. If the player chose a different
+		// render distance while the module was below Y 0, that choice wins;
+		// restoring the old value would silently overwrite it.
+		if (savedDistance >= 0 && mc != null && mc.options != null
+				&& mc.options.renderDistance().get() == LOW_DISTANCE) {
 			setDistance(mc, savedDistance);
 		}
 		savedDistance = -1;

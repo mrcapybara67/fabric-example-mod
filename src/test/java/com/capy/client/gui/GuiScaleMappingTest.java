@@ -154,6 +154,11 @@ class GuiScaleMappingTest {
 		};
 
 		@Override
+		public UiText caption() {
+			return text;
+		}
+
+		@Override
 		public UiText regular() {
 			return text;
 		}

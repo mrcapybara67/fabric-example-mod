@@ -262,27 +262,30 @@ public class CapyClient implements ClientModInitializer {
 			Guard.run("finder scan", () -> FinderScanner.get().tick());
 		}));
 
-		// The world overlays are drawn after entities, inside the main world
-		// pass, and before translucent terrain. This point is load bearing in
-		// 1.21.11: the debug-render event is fired while the frame graph is
-		// still being built, so immediate geometry submitted there is discarded
-		// and the ESP appears to do nothing. AFTER_ENTITIES runs inside the
-		// pass, where vanilla is already submitting entity geometry through the
-		// same buffer source mechanism.
+		// The world overlays are drawn at the end of the main render pass, after
+		// translucent terrain. Drawing them earlier let the water surface blend
+		// over every box and fade its colour whenever the target was underwater;
+		// END_MAIN runs after that layer, so an overlay colour stays exactly the
+		// one in its settings no matter what water is in front of it. This point
+		// is load bearing in 1.21.11: the debug-render event fires while the
+		// frame graph is still being built, so immediate geometry submitted
+		// there is discarded. END_MAIN is a drawing event inside the pass, where
+		// vanilla is still submitting world geometry through the same buffer
+		// source mechanism.
 		//
 		// Each overlay then decides for itself whether a wall may hide it: the
 		// see-through pair of render types has no depth test, so a box behind
 		// terrain is still drawn. Drawing here is safe for that: the terrain
 		// depth buffer is complete by this point, the boxes ignore it, and they
-		// write no depth either, so nothing drawn later is clipped by an
+		// write no depth either, so particles drawn later are not clipped by an
 		// occluder that is not on screen.
 		// Guarded: this runs inside the world pass, where a thrown exception is a
 		// crash on the first frame in a world rather than a missing box.
-		WorldRenderEvents.AFTER_ENTITIES.register(context -> Guard.run("esp", () -> EspRenderer.render(context)));
-		// The finder chunk styles share the same frame pass and camera-relative
-		// contract as the box renderer, but keep their own quad and line buffers
-		// because a contour interleaves the two types.
-		WorldRenderEvents.AFTER_ENTITIES.register(
+		WorldRenderEvents.END_MAIN.register(context -> Guard.run("esp", () -> EspRenderer.render(context)));
+		// The finder chunk styles share the same post-water point and camera-
+		// relative contract as the box renderer, but keep their own quad and line
+		// buffers because a contour interleaves the two types.
+		WorldRenderEvents.END_MAIN.register(
 				context -> Guard.run("finder styles", () -> ChunkRenderPass.render(context)));
 		// The skybox is submitted before terrain so every block can cover it.
 		// Its render type owns no depth state, which is what keeps distant

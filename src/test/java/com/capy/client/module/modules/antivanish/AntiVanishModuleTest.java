@@ -138,6 +138,15 @@ class AntiVanishModuleTest {
 	}
 
 	@Test
+	void deathMessageSuppressesDeathScreenSpectator() {
+		module.processChat("Steve was slain by Alex", 2_000);
+		module.observeGameMode(STEVE, "Steve", GameType.SPECTATOR.getId(), 2_000);
+		module.observeSpectatorBody(STEVE, "Steve", 5, 2_000);
+
+		assertTrue(module.engine().signals(2_000).isEmpty());
+	}
+
+	@Test
 	void deadSpectatorBodyIsNotAVanishClue() {
 		module.observeGameMode(STEVE, "Steve", GameType.SURVIVAL.getId(), 1_000);
 		module.observeGameMode(STEVE, "Steve", GameType.SPECTATOR.getId(), 2_000);

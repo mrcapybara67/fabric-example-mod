@@ -56,10 +56,11 @@ public final class Correlator {
 	 * @return how many subjects produced an alert this tick
 	 */
 	public int tick(Minecraft mc, ServerProfile profile, Confidence minimum, String host,
-			com.capy.client.module.WatchlistSetting watchlist) {
+			com.capy.client.module.WatchlistSetting watchlist, DeathTracker deaths) {
 		if (mc == null || mc.level == null || mc.player == null || profile == null) {
 			return 0;
 		}
+		long now = System.currentTimeMillis();
 		alerts.cancelGone();
 		Map<UUID, List<Observation>> snapshot = buffer.snapshot();
 		// A listed account is visible again: its vanished state is disproved,
@@ -71,6 +72,9 @@ public final class Correlator {
 		}
 		int raised = 0;
 		for (Map.Entry<UUID, List<Observation>> entry : snapshot.entrySet()) {
+			if (deaths != null && deaths.isDead(entry.getKey(), now)) {
+				continue;
+			}
 			AlertRecord record = evaluate(mc, entry.getKey(), entry.getValue(), profile, minimum, host, watchlist);
 			if (record == null || !alerts.raise(record)) {
 				continue;

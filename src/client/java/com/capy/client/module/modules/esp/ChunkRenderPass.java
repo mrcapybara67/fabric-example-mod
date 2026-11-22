@@ -20,7 +20,7 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * Draws the chunk-style layer for every enabled finder in the same world pass
- * and at the same point as {@link EspRenderer}.
+ * and at the same post-water point as {@link EspRenderer}.
  *
  * <p>The styles need both quads and lines in the same pass, so each kind has
  * its own immediate source. Switching render types inside one source would

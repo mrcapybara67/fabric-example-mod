@@ -20,25 +20,27 @@ import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 
 /**
- * Chunk Scanner: flags chunks whose tallest shaft reaches the sensitivity
- * height inside the lowest 33-block band.
+ * Chunk Scanner: flags chunks whose shafts reach the sensitivity height inside
+ * the underground band.
  *
- * <p>Sensitivity is the minimum stack height (2 to 5 blocks), not a vague
- * "strength": raising it removes the short dips, lowering it finds shallow
- * tunnels. Spread Radius decides how far two flagged chunks may be apart and
- * still be treated as one tunnel; only the tallest chunk of each group is kept,
- * so one long tunnel becomes one flag instead of a wall of them. A flag older
- * than sixty seconds is drawn dimmer.</p>
+ * <p>The band starts at the world floor, not at Y=0. The old 0..32 window
+ * missed every modern overworld base below sea level; the whole -64..32 range
+ * is read now. Sensitivity is the minimum stack height (2 to 5 blocks), not a
+ * vague "strength". Minimum Shafts requires more than one independent column
+ * in a grouped area, so a single natural cave chimney does not become a base
+ * flag. Spread Radius decides how far two flagged chunks may be apart and
+ * still count as one tunnel; only the tallest chunk of each group is kept, so
+ * one long tunnel becomes one flag instead of a wall of them.</p>
  */
 public final class ChunkScannerModule extends ShaftScanModule {
-	/** Y 0..32 is 33 blocks; elsewhere it starts at Y=0, or a higher world floor. */
-	private static final int BAND_HEIGHT = 33;
+	/** Lowest underground band: from the world floor up to Y=32. */
+	private static final int BAND_TOP = 32;
 	private static final long DIM_AFTER_MS = 60_000L;
 	private static final double DIM_FACTOR = 0.55;
 
@@ -48,6 +50,8 @@ public final class ChunkScannerModule extends ShaftScanModule {
 			"The world seed used by the advanced deepslate rule; blank disables it.");
 	private final IntSetting sensitivity = describe(setting(new IntSetting("sensitivity", 2, 2, 5, 1)),
 			"Minimum shaft stack height that counts as a find.");
+	private final IntSetting minimumColumns = describe(setting(new IntSetting("minimum_columns", 2, 1, 8, 1)),
+			"How many separate shafts a grouped area needs to be flagged.");
 	private final IntSetting spreadRadius = describe(setting(new IntSetting("spread_radius", 1, 0, 16, 1)),
 			"Group flagged chunks this many chunks apart and keep only the strongest.");
 	private final BooleanSetting tracer = describe(setting(new BooleanSetting("tracers", true)),
@@ -65,6 +69,7 @@ public final class ChunkScannerModule extends ShaftScanModule {
 	private SeedDeepslate seedRule;
 	private long appliedSeed = Long.MIN_VALUE;
 	private int appliedSpread = -1;
+	private int appliedColumns = -1;
 	private boolean appliedAdvanced;
 	private long lastChimeMs = Long.MIN_VALUE / 2;
 
@@ -112,8 +117,10 @@ public final class ChunkScannerModule extends ShaftScanModule {
 		if (level == null) {
 			return;
 		}
-		if (appliedSpread != spreadRadius.get() || appliedAdvanced != advanced.value() || !seedMatches()) {
+		if (appliedSpread != spreadRadius.get() || appliedColumns != minimumColumns.get()
+				|| appliedAdvanced != advanced.value() || !seedMatches()) {
 			appliedSpread = spreadRadius.get();
+			appliedColumns = minimumColumns.get();
 			appliedAdvanced = advanced.value();
 			SeedDeepslate before = seedRule;
 			seedRule = parseSeed();
@@ -159,27 +166,41 @@ public final class ChunkScannerModule extends ShaftScanModule {
 	protected void shaftsChanged() {
 		int minHeight = sensitivity.get();
 		int bandMin = bandMin();
-		int bandTop = bandMin + BAND_HEIGHT;
+		int bandTop = BAND_TOP;
 		Map<Long, int[]> tallest = new HashMap<>();
-		for (List<ShaftFinder.Shaft> shafts : shaftLists()) {
-			for (ShaftFinder.Shaft shaft : shafts) {
-				int min = Math.max(shaft.minY(), bandMin);
-				int max = Math.min(shaft.maxY(), bandTop);
-				int height = max - min;
-				if (height < minHeight) {
-					continue;
-				}
-				long key = Chunks.key(shaft.x() >> 4, shaft.z() >> 4);
-				int[] best = tallest.get(key);
-				if (best == null || height > best[0]) {
-					tallest.put(key, new int[]{height, min, max});
+		if (bandMin <= bandTop) {
+			for (List<ShaftFinder.Shaft> shafts : shaftLists()) {
+				for (ShaftFinder.Shaft shaft : shafts) {
+					int min = Math.max(shaft.minY(), bandMin);
+					int max = Math.min(shaft.maxY(), bandTop);
+					int height = max - min;
+					if (height < minHeight) {
+						continue;
+					}
+					long key = Chunks.key(shaft.x() >> 4, shaft.z() >> 4);
+					int[] best = tallest.get(key);
+					if (best == null) {
+						tallest.put(key, new int[]{height, min, max, 1});
+					} else {
+						best[3]++;
+						if (height > best[0]) {
+							best[0] = height;
+							best[1] = min;
+							best[2] = max;
+						}
+					}
 				}
 			}
 		}
 
 		Map<Long, Integer> heights = new HashMap<>(tallest.size());
-		tallest.forEach((key, info) -> heights.put(key, info[0]));
-		Map<Long, Integer> winners = keepTallest(heights, spreadRadius.get());
+		Map<Long, Integer> columns = new HashMap<>(tallest.size());
+		tallest.forEach((key, info) -> {
+			heights.put(key, info[0]);
+			columns.put(key, info[3]);
+		});
+		Map<Long, Integer> winners = keepTallest(heights, columns, spreadRadius.get(),
+				minimumColumns.get());
 		Map<Long, Integer> extras = new HashMap<>();
 		if (advanced.value() && parseSeed() != null) {
 			for (long key : new ArrayList<>(winners.keySet())) {
@@ -207,8 +228,12 @@ public final class ChunkScannerModule extends ShaftScanModule {
 				bottomY.put(key, info[1]);
 				topY.put(key, info[2]);
 			}
-			String reason = "shaft " + entry.getValue() + " blocks tall, Y "
-					+ (info == null ? 0 : info[1]) + " to " + (info == null ? entry.getValue() : info[2]);
+			// entry.getValue() may have been merged with the deepslate count;
+			// the height in the reason has to come from the shaft record.
+			int height = info == null ? entry.getValue() : info[0];
+			String reason = columns.getOrDefault(key, 1) + " shaft(s), " + height
+					+ " blocks tall, Y " + (info == null ? 0 : info[1]) + " to "
+					+ (info == null ? height : info[2]);
 			Integer seedHits = extras.get(key);
 			if (seedHits != null) {
 				reason += ", seed deepslate " + seedHits;
@@ -252,7 +277,8 @@ public final class ChunkScannerModule extends ShaftScanModule {
 				int localY = (y - minY) & 15;
 				for (int z = 0; z < 16; z++) {
 					for (int x = 0; x < 16; x++) {
-						if (section.getBlockState(x, localY, z).is(Blocks.DEEPSLATE)
+						BlockState state = section.getBlockState(x, localY, z);
+						if (state != null && state.is(Blocks.DEEPSLATE)
 								&& rule.suspicious(baseX + x, y, baseZ + z)) {
 							count++;
 						}
@@ -282,10 +308,7 @@ public final class ChunkScannerModule extends ShaftScanModule {
 	}
 
 	private int bandMin() {
-		if (level == null || level.dimension() == Level.OVERWORLD) {
-			return 0;
-		}
-		return Math.max(0, level.getMinY());
+		return level == null ? 0 : level.getMinY();
 	}
 
 	/**
@@ -294,6 +317,17 @@ public final class ChunkScannerModule extends ShaftScanModule {
 	 * flag per chunk; a larger spread merges a wider neighbourhood.
 	 */
 	static Map<Long, Integer> keepTallest(Map<Long, Integer> heights, int spread) {
+		return keepTallest(heights, Map.of(), spread, 0);
+	}
+
+	/**
+	 * Keep one winner per connected group, optionally dropping groups that do
+	 * not contain enough independent shafts. A single natural cave chimney is
+	 * not enough evidence to flag a base on its own; two shafts in the same
+	 * area are a much stronger signal.
+	 */
+	static Map<Long, Integer> keepTallest(Map<Long, Integer> heights, Map<Long, Integer> columns,
+			int spread, int minColumns) {
 		int radius = Math.max(0, spread);
 		Map<Long, Integer> winners = new HashMap<>();
 		Set<Long> seen = new HashSet<>();
@@ -325,8 +359,13 @@ public final class ChunkScannerModule extends ShaftScanModule {
 			}
 
 			int bestHeight = 0;
+			int totalColumns = 0;
 			for (long key : members) {
 				bestHeight = Math.max(bestHeight, heights.get(key));
+				totalColumns += Math.max(0, columns.getOrDefault(key, 0));
+			}
+			if (minColumns > 0 && totalColumns < minColumns) {
+				continue;
 			}
 			double centreX = sumX / members.size();
 			double centreZ = sumZ / members.size();
@@ -423,6 +462,7 @@ public final class ChunkScannerModule extends ShaftScanModule {
 		old.clear();
 		terrain.clear();
 		appliedSpread = -1;
+		appliedColumns = -1;
 		appliedSeed = Long.MIN_VALUE;
 		seedRule = null;
 	}

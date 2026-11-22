@@ -435,7 +435,12 @@ public class ModuleCard {
 		int nameColor = Ui.lerpColor(UiTheme.TEXT_2, UiTheme.TEXT, Math.max(onv, hv * 0.8f));
 		nameColor = Ui.fadeAlpha(nameColor, revealAlpha);
 		int textW = Math.max(0, textRight - textX);
-		UiText titleFont = bold.width(title) <= textW ? bold
+		// An enabled module gets the semibold cut; resting modules use the
+		// lighter medium cut. The colour already carries the state, and the
+		// weight change makes the active card feel selected rather than just
+		// illuminated.
+		UiText preferred = module.isEnabled() ? bold : medium;
+		UiText titleFont = preferred.width(title) <= textW ? preferred
 				: medium.width(title) <= textW ? medium : regular;
 		int titleY = Ui.centerTextY(y, UiTheme.CARD_H, titleFont);
 		if (titleFont.width(title) <= textW) {

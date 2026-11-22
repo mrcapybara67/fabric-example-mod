@@ -10,19 +10,27 @@ import org.junit.jupiter.api.Test;
 
 class ItemInspectPoseTest {
 	@Test
-	void swordAndPickaxeUseDifferentRotationAxesAtTheSameProgress() {
-		Matrix4f sword = matrix(ItemInspectModule.Tool.SWORD, 0.5f, false);
-		Matrix4f pickaxe = matrix(ItemInspectModule.Tool.PICKAXE, 0.5f, false);
-		assertTrue(differs(sword, pickaxe));
+	void everyWeaponHasThreeDistinctVariants() {
+		assertEquals(3, ItemInspectPose.Variant.values().length);
+		for (ItemInspectModule.Tool tool : ItemInspectModule.Tool.values()) {
+			Matrix4f side = matrix(tool, ItemInspectPose.Variant.SIDE, 0.52f, false);
+			Matrix4f turn = matrix(tool, ItemInspectPose.Variant.TURN, 0.52f, false);
+			Matrix4f flip = matrix(tool, ItemInspectPose.Variant.FLIP, 0.52f, false);
+			assertTrue(differs(side, turn), tool + " SIDE and TURN share a pose");
+			assertTrue(differs(side, flip), tool + " SIDE and FLIP share a pose");
+			assertTrue(differs(turn, flip), tool + " TURN and FLIP share a pose");
+		}
 	}
 
 	@Test
-	void everyInspectionStartsAndEndsAtTheVanillaPose() {
+	void everyVariantStartsAndEndsAtTheVanillaPose() {
 		for (ItemInspectModule.Tool tool : ItemInspectModule.Tool.values()) {
-			assertEquals(new Matrix4f(), matrix(tool, 0f, false));
-			assertEquals(new Matrix4f(), matrix(tool, 1f, false));
-			assertEquals(new Matrix4f(), matrix(tool, 0f, true));
-			assertEquals(new Matrix4f(), matrix(tool, 1f, true));
+			for (ItemInspectPose.Variant variant : ItemInspectPose.Variant.values()) {
+				assertEquals(new Matrix4f(), matrix(tool, variant, 0f, false));
+				assertEquals(new Matrix4f(), matrix(tool, variant, 1f, false));
+				assertEquals(new Matrix4f(), matrix(tool, variant, 0f, true));
+				assertEquals(new Matrix4f(), matrix(tool, variant, 1f, true));
+			}
 		}
 	}
 
@@ -31,27 +39,47 @@ class ItemInspectPoseTest {
 		ItemInspectModule.Tool[] tools = ItemInspectModule.Tool.values();
 		for (int i = 0; i < tools.length; i++) {
 			for (int j = i + 1; j < tools.length; j++) {
-				Matrix4f a = matrix(tools[i], 0.5f, false);
-				Matrix4f b = matrix(tools[j], 0.5f, false);
+				Matrix4f a = matrix(tools[i], ItemInspectPose.Variant.SIDE, 0.5f, false);
+				Matrix4f b = matrix(tools[j], ItemInspectPose.Variant.SIDE, 0.5f, false);
 				assertTrue(differs(a, b), tools[i] + " and " + tools[j] + " share a pose");
 			}
 		}
 	}
 
 	@Test
-	void swordAndAxeHaveDistinctFullTurnFlourishes() {
-		assertTrue(ItemInspectPose.spinForTest(ItemInspectModule.Tool.SWORD, 0.70f) > 350f);
-		assertTrue(ItemInspectPose.spinForTest(ItemInspectModule.Tool.AXE, 0.70f) < -350f);
-		assertFalse(ItemInspectPose.spinRollForTest(ItemInspectModule.Tool.SWORD));
-		assertTrue(ItemInspectPose.spinRollForTest(ItemInspectModule.Tool.AXE));
-		assertEquals(0f, ItemInspectPose.spinForTest(ItemInspectModule.Tool.SWORD, 0.72f), 0.0001f);
-		assertEquals(0f, ItemInspectPose.spinForTest(ItemInspectModule.Tool.PICKAXE, 0.70f), 0.0001f);
+	void swordAndAxeHaveOppositeFullTurns() {
+		assertTrue(ItemInspectPose.spinForTest(
+				ItemInspectModule.Tool.SWORD, ItemInspectPose.Variant.TURN, 0.68f) > 350f);
+		assertTrue(ItemInspectPose.spinForTest(
+				ItemInspectModule.Tool.AXE, ItemInspectPose.Variant.TURN, 0.68f) < -350f);
+		assertTrue(ItemInspectPose.spinForTest(
+				ItemInspectModule.Tool.SWORD, ItemInspectPose.Variant.FLIP, 0.60f) < -350f);
+		assertTrue(ItemInspectPose.spinForTest(
+				ItemInspectModule.Tool.AXE, ItemInspectPose.Variant.FLIP, 0.60f) > 350f);
+		assertEquals(0f, ItemInspectPose.spinForTest(
+				ItemInspectModule.Tool.SWORD, ItemInspectPose.Variant.TURN, 0.72f), 0.0001f);
+		assertEquals(0f, ItemInspectPose.spinForTest(
+				ItemInspectModule.Tool.SWORD, ItemInspectPose.Variant.FLIP, 0.64f), 0.0001f);
+		assertEquals(0f, ItemInspectPose.spinForTest(
+				ItemInspectModule.Tool.PICKAXE, ItemInspectPose.Variant.SIDE, 0.5f), 0.0001f);
+	}
+
+	@Test
+	void everyWeaponHasTwoFullTurnOptions() {
+		for (ItemInspectModule.Tool tool : ItemInspectModule.Tool.values()) {
+			assertTrue(Math.abs(ItemInspectPose.spinForTest(
+					tool, ItemInspectPose.Variant.TURN, 0.68f)) > 350f,
+					tool + " TURN is not a full turn");
+			assertTrue(Math.abs(ItemInspectPose.spinForTest(
+					tool, ItemInspectPose.Variant.FLIP, 0.60f)) > 350f,
+					tool + " FLIP is not a full turn");
+		}
 	}
 
 	@Test
 	void leftHandMirrorsTheRightHandAcrossTheGrip() {
-		Matrix4f right = matrix(ItemInspectModule.Tool.SWORD, 0.5f, false);
-		Matrix4f left = matrix(ItemInspectModule.Tool.SWORD, 0.5f, true);
+		Matrix4f right = matrix(ItemInspectModule.Tool.SWORD, ItemInspectPose.Variant.SIDE, 0.5f, false);
+		Matrix4f left = matrix(ItemInspectModule.Tool.SWORD, ItemInspectPose.Variant.SIDE, 0.5f, true);
 		assertTrue(right.m30() > 0f);
 		assertTrue(left.m30() < 0f);
 		assertEquals(-right.m30(), left.m30(), 1.0e-4f);
@@ -66,9 +94,10 @@ class ItemInspectPoseTest {
 		}
 	}
 
-	private static Matrix4f matrix(ItemInspectModule.Tool tool, float raw, boolean left) {
+	private static Matrix4f matrix(ItemInspectModule.Tool tool,
+			ItemInspectPose.Variant variant, float raw, boolean left) {
 		PoseStack pose = new PoseStack();
-		ItemInspectPose.applyForTest(pose, tool, raw, left);
+		ItemInspectPose.applyForTest(pose, tool, variant, raw, left);
 		return pose.last().pose();
 	}
 

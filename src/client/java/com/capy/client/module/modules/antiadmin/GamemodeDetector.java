@@ -29,9 +29,11 @@ public final class GamemodeDetector extends AbstractDetector {
 
 	private final Map<UUID, Integer> modes = new HashMap<>();
 	private final java.util.Set<UUID> reported = new java.util.HashSet<>();
+	private final DeathTracker deaths;
 
-	public GamemodeDetector(SignalBuffer buffer) {
+	public GamemodeDetector(SignalBuffer buffer, DeathTracker deaths) {
 		super(buffer);
+		this.deaths = deaths;
 	}
 
 	@Override
@@ -64,6 +66,11 @@ public final class GamemodeDetector extends AbstractDetector {
 		// change: a join reports the mode of everybody, including the staff
 		// member who was already in spectator before the client arrived.
 		if (previous == null || previous == SPECTATOR) {
+			return;
+		}
+		// A server moves a dead player into spectator for the death screen.
+		// That is not a vanish, so do not even record the cycle as reported.
+		if (deaths != null && deaths.isDead(update.uuid(), update.timeMs())) {
 			return;
 		}
 		reported.add(update.uuid());

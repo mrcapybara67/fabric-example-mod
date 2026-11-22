@@ -28,4 +28,15 @@ class AtmosphereParticleWrapTest {
 		assertEquals(0.0f, AtmosphereParticles.nearFade(1.0), 0.0001f);
 		assertTrue(AtmosphereParticles.nearFade(1.5) < AtmosphereParticles.nearFade(2.2));
 	}
+
+	@Test
+	void everyThemeStaysInsideItsParticleBudget() {
+		for (int theme = 0; theme < 10; theme++) {
+			int active = AtmosphereParticles.activeCount(theme, 1200, 1f);
+			assertTrue(active >= 350 && active <= 600,
+					"theme " + theme + " draws too many or too few motes: " + active);
+		}
+		assertEquals(0, AtmosphereParticles.activeCount(0, 1200, 0f));
+		assertTrue(AtmosphereParticles.activeCount(0, 4000, 2f) <= 4000);
+	}
 }

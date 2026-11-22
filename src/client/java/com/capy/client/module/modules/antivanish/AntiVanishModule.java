@@ -22,6 +22,7 @@ import com.capy.client.module.modules.hud.HudPanel;
 import com.capy.client.module.modules.antiadmin.AdminAlert;
 import com.capy.client.module.modules.antiadmin.AdminDetector;
 import com.capy.client.module.modules.antiadmin.AlertRenderer;
+import com.capy.client.module.modules.antiadmin.DeathTracker;
 import com.capy.client.module.modules.antiadmin.PacketSignals;
 import com.capy.client.module.modules.antiadmin.TabList;
 import com.capy.client.util.Guard;
@@ -77,7 +78,6 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 	private static final int INVISIBLE_SCAN_INTERVAL = 5;
 	private static final int HUD_ROWS = 4;
 	private static final long PROBE_LEAVE_GRACE_MS = 8_000L;
-	private static final long DEATH_GRACE_MS = 12_000L;
 	private static final double INVISIBLE_RANGE = 64.0;
 	private static final int VANISH_WEIGHT = 100;
 	private static final int INVISIBLE_WEIGHT = 35;
@@ -108,7 +108,7 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 	private final Map<String, Long> leaveAt = new HashMap<>();
 	private final Map<UUID, Subject> subjects = new HashMap<>();
 	private final Map<UUID, Integer> gameModes = new HashMap<>();
-	private final Map<UUID, Long> deaths = new HashMap<>();
+	private final DeathTracker deaths = new DeathTracker();
 	private final Set<UUID> spectatorSwitches = new HashSet<>();
 	private final VanishEngine engine = new VanishEngine();
 	private final DepartureTracker tracker = new DepartureTracker();
@@ -285,6 +285,9 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		if (name == null) {
 			return;
 		}
+		if (mode != SPECTATOR) {
+			deaths.alive(uuid);
+		}
 		if (recentlyDied(uuid, now)) {
 			spectatorSwitches.remove(uuid);
 			engine.forgetVanish(name);
@@ -332,6 +335,12 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		List<String[]> known = knownPairs();
 		tracker.chat(text, known, now);
 		for (String[] pair : known) {
+			if (pair.length > 1 && DeathTracker.looksLikeDeath(text, pair[1])) {
+				// A death message is proof the account left the living, not that
+				// it vanished. Keep the death screen's spectator switch out of
+				// the vanish engine.
+				observeDeath(parseUuid(pair[0]), pair[1], now);
+			}
 			if (pair.length > 1 && VanishText.looksLikeLeave(text, pair[1])) {
 				leaveAt.put(pair[1].toLowerCase(Locale.ROOT), now);
 				engine.forgetVanish(pair[1]);
@@ -537,7 +546,7 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 		if (uuid == null) {
 			return;
 		}
-		deaths.put(uuid, now);
+		deaths.death(uuid, now);
 		spectatorSwitches.remove(uuid);
 		engine.forgetSubject(name);
 		if (name != null && activeAlert != null && name.equalsIgnoreCase(activeAlert.name())) {
@@ -550,18 +559,24 @@ public final class AntiVanishModule extends Module implements Configurable, Tick
 			return;
 		}
 		for (AbstractClientPlayer player : mc.level.players()) {
-			if (player != null && player.isDeadOrDying()) {
+			if (player == null) {
+				continue;
+			}
+			if (player.isDeadOrDying()) {
 				String name = player.getGameProfile() == null ? nameOf(player.getUUID())
 						: player.getGameProfile().name();
 				observeDeath(player.getUUID(), name, now);
+			} else if (deaths.isDead(player.getUUID(), now)) {
+				// The body is alive again, so a later spectator switch is a real
+				// switch rather than the death screen.
+				deaths.alive(player.getUUID());
 			}
 		}
-		deaths.values().removeIf(at -> now - at > DEATH_GRACE_MS);
+		deaths.prune(now);
 	}
 
 	private boolean recentlyDied(UUID uuid, long now) {
-		Long at = uuid == null ? null : deaths.get(uuid);
-		return at != null && now - at <= DEATH_GRACE_MS;
+		return deaths.isDead(uuid, now);
 	}
 
 	/** Adds an invisible-body clue when the account is credible and in range. */

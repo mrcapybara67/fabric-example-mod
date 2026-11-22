@@ -24,6 +24,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.AmethystClusterBlock;
 import net.minecraft.world.level.block.BambooStalkBlock;
 import net.minecraft.world.level.block.Blocks;
@@ -55,11 +56,12 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  * The shared scanner feeds this finder one chunk at a time and this consumer
  * saves its section index when the tick budget runs out.</p>
  *
- * <p>Snow and ice are deliberately not evidence. Their melt and freeze ticks
- * depend on biome temperature and light, which a client cannot resolve from a
- * block state alone; treating the wrong ice as an owed tick would create a
- * false base. Everything else is evaluated type-first, so a section full of
- * leaves or crops does not read thousands of neighbours.</p>
+ * <p>Snow and ice count only under strong block light, which is the condition
+ * vanilla's melt tick uses. Daylight is sky light and never melts them, so
+ * reading the raw brightness would turn every sunlit snowfield into evidence;
+ * only a lamp that should already have melted the block does. Everything else
+ * is evaluated type-first, so a section full of leaves or crops does not read
+ * thousands of neighbours.</p>
  */
 public final class StalledGrowthFinderModule extends FinderModule {
 	private static final long EVALUATE_INTERVAL_TICKS = 20L;
@@ -171,7 +173,11 @@ public final class StalledGrowthFinderModule extends FinderModule {
 		if (!beginTick(mc)) {
 			return;
 		}
-		ensureEngine();
+		if (ensureEngine()) {
+			// A new elimination radius invalidates every cached result. Queue
+			// the loaded chunks again instead of waiting for them to reload.
+			FinderScanner.get().queueAllLoaded();
+		}
 		int custom = customSignature();
 		if (custom != appliedCustom) {
 			// Which evidence counts is part of the cached result: a different
@@ -259,9 +265,10 @@ public final class StalledGrowthFinderModule extends FinderModule {
 		return true;
 	}
 
-	private void ensureEngine() {
+	/** Returns true when the elimination radius changed and a rescan is needed. */
+	private boolean ensureEngine() {
 		if (level == null) {
-			return;
+			return false;
 		}
 		updateServerFlavor(Minecraft.getInstance());
 		int simulation = evidenceRadius();
@@ -272,7 +279,9 @@ public final class StalledGrowthFinderModule extends FinderModule {
 			renderChunks.clear();
 			lastEvaluateTick = -1L;
 			clearScan();
+			return true;
 		}
+		return false;
 	}
 
 	private int evidenceRadius() {
@@ -414,11 +423,11 @@ public final class StalledGrowthFinderModule extends FinderModule {
 			return GrowthRules.amethystBud(support.is(Blocks.BUDDING_AMETHYST), false);
 		}
 		if (state.is(Blocks.SNOW)) {
-			return GrowthRules.snow(level.getMaxLocalRawBrightness(probe.set(x, y, z)),
+			return GrowthRules.snow(level.getBrightness(LightLayer.BLOCK, probe.set(x, y, z)),
 					state.getValue(SnowLayerBlock.LAYERS));
 		}
 		if (state.is(Blocks.ICE) || state.is(Blocks.FROSTED_ICE)) {
-			return GrowthRules.ice(level.getMaxLocalRawBrightness(probe.set(x, y, z)));
+			return GrowthRules.ice(level.getBrightness(LightLayer.BLOCK, probe.set(x, y, z)));
 		}
 		return false;
 	}

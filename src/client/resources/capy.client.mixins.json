@@ -20,6 +20,7 @@
 		"SmoothCameraMixin",
 		"AtmosphereSkyMixin",
 		"AtmosphereTimeMixin",
+		"AtmosphereRainMixin",
 		"AtmosphereFogMixin",
 		"AtmosphereHazeMixin",
 		"MouseHandlerAccessor",

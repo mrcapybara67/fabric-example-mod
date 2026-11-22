@@ -109,7 +109,7 @@ public final class AdminDetector {
 		// Players the server actually sent to us: their position is known, so
 		// the distance is real and the radius means something.
 		for (AbstractClientPlayer player : level.players()) {
-			if (player == local || player.isRemoved()) {
+			if (player == local || player.isRemoved() || player.isDeadOrDying()) {
 				continue;
 			}
 			String profileName = player.getGameProfile() == null ? null : player.getGameProfile().name();

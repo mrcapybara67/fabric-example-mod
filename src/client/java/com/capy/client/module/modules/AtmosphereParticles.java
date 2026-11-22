@@ -41,7 +41,7 @@ public final class AtmosphereParticles {
 	private static final double[] BAND_HX = {4.5, 11.0, 22.0};
 	private static final double[] BAND_HY = {3.5, 7.0, 14.0};
 	private static final double NEAR_FADE = 1.0;
-	private static final float LIGHT_MIN = 0.38f;
+	private static final float LIGHT_MIN = 0.62f;
 	private static final Identifier ATLAS =
 			Identifier.fromNamespaceAndPath("capy", "textures/atmosphere/particle_atlas.png");
 
@@ -72,7 +72,6 @@ public final class AtmosphereParticles {
 	private static int lastQuality = -1;
 	private static long lastFrame;
 	private static float appearance;
-	private static float exposure = 1f;
 	private static float skyLight = 1f;
 	private static long lastLightTick = Long.MIN_VALUE;
 	private static Vec3 lastCenter;
@@ -90,13 +89,26 @@ public final class AtmosphereParticles {
 		lastQuality = -1;
 		lastFrame = 0L;
 		appearance = 0f;
-		exposure = 1f;
 		skyLight = 1f;
 		lastLightTick = Long.MIN_VALUE;
 		lastCenter = null;
 		cacheLevel = null;
 		cacheTick = Long.MIN_VALUE;
 		cacheChunk = Long.MIN_VALUE;
+	}
+
+	/**
+	 * The drawn and advanced slot count.
+	 *
+	 * <p>Render and advance must agree: when they used different densities the
+	 * pool drew one set of slots and animated a larger set, so part of the air
+	 * was frozen. This is the one rule both callers use.</p>
+	 */
+	static int activeCount(int theme, int quality, float density) {
+		int max = Math.max(0, quality);
+		float chosen = Math.max(0f, Math.min(2f, density));
+		int active = Math.round(max * chosen * ThemeProfile.of(theme).density);
+		return Math.max(0, Math.min(max, active));
 	}
 
 	/**
@@ -121,8 +133,7 @@ public final class AtmosphereParticles {
 		advance(mc, camera, partialTick);
 
 		ThemeProfile profile = ThemeProfile.of(theme);
-		int active = Math.round(quality * AtmosphereState.particleDensity * profile.density * exposure);
-		active = Math.max(0, Math.min(quality, active));
+		int active = activeCount(theme, quality, AtmosphereState.particleDensity);
 		if (active == 0 || appearance <= 0.01f) {
 			return;
 		}
@@ -185,7 +196,7 @@ public final class AtmosphereParticles {
 			py[i] = center.y + signed(hash(i * 31 + 11 + theme * 71)) * BAND_HY[b] * 0.94;
 			pz[i] = center.z + signed(hash(i * 47 + 5 + theme * 37)) * BAND_HX[b] * 0.94;
 			fall[i] = 0.30f + (float) hash(i * 59 + 7) * 0.70f;
-			size[i] = 0.55f + (float) hash(i * 71 + 13) * 0.90f;
+			size[i] = 0.75f + (float) hash(i * 71 + 13) * 0.70f;
 			spin[i] = (float) (hash(i * 83 + 19) * Math.PI * 2.0);
 			spinSpeed[i] = (float) ((hash(i * 97 + 23) - 0.5) * 2.4);
 			phase[i] = (float) (hash(i * 109 + 29) * Math.PI * 2.0);
@@ -211,36 +222,43 @@ public final class AtmosphereParticles {
 		if (appearance > 0.999f) {
 			appearance = 1f;
 		}
-		updateExposure(mc);
+		updateSkyLight(mc);
 		ensureHeights(mc);
 
 		double cx = camera.position().x;
 		double cy = camera.position().y;
 		double cz = camera.position().z;
+		double previousX = lastCenter == null ? cx : lastCenter.x;
+		double previousY = lastCenter == null ? cy : lastCenter.y;
+		double previousZ = lastCenter == null ? cz : lastCenter.z;
+		double moveX = cx - previousX;
+		double moveY = cy - previousY;
+		double moveZ = cz - previousZ;
 		if (lastCenter != null) {
-			double jump = Math.abs(cx - lastCenter.x) + Math.abs(cy - lastCenter.y)
-					+ Math.abs(cz - lastCenter.z);
+			double jump = Math.abs(moveX) + Math.abs(moveY) + Math.abs(moveZ);
 			if (jump > 64.0) {
 				fill(mc, camera, lastTheme, lastQuality);
-				lastCenter = camera.position();
 				return;
 			}
 		}
-		lastCenter = camera.position();
 		float rate = AtmosphereState.particleSpeed;
 		float windStrength = AtmosphereState.particleWind;
 		double seconds = now / 1.0e9;
 		ThemeProfile profile = ThemeProfile.of(lastTheme);
-		int active = Math.min(lastQuality, Math.max(0,
-				Math.round(lastQuality * AtmosphereState.particleDensity * exposure)));
+		int active = activeCount(lastTheme, lastQuality, AtmosphereState.particleDensity);
+		// Air does not stand still when the camera moves quickly. Following a
+		// fraction of the frame's travel keeps the field around the player
+		// without the hard edge-wrap flicker that made particles look pasted
+		// on the screen while flying. Walking is below the threshold, so the
+		// world still moves under a player on foot.
+		double speed = Math.sqrt(moveX * moveX + moveY * moveY + moveZ * moveZ) / dt;
+		float follow = smooth(4.5, 28.0, speed) * 0.88f;
 		for (int i = 0; i < lastQuality; i++) {
 			if (i >= active) {
 				continue;
 			}
 			double hx = BAND_HX[band[i]];
 			double hy = BAND_HY[band[i]];
-			float ground = groundAt(px[i], pz[i]);
-			boolean hasGround = !Float.isNaN(ground);
 			if (settled[i]) {
 				settleTime[i] += dt;
 				spin[i] += spinSpeed[i] * dt * 0.18f;
@@ -251,6 +269,13 @@ public final class AtmosphereParticles {
 				}
 				continue;
 			}
+			if (follow > 0.001f) {
+				px[i] += moveX * follow;
+				py[i] += moveY * follow * 0.90;
+				pz[i] += moveZ * follow;
+			}
+			float ground = groundAt(px[i], pz[i]);
+			boolean hasGround = !Float.isNaN(ground);
 			double windX = wind(px[i], py[i], cz + seconds, seconds, 0.061, 0.021)
 					+ wind(px[i], py[i], pz[i], seconds, 0.017, 0.009);
 			double windZ = wind(pz[i], py[i], px[i], seconds, 0.053, 0.019)
@@ -338,19 +363,14 @@ public final class AtmosphereParticles {
 		return (float) (t * t * (3.0 - 2.0 * t));
 	}
 
-	private static void updateExposure(Minecraft mc) {
+	private static void updateSkyLight(Minecraft mc) {
 		long tick = mc.level.getGameTime();
 		if (lastLightTick != Long.MIN_VALUE && tick - lastLightTick < 10L) {
 			return;
 		}
 		lastLightTick = tick;
 		BlockPos pos = mc.player.blockPosition();
-		boolean sky = mc.level.canSeeSky(pos);
-		int light = mc.level.getMaxLocalRawBrightness(pos);
-		float target = sky ? 0.65f + light / 15f * 0.35f : 0.24f;
-		exposure += (target - exposure) * 0.20f;
-		exposure = Math.max(0.18f, Math.min(1f, exposure));
-		skyLight = sky ? 1f : 0.42f;
+		skyLight = mc.level.canSeeSky(pos) ? 1f : 0.62f;
 	}
 
 	private static float lightTint(Minecraft mc, float partialTick) {
@@ -358,7 +378,7 @@ public final class AtmosphereParticles {
 		float day = (float) (0.5 + 0.5 * Math.cos((time - 6000L) / 24000.0 * Math.PI * 2.0));
 		float rain = mc.level.getRainLevel(partialTick);
 		rain = Math.max(0f, Math.min(1f, rain));
-		return Math.max(LIGHT_MIN, skyLight * (0.55f + day * 0.45f) * (1f - rain * 0.18f));
+		return Math.max(LIGHT_MIN, skyLight * (0.55f + day * 0.45f) * (1f - rain * 0.10f));
 	}
 
 	private static int tint(int color, float alpha) {
@@ -520,16 +540,16 @@ public final class AtmosphereParticles {
 			float density, float size, float alpha, boolean petal, boolean streak, boolean bubble,
 			Motion motion, float speed, float shimmer) {
 		private static final ThemeProfile[] PROFILES = {
-				new ThemeProfile(new int[]{0xFFD8E8FF, 0xFFEFF6FF, 0xFFFFF0D8}, 0, 1, 0.62f, 0.018f, 0.42f, false, false, false, Motion.FLOAT, 0.22f, 0.50f),
-				new ThemeProfile(new int[]{0xFFFFC47A, 0xFFFFE0A8, 0xFFFFF1C8}, 2, 1, 0.85f, 0.024f, 0.55f, false, false, false, Motion.RISE, 0.35f, 0.80f),
-				new ThemeProfile(new int[]{0xFF9CC8FF, 0xFFD8E8FF, 0xFF7898D8}, 0, 1, 0.50f, 0.014f, 0.45f, false, false, false, Motion.FLOAT, 0.18f, 0.20f),
-				new ThemeProfile(new int[]{0xFF5CFFE0, 0xFFB8FFF2, 0xFF8AB4FF}, 3, 1, 0.65f, 0.018f, 0.55f, false, false, false, Motion.FLOAT, 0.30f, 1.00f),
-				new ThemeProfile(new int[]{0xFFE8F4FF, 0xFFC8E0F8, 0xFFFFF4FA}, 4, 2, 1.00f, 0.032f, 0.46f, false, false, false, Motion.FLOAT, 0.40f, 0.00f),
-				new ThemeProfile(new int[]{0xFFB8F4FF, 0xFF8AD8F8, 0xFFD8FFF4}, 6, 1, 0.80f, 0.022f, 0.48f, false, false, true, Motion.RISE, 0.30f, 0.30f),
-				new ThemeProfile(new int[]{0xFFFFD08A, 0xFFFF5A2A, 0xFF9C3A28}, 2, 1, 0.70f, 0.020f, 0.55f, false, false, false, Motion.RISE, 0.45f, 1.00f),
-				new ThemeProfile(new int[]{0xFFFFF4FB, 0xFFFFD6EA, 0xFFD6FFF8, 0xFFFFC8DE}, 1, 1, 1.00f, 0.034f, 0.62f, true, false, false, Motion.FALL, 1.00f, 0.10f),
-				new ThemeProfile(new int[]{0xFFC46AFF, 0xFF7A3CD8, 0xFF2A1348}, 7, 1, 0.60f, 0.020f, 0.50f, false, false, false, Motion.SWIRL, 0.40f, 0.80f),
-				new ThemeProfile(new int[]{0xFFFF56D8, 0xFF3FF4E4, 0xFFB8FFF4}, 3, 1, 0.75f, 0.016f, 0.55f, false, false, false, Motion.FLOAT, 0.45f, 1.00f)
+				new ThemeProfile(new int[]{0xFFD8E8FF, 0xFFEFF6FF, 0xFFFFF0D8}, 0, 1, 0.40f, 0.055f, 0.68f, false, false, false, Motion.FLOAT, 0.22f, 0.50f),
+				new ThemeProfile(new int[]{0xFFFFC47A, 0xFFFFE0A8, 0xFFFFF1C8}, 2, 1, 0.42f, 0.062f, 0.78f, false, false, false, Motion.RISE, 0.35f, 0.80f),
+				new ThemeProfile(new int[]{0xFF9CC8FF, 0xFFD8E8FF, 0xFF7898D8}, 0, 1, 0.34f, 0.050f, 0.72f, false, false, false, Motion.FLOAT, 0.18f, 0.30f),
+				new ThemeProfile(new int[]{0xFF5CFFE0, 0xFFB8FFF2, 0xFF8AB4FF}, 3, 1, 0.38f, 0.058f, 0.78f, false, false, false, Motion.FLOAT, 0.30f, 0.90f),
+				new ThemeProfile(new int[]{0xFFE8F4FF, 0xFFC8E0F8, 0xFFFFF4FA}, 4, 2, 0.44f, 0.072f, 0.66f, false, false, false, Motion.FLOAT, 0.40f, 0.00f),
+				new ThemeProfile(new int[]{0xFFB8F4FF, 0xFF8AD8F8, 0xFFD8FFF4}, 6, 1, 0.40f, 0.060f, 0.74f, false, false, true, Motion.RISE, 0.30f, 0.30f),
+				new ThemeProfile(new int[]{0xFFFFD08A, 0xFFFF5A2A, 0xFF9C3A28}, 2, 1, 0.38f, 0.058f, 0.78f, false, false, false, Motion.RISE, 0.45f, 1.00f),
+				new ThemeProfile(new int[]{0xFFFFF4FB, 0xFFFFD6EA, 0xFFD6FFF8, 0xFFFFC8DE}, 1, 1, 0.44f, 0.078f, 0.84f, true, false, false, Motion.FALL, 1.00f, 0.10f),
+				new ThemeProfile(new int[]{0xFFC46AFF, 0xFF7A3CD8, 0xFF2A1348}, 7, 1, 0.34f, 0.058f, 0.76f, false, false, false, Motion.SWIRL, 0.40f, 0.80f),
+				new ThemeProfile(new int[]{0xFFFF56D8, 0xFF3FF4E4, 0xFFB8FFF4}, 3, 1, 0.40f, 0.056f, 0.80f, false, false, false, Motion.FLOAT, 0.45f, 1.00f)
 		};
 
 		static ThemeProfile of(int theme) {

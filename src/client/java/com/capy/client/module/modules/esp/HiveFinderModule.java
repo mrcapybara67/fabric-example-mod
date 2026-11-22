@@ -8,6 +8,7 @@ import com.capy.client.finder.core.FlagStyles;
 import com.capy.client.finder.core.HiveFinder;
 import com.capy.client.finder.core.TerrainPlate;
 import com.capy.client.module.BooleanSetting;
+import com.capy.client.module.IntSetting;
 import com.capy.client.module.SliderSetting;
 import com.google.gson.JsonObject;
 import java.util.HashMap;
@@ -41,6 +42,8 @@ public final class HiveFinderModule extends FinderModule {
 
 	private final SliderSetting mergeRadius = describe(setting(new SliderSetting("merge_radius", 4, 1, 8)),
 			"Chunks this close are folded into one hive flag.");
+	private final IntSetting minimumHives = describe(setting(new IntSetting("min_hives", 2, 1, 8, 1)),
+			"How many full hives a chunk needs to count as a cluster.");
 	private final BooleanSetting notifications = describe(setting(new BooleanSetting("notifications", false)),
 			"Show a short toast when a new hive cluster is found.");
 	private final BooleanSetting beam = describe(setting(new BooleanSetting("beam", false)),
@@ -48,9 +51,11 @@ public final class HiveFinderModule extends FinderModule {
 	private final HiveFinder hive = new HiveFinder();
 	private final Map<Long, Long> retry = new HashMap<>();
 	private long lastEvaluateTick = -1L;
+	private int appliedHives = -1;
 	private boolean scanning;
 	private long scanKey;
 	private int scanSection;
+	private int scanFull;
 
 	public HiveFinderModule() {
 		super("hive_finder", 0xFFF2C14E);
@@ -60,6 +65,17 @@ public final class HiveFinderModule extends FinderModule {
 	public void onTick(Minecraft mc) {
 		if (!beginTick(mc)) {
 			return;
+		}
+		int minimum = minimumHives.get();
+		if (appliedHives != minimum) {
+			// The threshold is part of the cached hit set. Drop the old hits and
+			// rescan rather than leaving a one-hive flag that the new rule says
+			// is not a cluster.
+			appliedHives = minimum;
+			hive.clearHits();
+			clearScan();
+			evaluate();
+			FinderScanner.get().queueAllLoaded();
 		}
 		moveReadyRetries();
 		long tick = level.getGameTime();
@@ -85,6 +101,7 @@ public final class HiveFinderModule extends FinderModule {
 			scanning = true;
 			scanKey = key;
 			scanSection = 0;
+			scanFull = 0;
 		}
 		int minY = chunk.getMinY();
 		int baseX = chunk.getPos().getMinBlockX();
@@ -105,18 +122,16 @@ public final class HiveFinderModule extends FinderModule {
 				for (int z = 0; z < 16; z++) {
 					for (int x = 0; x < 16; x++) {
 						BlockState state = section.getBlockState(x, y, z);
-						if (state.is(Blocks.BEEHIVE) || state.is(Blocks.BEE_NEST)) {
+						if (state != null && (state.is(Blocks.BEEHIVE) || state.is(Blocks.BEE_NEST))) {
 							if (state.getValue(BeehiveBlock.HONEY_LEVEL) >= BeehiveBlock.MAX_HONEY_LEVELS) {
-								hive.setHit(key, true);
-								clearScan();
-								return true;
+								scanFull++;
 							}
 						}
 					}
 				}
 			}
 		}
-		hive.setHit(key, false);
+		hive.setHit(key, scanFull >= minimumHives.get());
 		clearScan();
 		return true;
 	}
@@ -187,6 +202,7 @@ public final class HiveFinderModule extends FinderModule {
 		scanning = false;
 		scanKey = 0L;
 		scanSection = 0;
+		scanFull = 0;
 	}
 
 	@Override
@@ -196,6 +212,7 @@ public final class HiveFinderModule extends FinderModule {
 		retry.clear();
 		terrain.clear();
 		lastEvaluateTick = -1L;
+		appliedHives = -1;
 		clearScan();
 	}
 
@@ -203,11 +220,14 @@ public final class HiveFinderModule extends FinderModule {
 	public void loadConfig(JsonObject json) {
 		super.loadConfig(json);
 		mergeRadius.set(ConfigValues.intValue(json, "merge_radius", 4));
+		minimumHives.set(ConfigValues.intValue(json, "min_hives", 2));
+		appliedHives = -1;
 	}
 
 	@Override
 	public void saveConfig(JsonObject json) {
 		super.saveConfig(json);
 		json.addProperty("merge_radius", mergeRadius.get());
+		json.addProperty("min_hives", minimumHives.get());
 	}
 }

@@ -588,14 +588,14 @@ public final class GuiFrame {
 		// the large page title. It gives the header a typographic hierarchy
 		// without adding another panel or another icon.
 		UiText display = type.display();
-		UiText overlineFont = type.bold();
-		UiText pageFont = type.medium();
+		UiText overlineFont = type.caption();
+		UiText pageFont = type.caption();
 		String pageTitle = settingsCard != null ? "Module settings"
 				: search.normalisedQuery().isEmpty() ? CATEGORIES[selected].title : "Search results";
 		int titleX = wx + UiTheme.SP_6;
-		overlineFont.draw(c, "CAPY / CLIENT", titleX, wy + 8,
-				Ui.withAlpha(UiTheme.ACCENT_2, 0xC8));
-		int titleY = wy + 20;
+		Ui.drawTracked(c, overlineFont, "CAPY / CLIENT", titleX, wy + 8,
+				Ui.withAlpha(UiTheme.ACCENT_2, 0xB8), 0.8f);
+		int titleY = wy + 21;
 		int titleMax = Math.max(0, searchX(wx, ww) - titleX - UiTheme.SP_4);
 		int titleW = Math.min(display.width(pageTitle), titleMax);
 		Ui.drawEllipsized(c, display, pageTitle, titleX, titleY, titleMax, UiTheme.TEXT);
@@ -614,15 +614,16 @@ public final class GuiFrame {
 		// it follows a toggle immediately. It is status, not a button, so it
 		// deliberately has no hover state.
 		String count = enabledText();
-		int pillW = pageFont.width(count) + UiTheme.SP_4;
+		float pillSpacing = 0.5f;
+		int pillW = Ui.trackedWidth(pageFont, count, pillSpacing) + UiTheme.SP_4 + 4;
 		int pillH = 18;
 		int pillX = titleX + titleW + UiTheme.SP_4;
-		int pillY = wy + 20;
+		int pillY = wy + 21;
 		if (!compactHeader() && pillX + pillW < settingsX(wx, ww) - UiTheme.SP_4) {
 			Ui.surface(c, pillX, pillY, pillW, pillH, 3, UiTheme.TRACK_TOP, UiTheme.TRACK_BOTTOM);
 			Ui.outline(c, pillX, pillY, pillW, pillH, 3, pillBorder());
-			Ui.drawCentered(c, pageFont, count, pillX + pillW / 2,
-					Ui.centerTextY(pillY, pillH, pageFont), UiTheme.ACCENT);
+			Ui.drawTrackedCentered(c, pageFont, count, pillX + pillW / 2,
+					Ui.centerTextY(pillY, pillH, pageFont), UiTheme.ACCENT, pillSpacing);
 		}
 
 		int fieldX = searchX(wx, ww);
@@ -665,7 +666,7 @@ public final class GuiFrame {
 		int count = enabledCount();
 		if (count != cachedEnabledCount) {
 			cachedEnabledCount = count;
-			cachedEnabledText = count + " active";
+			cachedEnabledText = count + " ACTIVE";
 		}
 		return cachedEnabledText;
 	}
@@ -673,7 +674,7 @@ public final class GuiFrame {
 	private String listLabel(int size) {
 		if (size != cachedListSize) {
 			cachedListSize = size;
-			cachedListLabel = size + (size == 1 ? " module" : " modules");
+			cachedListLabel = size + (size == 1 ? " MODULE" : " MODULES");
 		}
 		return cachedListLabel;
 	}
@@ -742,12 +743,14 @@ public final class GuiFrame {
 				Ui.withAlpha(UiTheme.ACCENT, 0x73));
 
 		UiText display = type.display();
-		UiText bold = type.bold();
+		UiText medium = type.medium();
 		UiText regular = type.regular();
-		display.draw(c, "INTERFACE", x + SETTINGS_PAD, y + 12, UiTheme.TEXT);
+		display.draw(c, "Interface", x + SETTINGS_PAD, y + 12, UiTheme.TEXT);
 		regular.draw(c, "Changes save instantly", x + SETTINGS_PAD, y + 30, UiTheme.TEXT_3);
-		Ui.drawRightAligned(c, regular, "ESC", x + w - SETTINGS_PAD, y + 30,
-				Ui.withAlpha(UiTheme.TEXT_3, 0xB0));
+		UiText caption = type.caption();
+		int escW = Ui.trackedWidth(caption, "ESC", 0.8f);
+		Ui.drawTracked(c, caption, "ESC", x + w - SETTINGS_PAD - escW, y + 30,
+				Ui.withAlpha(UiTheme.TEXT_3, 0xB0), 0.8f);
 		Ui.fadeLine(c, x + SETTINGS_PAD, y + 47, w - SETTINGS_PAD * 2,
 				Ui.withAlpha(UiTheme.BORDER, 0x8C));
 
@@ -759,7 +762,7 @@ public final class GuiFrame {
 				settingsRowHeight(0));
 
 		int volumeY = settingsRowTop(1);
-		regular.draw(c, "Volume", rowX, Ui.centerTextY(volumeY, SETTINGS_ROW_H, regular), UiTheme.TEXT_2);
+		medium.draw(c, "Volume", rowX, Ui.centerTextY(volumeY, SETTINGS_ROW_H, medium), UiTheme.TEXT_2);
 		int trackX = settingsVolumeTrackX(x);
 		int trackY = volumeY + 11;
 		int trackW = settingsVolumeTrackW(x, w);
@@ -780,9 +783,9 @@ public final class GuiFrame {
 
 		int pillW = 104;
 		int pillX = x + w - SETTINGS_PAD - pillW;
-		drawSettingsStepper(c, regular, "Window size", config.guiSize().label(), rowX,
+		drawSettingsStepper(c, medium, "Window size", config.guiSize().label(), rowX,
 				settingsRowTop(3), pillX, pillW, mouseX, mouseY);
-		drawSettingsStepper(c, regular, "Quality", config.guiQuality().name(), rowX,
+		drawSettingsStepper(c, medium, "Quality", config.guiQuality().name(), rowX,
 				settingsRowTop(4), pillX, pillW, mouseX, mouseY);
 		drawSettingToggle(c, type.medium(), "Stealth mode", stealthToggle, config.stealth(),
 				rowX, settingsRowTop(5), rowW, toggleX, mouseX, mouseY, delta,
@@ -797,8 +800,8 @@ public final class GuiFrame {
 				hudHovered ? Ui.withAlpha(UiTheme.ACCENT_DEEP, 0x22) : UiTheme.TRACK_BOTTOM);
 		Ui.outline(c, rowX, hudY, rowW, hudH, 3,
 				hudHovered ? UiTheme.ACCENT : UiTheme.BORDER);
-		Ui.drawCentered(c, bold, "Edit HUD", rowX + rowW / 2,
-				Ui.centerTextY(hudY, hudH, bold), hudHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
+		Ui.drawCentered(c, medium, "Edit HUD", rowX + rowW / 2,
+				Ui.centerTextY(hudY, hudH, medium), hudHovered ? UiTheme.TEXT : UiTheme.TEXT_2);
 	}
 
 	/**
@@ -872,8 +875,8 @@ public final class GuiFrame {
 		// The caption shares the row labels' inset rather than the content
 		// header's: in the sidebar the rows are the alignment reference, and a
 		// caption a couple of pixels off them reads as a mistake.
-		Ui.drawEllipsized(c, type.regular(), "CATEGORIES", sx0 + UiTheme.SP_5, py + UiTheme.SP_5,
-				sw - UiTheme.SP_6, UiTheme.TEXT_3);
+		Ui.drawTracked(c, type.caption(), "CATEGORIES", sx0 + UiTheme.SP_5, py + UiTheme.SP_5,
+				UiTheme.TEXT_3, 0.65f);
 
 		for (int i = 0; i < CATEGORIES.length; i++) {
 			Category category = CATEGORIES[i];
@@ -977,28 +980,35 @@ public final class GuiFrame {
 
 		// The section header: what is shown and how much of it there is.
 		int headerH = SECTION_HEADER_H;
-		UiText bold = type.bold();
-		UiText meta = type.regular();
-		String title = showCategory ? "SEARCH RESULTS" : CATEGORIES[selected].title.toUpperCase(Locale.ROOT);
-		// The module count is a pill, not loose text: it is metadata about the
-		// page, and a small surface is what makes that read as metadata. It is
-		// measured before the title is drawn, so the title is trimmed against
-		// the pill instead of against a guessed width.
+		UiText sectionFont = type.caption();
+		UiText meta = type.caption();
+		String title = showCategory ? "MATCHES" : "MODULES";
+		// The page title above already names the category. This smaller label
+		// only says what the grid contains, so it can stay quiet instead of
+		// repeating the title in a second all-caps row.
 		String countLabel = listLabel(list.size());
+		float labelSpacing = 0.5f;
 		int pillH = Math.max(14, meta.lineHeight() + 6);
-		int pillW = meta.width(countLabel) + 14;
+		int pillW = Ui.trackedWidth(meta, countLabel, labelSpacing) + 14;
 		int pillX = cx + cw - pillW;
 		int pillY = top + (headerH - pillH) / 2 - 2;
 		// The section header is padded by the panel radius, so its first glyph
 		// starts on the same curve the cards below it are cornered to.
 		int titleX = cx + UiTheme.RADIUS_LG;
 		int titleRoom = Math.max(0, pillX - titleX - UiTheme.SP_4);
-		Ui.drawEllipsized(c, bold, title, titleX, Ui.centerTextY(top, headerH, bold), titleRoom, UiTheme.TEXT);
+		int titleW = Ui.trackedWidth(sectionFont, title, labelSpacing);
+		if (titleW <= titleRoom) {
+			Ui.drawTracked(c, sectionFont, title, titleX, Ui.centerTextY(top, headerH, sectionFont),
+					UiTheme.TEXT_2, labelSpacing);
+		} else {
+			Ui.drawEllipsized(c, sectionFont, title, titleX,
+					Ui.centerTextY(top, headerH, sectionFont), titleRoom, UiTheme.TEXT_2);
+		}
 		Ui.surface(c, pillX, pillY, pillW, pillH, 3,
 				Ui.withAlpha(UiTheme.PANEL_ALT, 0xB8), Ui.withAlpha(UiTheme.PANEL_TOP, 0x94));
 		Ui.outline(c, pillX, pillY, pillW, pillH, 3, Ui.withAlpha(UiTheme.BORDER, 0x8C));
-		Ui.drawCentered(c, meta, countLabel, pillX + pillW / 2,
-				pillY + (pillH - meta.lineHeight()) / 2, UiTheme.TEXT_3);
+		Ui.drawTrackedCentered(c, meta, countLabel, pillX + pillW / 2,
+				pillY + (pillH - meta.lineHeight()) / 2, UiTheme.TEXT_3, labelSpacing);
 		// A delicate line under the section header.
 		Ui.fadeLine(c, cx, top + headerH - 6, cw, Ui.withAlpha(UiTheme.BORDER, 0xC0));
 

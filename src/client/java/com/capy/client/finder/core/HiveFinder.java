@@ -35,6 +35,11 @@ public final class HiveFinder {
 		return hits;
 	}
 
+	/** Drops the flags while keeping settle timers, for a threshold change. */
+	public void clearHits() {
+		hits.clear();
+	}
+
 	public void clear() {
 		firstSeen.clear();
 		hits.clear();

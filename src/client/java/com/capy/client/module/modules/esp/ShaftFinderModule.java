@@ -11,9 +11,12 @@ import com.capy.client.module.ColorSetting;
 import com.capy.client.module.IntSetting;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.AABB;
 
@@ -42,6 +45,8 @@ public final class ShaftFinderModule extends ShaftScanModule {
 			"Include the three-block 3x1 shafts.");
 	private final ColorSetting colorThree = describe(setting(new ColorSetting("color_three", DEFAULT_THREE_COLOR)),
 			"The colour used for the wider 3x1 shafts.");
+	/** The boxes that belong to a 3x1 shaft, by identity, for the wide colour. */
+	private final Set<AABB> wideBoxes = Collections.newSetFromMap(new IdentityHashMap<>());
 	private int appliedOne = -1;
 	private int appliedThree = -1;
 
@@ -70,6 +75,7 @@ public final class ShaftFinderModule extends ShaftScanModule {
 	@Override
 	protected void shaftsChanged() {
 		Map<Long, List<AABB>> union = new HashMap<>();
+		wideBoxes.clear();
 		for (List<ShaftFinder.Shaft> shafts : shaftLists()) {
 			for (ShaftFinder.Shaft shaft : shafts) {
 				ShaftFinder.Shape shape = shaft.shape();
@@ -85,11 +91,26 @@ public final class ShaftFinderModule extends ShaftScanModule {
 				// maxY() is the first closed cell after the run, so it is also
 				// the exclusive top of the box. Adding one here would draw the
 				// sealing block as part of the shaft.
-				list.add(new AABB(shaft.x(), shaft.minY(), shaft.z(),
-						shaft.x() + shape.sizeX, shaft.maxY(), shaft.z() + shape.sizeZ));
+				AABB box = new AABB(shaft.x(), shaft.minY(), shaft.z(),
+						shaft.x() + shape.sizeX, shaft.maxY(), shaft.z() + shape.sizeZ);
+				list.add(box);
+				if (wide) {
+					wideBoxes.add(box);
+				}
 			}
 		}
 		replaceFlags(union, "closed vertical shaft");
+	}
+
+	/** The 3x1 colour setting applies to the wider shafts, not the 1x1 ones. */
+	@Override
+	public int colorFor(AABB box) {
+		return colorFor(box, System.nanoTime() / 1.0e9);
+	}
+
+	@Override
+	public int colorFor(AABB box, double timeSec) {
+		return wideBoxes.contains(box) ? colorThree.argbAt(timeSec) : super.colorFor(box, timeSec);
 	}
 
 	@Override
@@ -104,9 +125,12 @@ public final class ShaftFinderModule extends ShaftScanModule {
 			double z = (box.minZ + box.maxZ) * 0.5;
 			long key = Chunks.key((int) Math.floor(x) >> 4, (int) Math.floor(z) >> 4);
 			look.add(FlagLook.Flag.coreOnly(x, box.maxY + 0.05, z,
-					colorFor(box, timeSec) & 0xFFFFFF, distance, appearEase(key, timeMs), true));
+					colorFor(box, timeSec) & 0xFFFFFF, distance, appearEase(key, timeMs), false));
 		}
-		FlagLook.drawAll(sink, look, timeMs, quality(), autoSimplified(), true, tracerOrigin());
+		// Tunnel Hole ESP is a box-only overlay. It used to draw three
+		// unconditional lines from the crosshair, which made the shafts read as
+		// tracers rather than as holes in the world.
+		FlagLook.drawAll(sink, look, timeMs, quality(), autoSimplified(), false, null);
 		for (AABB box : boxesNearestFirst()) {
 			double distance = boxDistance(box);
 			if (!drawableFlag(distance) || !fullStyle(distance, 140)) {
@@ -120,6 +144,7 @@ public final class ShaftFinderModule extends ShaftScanModule {
 	@Override
 	public void resetSession() {
 		super.resetSession();
+		wideBoxes.clear();
 		appliedOne = -1;
 		appliedThree = -1;
 	}

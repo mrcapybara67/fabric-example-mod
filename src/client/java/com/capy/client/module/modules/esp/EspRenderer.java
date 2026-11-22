@@ -46,12 +46,14 @@ import org.slf4j.LoggerFactory;
  * let a near box be blended under a far one and produce a patchwork; sorting is
  * the only thing that makes overlapping highlights look correct.
  *
- * The event this is registered on runs <em>inside</em> the world frame pass.
- * That matters: in 1.21.11 the debug-render event is fired while the frame is
- * still being extracted, so an immediate draw submitted there has no pass to
- * land in and is silently discarded. The hook therefore lives on
- * {@code AFTER_ENTITIES}, where vanilla is already drawing entities with the
- * same buffer source mechanism.
+ * The event this is registered on runs <em>inside</em> the world frame pass,
+ * after translucent terrain. That matters twice: in 1.21.11 the debug-render
+ * event is fired while the frame is still being extracted, so an immediate
+ * draw submitted there has no pass to land in and is silently discarded; and
+ * a hook before translucency lets water blend over the boxes, fading a colour
+ * that is supposed to stay exactly as configured. {@code END_MAIN} runs after
+ * water, where vanilla is still drawing world geometry through the same buffer
+ * source mechanism.
  *
  * Vertex coordinates are camera relative, which is what a world render
  * consumer expects. The matrix stack handed to the event is already the
@@ -113,8 +115,8 @@ public final class EspRenderer {
 	}
 
 	/**
-	 * World render hook: called once per frame from {@code AFTER_ENTITIES},
-	 * while the main world pass is active.
+	 * World render hook: called once per frame from {@code END_MAIN}, after
+	 * translucent terrain and while the main world pass is active.
 	 */
 	public static void render(WorldRenderContext context) {
 		Minecraft mc = Minecraft.getInstance();
@@ -160,11 +162,11 @@ public final class EspRenderer {
 			anchorY = forward.y() * 0.5;
 			anchorZ = forward.z() * 0.5;
 
-			// AFTER_ENTITIES is called after the frame pass has created its
-			// matrix stack, so this is normally non-null. A null would silently
-			// remove every overlay, which is exactly the failure this hook was
-			// moved to fix, so an identity stack is used instead. The vertices
-			// are camera relative, which is what an identity pose expects.
+			// END_MAIN is called after the frame pass has created its matrix
+			// stack, so this is normally non-null. A null would silently remove
+			// every overlay, which is exactly the failure this hook was moved to
+			// fix, so an identity stack is used instead. The vertices are camera
+			// relative, which is what an identity pose expects.
 			PoseStack stack = context.matrices();
 			if (stack == null) {
 				stack = new PoseStack();
