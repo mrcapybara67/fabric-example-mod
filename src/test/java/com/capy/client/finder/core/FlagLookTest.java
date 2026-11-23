@@ -81,6 +81,16 @@ class FlagLookTest {
 	}
 
 	@Test
+	void depthFlagKeepsItsCoreAtTheEventHeight() {
+		Counter sink = new Counter();
+		FlagLook.Flag flag = FlagLook.Flag.atDepth(KEY, 8, -40, 8, flat(), 0xFF4466, 20, 1, false, true);
+		assertEquals(-40, flag.coreY(), 1.0e-9);
+		FlagLook.drawAll(sink, List.of(flag), 1_000, FlagQuality.HIGH, false, false, null);
+		assertTrue(sink.maxQuadY > SURFACE, "the surface plate is still drawn");
+		assertTrue(sink.minQuadY < -39, "the core is drawn at the deep event");
+	}
+
+	@Test
 	void theBudgetFallsBackToPlateAndRimOnly() {
 		assertTrue(FlagRender.reserve(FlagRender.DEFAULT_BUDGET));
 		Counter sink = new Counter();
@@ -131,6 +141,7 @@ class FlagLookTest {
 		int tracerLines;
 		double firstQuadY = Double.NaN;
 		double firstLineY = Double.NaN;
+		double minQuadY = Double.POSITIVE_INFINITY;
 		double maxQuadY = Double.NEGATIVE_INFINITY;
 
 		@Override
@@ -140,6 +151,7 @@ class FlagLookTest {
 			if (Double.isNaN(firstQuadY)) {
 				firstQuadY = y0;
 			}
+			minQuadY = Math.min(minQuadY, Math.min(Math.min(y0, y1), Math.min(y2, y3)));
 			maxQuadY = Math.max(maxQuadY, Math.max(Math.max(y0, y1), Math.max(y2, y3)));
 		}
 

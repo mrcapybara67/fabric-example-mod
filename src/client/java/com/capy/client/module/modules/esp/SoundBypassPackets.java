@@ -98,6 +98,23 @@ public final class SoundBypassPackets {
 		}
 	}
 
+	/**
+	 * Redstone that changes state without a sound or block event still sends a
+	 * block update. Feeding it through the same grid keeps deepslate circuits
+	 * visible even when their noise never reaches the player.
+	 */
+	public static void onBlockUpdate(BlockPos pos, BlockState state) {
+		SoundBypassFeed feed = feed();
+		if (!feed.active() || pos == null || state == null) {
+			return;
+		}
+		if (MotionFeed.classify(state.getBlock(), state) != MotionFeed.Source.REDSTONE) {
+			return;
+		}
+		feed.onBlockUpdate(SoundKinds.Kind.REDSTONE, 1.0,
+				pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, now());
+	}
+
 	public static void onBlockEvent(ClientboundBlockEventPacket packet) {
 		SoundBypassFeed feed = feed();
 		if (!feed.active() || packet == null || packet.getBlock() == null) {

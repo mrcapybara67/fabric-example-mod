@@ -181,8 +181,14 @@ public final class SoundBypassModule extends FinderModule {
 				continue;
 			}
 			double ease = FlagLook.easeOutCubic(activeSince.getOrDefault(key, 0L), timeMs);
-			look.add(FlagLook.Flag.at(key, cell.x(), cell.z(), terrainOrFlat(key),
+			int[] heights = terrainOrFlat(key);
+			double surface = TerrainPlate.average(heights);
+			look.add(FlagLook.Flag.atDepth(key, cell.x(), cell.y() + 0.03, cell.z(), heights,
 					base & 0xFFFFFF, distance, ease, tracer.value(), beams.value()));
+			if (Double.isFinite(surface) && surface > cell.y() + 2.0) {
+				FlagStyles.depthGauge(sink, cell.x(), cell.z(), surface + 0.06, cell.y(),
+						base & 0xFFFFFF, timeMs);
+			}
 		}
 		FlagLook.drawAll(sink, look, timeMs, quality(), autoSimplified(), tracer.value(), tracerOrigin());
 	}
@@ -235,7 +241,7 @@ public final class SoundBypassModule extends FinderModule {
 				continue;
 			}
 			long key = Chunks.key(cell.sx(), cell.sz());
-			if (FinderRules.withinBlocks(Chunks.x(key), Chunks.z(key), px, pz, ignoreNearMe.get())) {
+			if (FinderRules.withinBlocks3D(cell.x(), cell.y(), cell.z(), px, py, pz, ignoreNearMe.get())) {
 				continue;
 			}
 			next.add(new CellView(cell, key, reason(cell)));

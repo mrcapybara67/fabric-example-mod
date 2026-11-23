@@ -104,6 +104,18 @@ public final class FinderRules {
 		return dx * dx + dz * dz <= (double) radius * radius;
 	}
 
+	/** True when a point is inside the same ignore radius in all three axes. */
+	public static boolean withinBlocks3D(double x, double y, double z,
+			double playerX, double playerY, double playerZ, int radius) {
+		if (radius <= 0) {
+			return false;
+		}
+		double dx = x - playerX;
+		double dy = y - playerY;
+		double dz = z - playerZ;
+		return dx * dx + dy * dy + dz * dz <= (double) radius * radius;
+	}
+
 	/** True when a target is moving closer to the observer. */
 	public static boolean approaching(double previousDistance, double currentDistance, double speed) {
 		return speed >= 0.4 && currentDistance < previousDistance;

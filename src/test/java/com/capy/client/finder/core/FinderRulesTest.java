@@ -51,6 +51,14 @@ class FinderRulesTest {
 	}
 
 	@Test
+	void soundBypassIgnoreRadiusUsesTheVerticalAxisToo() {
+		assertFalse(FinderRules.withinBlocks3D(8, 64, 8, 8, 200, 8, 24),
+				"a deep event directly below the player is not nearby in 3D");
+		assertTrue(FinderRules.withinBlocks3D(8, 64, 8, 8, 80, 8, 24));
+		assertFalse(FinderRules.withinBlocks3D(8, 64, 8, 8, 64, 8, 0));
+	}
+
+	@Test
 	void approachingRequiresMovementCloserToTheObserver() {
 		assertTrue(FinderRules.approaching(20.0, 10.0, 1.0));
 		assertFalse(FinderRules.approaching(10.0, 20.0, 1.0));

@@ -118,6 +118,13 @@ public final class SoundBypassFeed {
 		offer(kind, baseWeight, x, y, z, now, ChannelStats.Channel.LEVEL_EVENT);
 	}
 
+	public synchronized void onBlockUpdate(SoundKinds.Kind kind, double baseWeight, double x, double y, double z, long now) {
+		if (!active() || kind == SoundKinds.Kind.IGNORE || baseWeight <= 0) {
+			return;
+		}
+		offer(kind, baseWeight, x, y, z, now, ChannelStats.Channel.BLOCK_UPDATE);
+	}
+
 	public synchronized void onStructure(double x, double y, double z, long now) {
 		if (active()) {
 			filter.noteStructure(x, y, z, now);

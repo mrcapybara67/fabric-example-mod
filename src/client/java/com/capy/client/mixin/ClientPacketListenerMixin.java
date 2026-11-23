@@ -159,6 +159,8 @@ public class ClientPacketListenerMixin {
 		Guard.run("anti-vanish block update", () -> VanishPackets.onBlockUpdate(packet.getPos(), packet.getBlockState()));
 		Guard.run("finder block update", () -> FinderScanner.get().onBlockUpdate(packet.getPos()));
 		Guard.run("motion block update", () -> MotionFeed.onBlockUpdate(packet.getPos(), packet.getBlockState()));
+		Guard.run("sound bypass block update",
+				() -> SoundBypassPackets.onBlockUpdate(packet.getPos(), packet.getBlockState()));
 	}
 
 	@Inject(method = "handleBlockEvent", at = @At("HEAD"))

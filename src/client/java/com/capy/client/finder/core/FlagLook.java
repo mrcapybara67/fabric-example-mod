@@ -74,6 +74,12 @@ public final class FlagLook {
 			return new Flag(key, x, z, heights, rgb, Double.NaN, distance, ease, true, true, tracer, beam, beamHeight);
 		}
 
+		/** A terrain plate with the core at the event's own depth. */
+		public static Flag atDepth(long key, double x, double y, double z, int[] heights, int rgb,
+				double distance, double ease, boolean tracer, boolean beam) {
+			return new Flag(key, x, z, heights, rgb, y, distance, ease, true, true, tracer, beam, 60.0);
+		}
+
 		public static Flag coreOnly(double x, double y, double z, int rgb, double distance,
 				double ease, boolean tracer) {
 			return new Flag(0L, x, z, null, rgb, y, distance, ease, false, false, tracer, true, 60.0);

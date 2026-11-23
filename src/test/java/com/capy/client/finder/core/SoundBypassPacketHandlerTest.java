@@ -57,6 +57,17 @@ class SoundBypassPacketHandlerTest {
 	}
 
 	@Test
+	void deepRedstoneBlockUpdateIsAccepted() {
+		feed.onBlockUpdate(SoundKinds.Kind.REDSTONE, 2.0, 100.5, -50.5, 100.5, 1_000);
+
+		List<ActivityGrid.Cell> cells = feed.top(1_000, 0, 10);
+		assertEquals(1, cells.size());
+		assertEquals(1.0, cells.getFirst().score(), 1e-9);
+		assertEquals(SoundKinds.Kind.REDSTONE, cells.getFirst().dominant());
+		assertEquals(1, feed.stats().total(ChannelStats.Channel.BLOCK_UPDATE));
+	}
+
+	@Test
 	void trialSpawnerDiscountsNearbyPiston() {
 		feed.onSound("block.trial_spawner.ambient", 0.5, 64, 0.5, 1_000);
 		feed.onSound("block.piston.extend", 0.5, 64, 0.5, 1_100);
